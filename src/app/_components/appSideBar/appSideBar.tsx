@@ -5,31 +5,22 @@ import {
     Sidebar,
     SidebarContent,
     SidebarFooter,
-    SidebarGroup,
     SidebarHeader,
     SidebarMenu,
     SidebarMenuButton,
-    SidebarMenuItem, SidebarMenuSkeleton, SidebarRail,
+    SidebarMenuItem,
     useSidebar,
 } from "@/components/ui/sidebar"
-import {BriefcaseIcon, LogIn, LogOut} from "lucide-react";
+import {LogOut} from "lucide-react";
 import {signOut, useSession} from "next-auth/react";
 import {ModeToggle} from "@/app/_components/appSideBar/modeToggle";
+import {APP_ROUTES} from "@/app/_components/appRoutes";
 
-const routes =
-    [
-        {href: "/main", name: "Главная", icon: <BriefcaseIcon/>, roles: ["admin"]},
-        // {href: "/div", name: "Мониторинг дивизиона", icon: <Gauge />, roles: ["SERVICE_ADMIN","ADMIN","DIV_MANAGER","RRS_MANAGER"]},
-        // {href: "/rrs", name: "Мониторинг РРС", icon: <Building2 />, roles: ["SERVICE_ADMIN","ADMIN","DIV_MANAGER","RRS_MANAGER","MANAGER"]},
-        // {href: "/firm", name: "Мониторинг Филиала", icon: <HomeIcon/>, roles: ["SERVICE_ADMIN","ADMIN","DIV_MANAGER","RRS_MANAGER","MANAGER","DEPUTY_MANAGER"]},
-        // {href: "/user", name: "Пользователь", icon: <UserRound />, roles: []},
-        // {href: "/details", name: "Детализация по сотруднику", icon: <List />, roles: []},
-    ]
+const routes = APP_ROUTES
 
 export default function AppSideBar() {
     const session = useSession()
     const {state} = useSidebar()
-    console.log(session)
 
     return (
         <Sidebar collapsible="icon">

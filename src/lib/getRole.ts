@@ -11,6 +11,7 @@ const roleTypes = [
 
 const roles = [
     {jobTitle: "Старший специалист по интеграции проектов дивизиона", role: "admin"},
+    {jobTitle: "Аналитик данных 1 категории", role: "admin"},
     {jobTitle: "Менеджер по интеграции проектов дивизиона", role: "s_admin"},
     {jobTitle: "Специалист по интеграции проектов дивизиона", role: "user"}
 ]

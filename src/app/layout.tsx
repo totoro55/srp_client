@@ -4,7 +4,7 @@ import Head from "next/head";
 import Providers from "@/app/providers";
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
-import {SidebarProvider, SidebarTrigger} from "@/components/ui/sidebar";
+import {SidebarProvider} from "@/components/ui/sidebar";
 import AppSideBar from "@/app/_components/appSideBar/appSideBar";
 import Header from "@/app/_components/header/header";
 

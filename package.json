@@ -3,16 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "kill-port 3000 && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@tanstack/react-table": "^9.2.4",
     "@types/ldapjs": "^3.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cn": "^0.3.0",
     "ldapts": "^8.1.8",
     "lucide-react": "^1.24.0",
     "next": "16.2.10",
@@ -31,6 +33,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "kill-port": "^2.0.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

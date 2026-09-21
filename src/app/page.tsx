@@ -20,9 +20,7 @@ export default async function Home() {
                 }
                 {session &&
                     <>
-                        <p>
-                            {`Добро пожаловать, ${session?.user?.name}!`}
-                        </p>
+                        <p>{`Добро пожаловать, ${session?.user?.name}!`}</p>
                     </>
                 }
             </div>

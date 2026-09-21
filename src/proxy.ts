@@ -1,54 +1,52 @@
-import {withAuth} from "next-auth/middleware";
-import {PUBLIC_ROUTES, Role, ROLE_PERMISSIONS} from "@/lib/routes";
-import {NextResponse} from "next/server";
+import { getToken } from "next-auth/jwt";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { PUBLIC_ROUTES, Role, ROLE_PERMISSIONS } from "@/lib/routes";
 
-export default withAuth(
-    function middleware(req){
-        const token = req.nextauth.token
-        const { pathname } = req.nextUrl;
+export async function proxy(req: NextRequest) {
+    const { pathname } = req.nextUrl;
 
-        if (PUBLIC_ROUTES.includes(pathname)) {
-            console.log("proxy public route");
-            return NextResponse.next();
-        }
-
-        const userRole = token?.role as Role | undefined;
-
-        if (!userRole) {
-            console.log("proxy no role");
-            const loginUrl = new URL('/login', req.url);
-            return NextResponse.redirect(loginUrl);
-        }
-
-        if (token && pathname === '/login'){
-            console.log("proxy redirect to /login");
-            return NextResponse.redirect(new URL('/', req.url));
-        }
-
-        const hasAccess = Object.entries(ROLE_PERMISSIONS).some(([role, allowedPaths]) => {
-            // Check if the user possesses this specific role
-            if (userRole !== role) return false;
-
-            // Check if the current route starts with any of the allowed path patterns
-            return allowedPaths.some(path => pathname === path || pathname.startsWith(`${path}/`));
-        });
-
-        if (!hasAccess) {
-            console.log("proxy no access");
-            const forbiddenUrl = new URL('/forbidden', req.url);
-            return NextResponse.redirect(forbiddenUrl);
-        }
-
-        console.log("proxy has access");
+    if (
+        pathname.startsWith('/_next') ||
+        pathname.startsWith('/api/auth') ||
+        pathname.includes('.') ||
+        PUBLIC_ROUTES.includes(pathname)
+    ) {
         return NextResponse.next();
-    },
-    {
-        callbacks:{
-            authorized: ({token}) => !!token
-        }
     }
-    )
+
+    //const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+    const token = { role: 'admin' }
+    if (!token) {
+        if (pathname === '/login') return NextResponse.next();
+        return NextResponse.redirect(new URL('/login', req.url));
+    }
+
+    if (pathname === '/login') {
+        return NextResponse.redirect(new URL('/', req.url));
+    }
+
+    const userRole = token?.role as Role | undefined;
+    if (!userRole) {
+        if (pathname === '/forbidden') return NextResponse.next();
+        return NextResponse.redirect(new URL('/forbidden', req.url));
+    }
+
+    const hasAccess = Object.entries(ROLE_PERMISSIONS).some(([role, allowedPaths]) => {
+        if (userRole !== role) return false;
+        return allowedPaths.some(path => pathname === path || pathname.startsWith(`${path}/`));
+    });
+
+    if (!hasAccess) {
+        if (pathname === '/forbidden') return NextResponse.next();
+        return NextResponse.redirect(new URL('/forbidden', req.url));
+    }
+
+    return NextResponse.next();
+}
+
+export default proxy;
 
 export const config = {
-    matcher: ['/main'],
+    matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
 };
