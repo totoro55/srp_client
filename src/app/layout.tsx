@@ -5,8 +5,8 @@ import Providers from "@/app/providers";
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
 import {SidebarProvider} from "@/components/ui/sidebar";
-import AppSideBar from "@/app/_components/appSideBar/appSideBar";
 import Header from "@/app/_components/header/header";
+import {AppSideBar} from "@/app/_components/appSideBar/AppSideBar";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -30,7 +30,15 @@ export default function RootLayout({
       {/* <link rel="shortcut icon" href={favicon} /> */}
       <link rel="shortcut icon" href="/icon.ico" />
     </Head>
-      <body className="min-h-full w-full">
+    <body
+        className={cn(
+            inter.className,
+            // ГЛАВНОЕ ИСПРАВЛЕНИЕ:
+            // h-full и w-full задают четкие границы 100% экрана.
+            // overflow-x-hidden полностью запрещает всему сайту улетать вправо.
+            // min-h-screen гарантирует, что фон не оборвется.
+            "h-full w-full min-h-screen bg-background text-foreground overflow-x-hidden"
+        )}>
       <Providers>
         <SidebarProvider defaultOpen={false}>
           <AppSideBar />

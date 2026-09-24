@@ -2,9 +2,11 @@ import {getServerSession} from "next-auth";
 import {Button} from "@/components/ui/button";
 import Link from "next/link";
 import {redirect} from "next/navigation";
+import {authOptions} from "@/auth";
 
 export default async function Home() {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
+    console.log(session);
     if (!session) {
         return redirect("/login");
     }
@@ -20,7 +22,7 @@ export default async function Home() {
                 }
                 {session &&
                     <>
-                        <p>{`Добро пожаловать, ${session?.user?.name}!`}</p>
+                        <p>{`Добро пожаловать, ${session?.user?.displayName}!`}</p>
                     </>
                 }
             </div>
