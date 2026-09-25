@@ -1,129 +1,167 @@
-// src/app/admin/roles/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Role, Mapping, UserException, AdminSectionType } from '@/types/admin';
-import { RolesTable } from './_components/RolesTable';
-import { MappingsTable } from './_components/MappingsTable';
-import { ExceptionsTable } from './_components/ExceptionsTable';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Role, Mapping, UserException, AdminTab } from '@/types/admin';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ShieldAlert, Users, Briefcase, UserCheck} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck, Search } from "lucide-react";
+import { useHasAccess } from "@/hooks/useHasAccess";
+import { AdminFormDialog, FieldConfig } from './_components/AdminFormDialog';
 
-export default function AdminRolesManagementPage() {
-    const [roles, setRoles] = useState<Role[]>([]);
-    const [mappings, setMappings] = useState<Mapping[]>([]);
-    const [exceptions, setExceptions] = useState<UserException[]>([]);
-    const [error, setError] = useState<string | null>(null);
+export default function AdminRolesPage() {
+    const [activeTab, setActiveTab] = useState<AdminTab>('roles');
+    const [data, setData] = useState<{ roles: Role[]; mappings: Mapping[]; exceptions: UserException[] }>({ roles: [], mappings: [], exceptions: [] });
+    const [search, setSearch] = useState('');
 
-    const refreshData = useCallback(async () => {
-        try {
-            const res = await fetch('/api/admin/roles');
-            const json = await res.json();
-            if (json.success) {
-                setRoles(json.data.roles);
-                setMappings(json.data.mappings);
-                setExceptions(json.data.exceptions);
-            } else {
-                setError(json.error.message);
-            }
-        } catch {
-            setError('Ошибка сети при обновлении справочников');
-        }
+    // Стейт для универсального модального окна
+    const [dialog, setDialog] = useState<{ isOpen: boolean; mode: 'create' | 'edit'; targetData?: any }>({ isOpen: false, mode: 'create' });
+
+    const canWrite = useHasAccess("/api/admin/roles", "POST");
+
+    const loadData = useCallback(async () => {
+        const res = await fetch('/api/admin/roles');
+        const json = await res.json();
+        if (json.success) setData(json.data);
     }, []);
 
-    useEffect(() => {
-        let isMounted = true;
-        async function fetchInitialData() {
-            try {
-                const res = await fetch('/api/admin/roles');
-                const json = await res.json();
-                if (isMounted) {
-                    if (json.success) {
-                        setRoles(json.data.roles);
-                        setMappings(json.data.mappings);
-                        setExceptions(json.data.exceptions);
-                    } else {
-                        setError(json.error.message);
-                    }
-                }
-            } catch {
-                if (isMounted) setError('Ошибка сети при первоначальной загрузке данных');
-            }
-        }
-        fetchInitialData();
-        return () => { isMounted = false; };
-    }, []);
+    useEffect(() => { loadData(); }, [loadData]);
 
-    const handleApiSubmit = async (type: AdminSectionType, payload: object): Promise<boolean> => {
-        setError(null);
-        try {
-            const res = await fetch('/api/admin/roles', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type, ...payload }),
-            });
-            const json = await res.json();
-            if (json.success) {
-                refreshData();
-                return true;
-            }
-            setError(json.error.message);
-            return false;
-        } catch {
-            setError('Не удалось отправить данные.');
-            return false;
-        }
+    // Конфигурация полей диалога в зависимости от активной вкладки
+    const formFieldsConfig = useMemo<FieldConfig[]>(() => {
+        if (activeTab === 'roles') return [
+            { key: 'name', label: 'Название роли', type: 'text', required: true },
+            { key: 'description', label: 'Описание', type: 'text' }
+        ];
+        if (activeTab === 'mappings') return [
+            { key: 'ldapPosition', label: 'Должность в LDAP', type: 'text', required: true },
+            { key: 'roleId', label: 'Системная роль ИБ', type: 'select', required: true }
+        ];
+        return [
+            { key: 'username', label: 'Имя пользователя (UID)', type: 'text', required: true },
+            { key: 'roleId', label: 'Временная роль', type: 'select', required: true },
+            { key: 'reason', label: 'Обоснование', type: 'text' },
+            { key: 'expiresAt', label: 'Срок действия до', type: 'date' }
+        ];
+    }, [activeTab]);
+
+    const handleSave = async (formData: any) => {
+        const method = dialog.mode === 'create' ? 'POST' : 'PUT';
+        await fetch('/api/admin/roles', {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: activeTab.toUpperCase().slice(0, -1), ...formData })
+        });
+        loadData();
     };
 
+    const handleDelete = async (id: number) => {
+        if (!confirm('Вы уверены, что хотите удалить эту запись?')) return;
+        await fetch(`/api/admin/roles?type=${activeTab.toUpperCase().slice(0, -1)}&id=${id}`, { method: 'DELETE' });
+        loadData();
+    };
+
+    // Декларативная фильтрация списков
+    const filteredItems = useMemo(() => {
+        const query = search.toLowerCase();
+        if (activeTab === 'roles') return data.roles.filter(r => r.name.toLowerCase().includes(query));
+        if (activeTab === 'mappings') return data.mappings.filter(m => m.ldapPosition.toLowerCase().includes(query));
+        return data.exceptions.filter(e => e.username.toLowerCase().includes(query));
+    }, [data, activeTab, search]);
+
     return (
-        <div className="w-full">
+        <div className="w-full space-y-6">
             <div>
-                <h1 className="text-3xl font-bold tracking-tight">Управление доступами LDAP</h1>
-                <p className="text-muted-foreground font-normal text-sm">Конфигурация системных ролей, кадровых соответствий AD и принудительных исключений.</p>
+                <h1 className="text-2xl font-bold tracking-tight">Управление доступами LDAP</h1>
+                <p className="text-muted-foreground text-xs">Конфигурация ролей, соответствий должностей AD и исключений.</p>
             </div>
 
-            {error && (
-                <Alert variant="destructive" className="mt-4">
-                    <ShieldAlert className="h-4 w-4" />
-                    <AlertTitle>Ошибка операции</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-
-            <Tabs defaultValue="roles" className="w-full mt-6">
-                <TabsList className="flex w-full h-12 mb-6 bg-muted/60 p-1 rounded-lg border items-center justify-between gap-1 overflow-hidden select-none">
-                    <TabsTrigger value="roles" className="flex-1 flex items-center justify-center gap-2 h-full text-sm font-medium rounded-md transition-all duration-200 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:font-semibold"><Users className="w-4 h-4 shrink-0"/> Системные роли</TabsTrigger>
-                    <TabsTrigger value="mappings" className="flex-1 flex items-center justify-center gap-2 h-full text-sm font-medium rounded-md transition-all duration-200 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:font-semibold"><Briefcase className="w-4 h-4 shrink-0"/> Должности LDAP</TabsTrigger>
-                    <TabsTrigger value="exceptions" className="flex-1 flex items-center justify-center gap-2 h-full text-sm font-medium rounded-md transition-all duration-200 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:font-semibold"><UserCheck className="w-4 h-4 shrink-0"/> Ручные исключения</TabsTrigger>
+            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); }} className="w-full">
+                <TabsList className="grid grid-cols-3 max-w-[600px] h-10 border bg-muted/50 p-1 rounded-md">
+                    <TabsTrigger value="roles" className="text-xs gap-1.5"><Users className="w-3.5 h-3.5"/> Роли</TabsTrigger>
+                    <TabsTrigger value="mappings" className="text-xs gap-1.5"><Briefcase className="w-3.5 h-3.5"/> Должности</TabsTrigger>
+                    <TabsTrigger value="exceptions" className="text-xs gap-1.5"><UserCheck className="w-3.5 h-3.5"/> Исключения</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="roles">
-                    <RolesTable
-                        roles={roles}
-                        onRefresh={refreshData}
-                        onAddSubmit={(p) => handleApiSubmit('ROLE', p)}
-                    />
-                </TabsContent>
-
-                <TabsContent value="mappings">
-                    <MappingsTable
-                        mappings={mappings}
-                        roles={roles}
-                        onRefresh={refreshData}
-                        onAddSubmit={(p) => handleApiSubmit('MAPPING', p)}
-                    />
-                </TabsContent>
-
-                <TabsContent value="exceptions">
-                    <ExceptionsTable
-                        exceptions={exceptions}
-                        roles={roles}
-                        onRefresh={refreshData}
-                        onAddSubmit={(p) => handleApiSubmit('EXCEPTION', p)}
-                    />
-                </TabsContent>
+                <Card className="mt-4 border shadow-sm">
+                    <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4">
+                        <div className="relative w-full sm:max-w-xs">
+                            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input placeholder="Быстрый поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-8 text-xs" />
+                        </div>
+                        {canWrite && (
+                            <Button size="sm" onClick={() => setDialog({ isOpen: true, mode: 'create' })} className="text-xs h-8 gap-1.5">
+                                <Plus className="w-3.5 h-3.5"/> Добавить запись
+                            </Button>
+                        )}
+                    </CardHeader>
+                    <CardContent className="overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/30">
+                                    {activeTab === 'roles' && <>
+                                        <TableHead className="w-16">ID</TableHead>
+                                        <TableHead>Название роли</TableHead>
+                                        <TableHead>Описание</TableHead>
+                                    </>}
+                                    {activeTab === 'mappings' && <>
+                                        <TableHead>Должность LDAP</TableHead>
+                                        <TableHead>Выдаваемая роль</TableHead>
+                                    </>}
+                                    {activeTab === 'exceptions' && <>
+                                        <TableHead>Сотрудник</TableHead>
+                                        <TableHead>Роль</TableHead>
+                                        <TableHead>Обоснование</TableHead>
+                                        <TableHead>До какого числа</TableHead>
+                                    </>}
+                                    <TableHead className="w-20 text-right">Действия</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredItems.length === 0 ? (
+                                    <TableRow><TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-8">Записей не найдено</TableCell></TableRow>
+                                ) : filteredItems.map((item: any) => (
+                                    <TableRow key={item.id} className="text-xs">
+                                        {activeTab === 'roles' && <>
+                                            <TableCell className="text-muted-foreground">{item.id}</TableCell>
+                                            <TableCell className="font-semibold">{item.name}</TableCell>
+                                            <TableCell className="text-muted-foreground">{item.description || '—'}</TableCell>
+                                        </>}
+                                        {activeTab === 'mappings' && <>
+                                            <TableCell className="font-medium">{item.ldapPosition}</TableCell>
+                                            <TableCell><span className="bg-secondary/70 px-2 py-0.5 rounded font-medium">{item.roleName}</span></TableCell>
+                                        </>}
+                                        {activeTab === 'exceptions' && <>
+                                            <TableCell className="font-medium">{item.username}</TableCell>
+                                            <TableCell><span className="bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-400 px-2 py-0.5 rounded font-medium">{item.roleName}</span></TableCell>
+                                            <TableCell className="text-muted-foreground">{item.reason || '—'}</TableCell>
+                                            <TableCell className="text-muted-foreground">{item.expiresAt ? new Date(item.expiresAt).toLocaleDateString() : 'Бессрочно'}</TableCell>
+                                        </>}
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-0.5">
+                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDialog({ isOpen: true, mode: 'edit', targetData: item })}><Pencil className="h-3.5 w-3.5"/></Button>}
+                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleDelete(item.id)}><Trash2 className="h-3.5 w-3.5"/></Button>}
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
             </Tabs>
+
+            <AdminFormDialog
+                isOpen={dialog.isOpen}
+                title={dialog.mode === 'create' ? 'Создание новой записи' : 'Редактирование записи'}
+                fields={formFieldsConfig}
+                roles={data.roles}
+                initialData={dialog.targetData}
+                onClose={() => setDialog({ isOpen: false, mode: 'create' })}
+                onSave={handleSave}
+            />
         </div>
     );
 }

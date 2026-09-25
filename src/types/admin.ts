@@ -1,5 +1,24 @@
-export interface Role { id: number; name: string; description: string | null; }
-export interface Mapping { id: number; ldap_position: string; role_name: string; role_id: number; }
-export interface UserException { id: number; username: string; role_name: string; role_id: number; reason: string | null; }
+export interface Role {
+    id: number;
+    name: string;
+    description: string | null;
+}
 
-export type AdminSectionType = 'ROLE' | 'MAPPING' | 'EXCEPTION';
+export interface Mapping {
+    id: number;
+    ldapPosition: string;
+    roleId: number;
+    roleName: string;
+}
+
+export interface UserException {
+    id: number;
+    username: string;
+    roleId: number;
+    roleName: string;
+    reason: string | null;
+    grantedBy: string | null;
+    expiresAt: string | null;
+}
+
+export type AdminTab = 'roles' | 'mappings' | 'exceptions';

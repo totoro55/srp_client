@@ -30,12 +30,12 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         items: [
             { name: 'Главная панель', href: '/', icon: Home },
             { name: 'Мониторинг', href: '/dashboard', icon: LayoutDashboard },
-            { name: 'Настройки профиля', href: '/profile/settings', icon: Settings },
+            { name: 'Настройки', href: '/settings', icon: Settings },
         ]
     },
     {
         id: 'security',
-        label: "Панель ИБ",
+        label: "Доступы и безопасность",
         icon: ShieldAlert,
         items: [
             { name: 'Матрица доступов', href: '/admin/matrix', icon: Grid3X3 },

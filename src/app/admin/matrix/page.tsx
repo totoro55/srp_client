@@ -1,7 +1,7 @@
 // src/app/admin/matrix/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import {useState, useEffect, useCallback, useTransition} from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ShieldAlert, Loader2 } from "lucide-react";
 
@@ -41,6 +41,8 @@ export default function AdminMatrixPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    const [, startTransition] = useTransition();
+
     // Функция реактивного обновления данных с сервера
     const fetchMatrixData = useCallback(async (showLoader = false) => {
         if (showLoader) setIsLoading(true);
@@ -65,7 +67,9 @@ export default function AdminMatrixPage() {
 
     // Первоначальная загрузка данных при монтировании страницы
     useEffect(() => {
-        fetchMatrixData(true);
+        startTransition(()=>{
+            fetchMatrixData(true);
+        })
     }, [fetchMatrixData]);
 
     // Обработчик переключения чекбоксов (отправка изменений в СУБД)

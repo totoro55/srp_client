@@ -1,112 +1,82 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/services/db';
-import {createErrorResponse} from "@/lib/api-error";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/auth";
 
-// 1. Получение списков ролей, маппингов должностей и исключений
+const checkAdmin = async () => {
+    const session = await getServerSession(authOptions);
+    if (session?.user?.role !== 'ADMIN') throw new Error('403');
+    return session.user.username || 'SYSTEM';
+};
+
 export async function GET() {
     try {
-        const roles = await db.query('SELECT * FROM roles ORDER BY id ASC');
+        await checkAdmin();
+        const roles = await db.query('SELECT id, name, description FROM roles ORDER BY id ASC');
         const mappings = await db.query(`
-      SELECT m.id, m.ldap_position, r.name as role_name, m.role_id 
-      FROM ldap_position_mappings m 
-      JOIN roles r ON m.role_id = r.id 
-      ORDER BY m.id DESC
-    `);
+            SELECT m.id, m.ldap_position AS "ldapPosition", m.role_id AS "roleId", r.name AS "roleName"
+            FROM ldap_position_mappings m JOIN roles r ON m.role_id = r.id ORDER BY m.id DESC
+        `);
         const exceptions = await db.query(`
-      SELECT e.id, e.username, r.name as role_name, e.role_id, e.reason 
-      FROM user_role_exceptions e 
-      JOIN roles r ON e.role_id = r.id 
-      ORDER BY e.id DESC
-    `);
-
+            SELECT e.id, e.username, e.role_id AS "roleId", r.name AS "roleName", 
+                   e.reason, e.granted_by AS "grantedBy", e.expires_at AS "expiresAt"
+            FROM user_role_exceptions e JOIN roles r ON e.role_id = r.id ORDER BY e.id DESC
+        `);
         return NextResponse.json({ success: true, data: { roles, mappings, exceptions } });
-    } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось загрузить списки управления', 500, error);
+    } catch (err: any) {
+        return NextResponse.json({ success: false, error: err.message === '403' ? 'Доступ ограничен' : 'Ошибка БД' }, { status: err.message === '403' ? 403 : 500 });
     }
 }
 
-// 2. Создание новой роли, маппинга или исключения
-export async function POST(request: Request) {
+export async function POST(req: Request) {
     try {
-        const body = await request.json();
-        const { type, role_name, description, ldap_position, role_id, username, reason } = body;
+        const admin = await checkAdmin();
+        const { type, ...payload } = await req.json();
 
-        // Создание роли
         if (type === 'ROLE') {
-            if (!role_name) return createErrorResponse('BAD_REQUEST', 'Имя роли обязательно', 400);
-            const res = await db.query(
-                'INSERT INTO roles (name, description) VALUES (\$1, \$2) ON CONFLICT (name) DO NOTHING RETURNING id',
-                [role_name.toUpperCase(), description]
-            );
-            return NextResponse.json({ success: true, data: res });
+            await db.query('INSERT INTO roles (name, description) VALUES (\$1, \$2) ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description', [payload.name, payload.description]);
+        } else if (type === 'MAPPING') {
+            await db.query('INSERT INTO ldap_position_mappings (ldap_position, role_id) VALUES (\$1, \$2) ON CONFLICT (ldap_position) DO UPDATE SET role_id = EXCLUDED.role_id', [payload.ldapPosition, payload.roleId]);
+        } else if (type === 'EXCEPTION') {
+            await db.query('INSERT INTO user_role_exceptions (username, role_id, reason, granted_by, expires_at) VALUES (\$1, \$2, \$3, \$4, \$5)', [payload.username, payload.roleId, payload.reason, admin, payload.expiresAt]);
         }
-
-        // Создание маппинга должности LDAP -> Роль
-        if (type === 'MAPPING') {
-            if (!ldap_position || !role_id) return createErrorResponse('BAD_REQUEST', 'Должность и роль обязательны', 400);
-            const res = await db.query(
-                'INSERT INTO ldap_position_mappings (ldap_position, role_id) VALUES (\$1, \$2) ON CONFLICT (ldap_position) DO UPDATE SET role_id = EXCLUDED.role_id RETURNING id',
-                [ldap_position, role_id]
-            );
-            return NextResponse.json({ success: true, data: res });
-        }
-
-        // Создание исключения для пользователя
-        if (type === 'EXCEPTION') {
-            if (!username || !role_id) return createErrorResponse('BAD_REQUEST', 'Логин и роль обязательны', 400);
-            const res = await db.query(
-                'INSERT INTO user_role_exceptions (username, role_id, reason) VALUES (\$1, \$2, \$3) ON CONFLICT (username) DO UPDATE SET role_id = EXCLUDED.role_id, reason = EXCLUDED.reason RETURNING id',
-                [username, role_id, reason]
-            );
-            return NextResponse.json({ success: true, data: res });
-        }
-
-        return createErrorResponse('BAD_REQUEST', 'Неверный тип операции', 400);
-    } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Ошибка при сохранении данных', 500, error);
+        return NextResponse.json({ success: true });
+    } catch {
+        return NextResponse.json({ success: false, error: 'Ошибка сохранения' }, { status: 500 });
     }
 }
 
-export async function DELETE(request: Request) {
+export async function PUT(req: Request) {
     try {
-        const { searchParams } = new URL(request.url);
+        const admin = await checkAdmin();
+        const { type, id, ...payload } = await req.json();
+
+        if (type === 'ROLE') {
+            await db.query('UPDATE roles SET name = \$1, description = \$2 WHERE id = \$3', [payload.name, payload.description, id]);
+        } else if (type === 'MAPPING') {
+            await db.query('UPDATE ldap_position_mappings SET ldap_position = \$1, role_id = \$2 WHERE id = \$3', [payload.ldapPosition, payload.roleId, id]);
+        } else if (type === 'EXCEPTION') {
+            await db.query('UPDATE user_role_exceptions SET role_id = \$1, reason = \$2, granted_by = \$3, expires_at = \$4 WHERE id = \$5', [payload.roleId, payload.reason, admin, payload.expiresAt, id]);
+        }
+        return NextResponse.json({ success: true });
+    } catch {
+        return NextResponse.json({ success: false, error: 'Ошибка обновления' }, { status: 500 });
+    }
+}
+
+export async function DELETE(req: Request) {
+    try {
+        await checkAdmin();
+        const { searchParams } = new URL(req.url);
         const id = searchParams.get('id');
-        const type = searchParams.get('type'); // 'ROLE' | 'MAPPING' | 'EXCEPTION'
+        const type = searchParams.get('type');
 
-        if (!id || !type) return createErrorResponse('BAD_REQUEST', 'Параметры id и type обязательны', 400);
-
-        const intId = parseInt(id, 10);
-
-        if (type === 'ROLE') await db.query('DELETE FROM roles WHERE id = $1', [intId]);
-        if (type === 'MAPPING') await db.query('DELETE FROM ldap_position_mappings WHERE id = $1', [intId]);
-        if (type === 'EXCEPTION') await db.query('DELETE FROM user_role_exceptions WHERE id = $1', [intId]);
-
+        const tableMap: Record<string, string> = { ROLE: 'roles', MAPPING: 'ldap_position_mappings', EXCEPTION: 'user_role_exceptions' };
+        if (id && type && tableMap[type]) {
+            await db.query(`DELETE FROM ${tableMap[type]} WHERE id = $1`, [parseInt(id, 10)]);
+        }
         return NextResponse.json({ success: true });
-    } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось удалить запись', 500, error);
-    }
-}
-
-export async function PUT(request: Request) {
-    try {
-        const body = await request.json();
-        const { type, id, ...payload } = body;
-
-        if (!id || !type) return createErrorResponse('BAD_REQUEST', 'ID и тип операции обязательны', 400);
-        const intId = parseInt(id, 10);
-
-        if (type === 'ROLE') {
-            await db.query('UPDATE roles SET name = $1, description = $2 WHERE id = $3', [payload.role_name.toUpperCase(), payload.description || null, intId]);
-        }
-        if (type === 'MAPPING') {
-            await db.query('UPDATE ldap_position_mappings SET ldap_position = $1, role_id = $2 WHERE id = $3', [payload.ldap_position, payload.role_id, intId]);
-        }
-        if (type === 'EXCEPTION') {
-            await db.query('UPDATE user_role_exceptions SET username = $1, role_id = $2, reason = $3 WHERE id = $4', [payload.username, payload.role_id, payload.reason || null, intId]);
-        }
-
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось обновить данные', 500, error);
+    } catch {
+        return NextResponse.json({ success: false, error: 'Ошибка удаления' }, { status: 500 });
     }
 }

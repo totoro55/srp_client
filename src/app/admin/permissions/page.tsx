@@ -6,10 +6,13 @@ import { PermissionForm } from './_components/PermissionForm';
 import { PermissionTable } from './_components/PermissionTable';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ShieldAlert } from "lucide-react";
+import {useHasAccess} from "@/hooks/useHasAccess";
 
 export default function AdminPermissionsPage() {
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [globalError, setGlobalError] = useState<string | null>(null);
+    const canCreate = useHasAccess("/api/admin/permissions", "POST");
+
 
     const refreshPermissions = useCallback(async () => {
         try {
@@ -87,7 +90,7 @@ export default function AdminPermissionsPage() {
                     <h1 className="text-3xl font-bold tracking-tight">Управление роутами безопасности</h1>
                     <p className="text-muted-foreground text-sm">Список защищаемых эндпоинтов и интерфейсных страниц системы.</p>
                 </div>
-                <PermissionForm onSubmit={handleFormSubmit} />
+                {canCreate && <PermissionForm onSubmit={handleFormSubmit} />}
             </div>
 
             {globalError && (

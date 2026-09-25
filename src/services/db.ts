@@ -88,30 +88,31 @@ class DbService {
      * Сбор приоритетных прав (Исключения -> Маппинги должностей -> Матрица доступов)
      */
     public async getUserPermissions(username: string, ldapPosition: string) {
-        if (!this.isInitialized) {
-            await this.initSchema();
-        }
+        if (!this.isInitialized) await this.initSchema();
 
-        // Текстовый SQL-запрос сбора прав (был написан на первом этапе)
         const queryText = `
-      WITH user_role AS (
-        SELECT role_id FROM user_role_exceptions WHERE username = $1
-        UNION ALL
-        SELECT role_id FROM ldap_position_mappings WHERE ldap_position = $2
-        LIMIT 1
-      )
-      SELECT 
-        r.name as role,
-        COALESCE(
-          json_agg(json_build_object('path', p.route_path, 'method', p.method)) FILTER (WHERE p.id IS NOT NULL), 
-          '[]'::json
-        ) as permissions
-      FROM user_role ur
-      JOIN roles r ON ur.role_id = r.id
-      LEFT JOIN role_permissions rp ON r.id = rp.role_id
-      LEFT JOIN permissions p ON rp.permission_id = p.id
-      GROUP BY r.name;
-    `;
+            WITH user_role AS (
+                -- 🔥 ИСПРАВЛЕНИЕ: Добавили проверку expires_at IS NULL OR expires_at > NOW()
+                SELECT role_id FROM user_role_exceptions
+                WHERE username = $1 AND (expires_at IS NULL OR expires_at > NOW())
+
+                UNION ALL
+
+                SELECT role_id FROM ldap_position_mappings WHERE ldap_position = $2
+                LIMIT 1
+                )
+            SELECT
+                r.name as role,
+                COALESCE(
+                        json_agg(json_build_object('path', p.route_path, 'method', p.method)) FILTER (WHERE p.id IS NOT NULL),
+                        '[]'::json
+                ) as permissions
+            FROM user_role ur
+                     JOIN roles r ON ur.role_id = r.id
+                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                     LEFT JOIN permissions p ON rp.permission_id = p.id
+            GROUP BY r.name;
+        `;
 
         const rows = await this.query<{ role: string; permissions: UserPermission[] }>(queryText, [username, ldapPosition]);
         return rows[0] || null;

@@ -8,26 +8,36 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Filter, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface Role {
+// Описываем минимально необходимую структуру роли для универсальности
+interface BaseRole {
     id: number;
     name: string;
 }
 
-interface MatrixRolesFilterProps {
-    roles: Role[];
+interface RoleMultiSelectProps {
+    roles: BaseRole[];
     selectedRoleIds: number[];
     onToggleRole: (roleId: number) => void;
     onClearFilters: () => void;
+    placeholder?: string; // Кастомный плейсхолдер для поиска
+    triggerText?: string; // Кастомный текст на кнопке-триггере
 }
 
-export function MatrixRolesFilter({ roles, selectedRoleIds, onToggleRole, onClearFilters }: MatrixRolesFilterProps) {
+export function RoleMultiSelect({
+                                    roles,
+                                    selectedRoleIds,
+                                    onToggleRole,
+                                    onClearFilters,
+                                    placeholder = "Поиск роли...",
+                                    triggerText = "Фильтр ролей"
+                                }: RoleMultiSelectProps) {
     return (
         <Popover>
             <PopoverTrigger render={
                                  <Button variant="outline" size="sm" className="w-full h-9 justify-between border-dashed rounded-md px-3 font-normal text-xs">
                                     <div className="flex items-center gap-2 truncate">
                                         <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                        <span className="truncate">Фильтр ролей</span>
+                                        <span className="truncate">{triggerText}</span>
 
                                         {selectedRoleIds.length > 0 && (
                                             <>
@@ -58,7 +68,7 @@ export function MatrixRolesFilter({ roles, selectedRoleIds, onToggleRole, onClea
             </PopoverTrigger>
             <PopoverContent className="w-[240px] p-0" align="end">
                 <Command>
-                    <CommandInput placeholder="Поиск роли..." className="text-xs h-9" />
+                    <CommandInput placeholder={placeholder} className="text-xs h-9" />
                     <CommandList>
                         <CommandEmpty><span className="text-xs p-3 block text-muted-foreground">Роли не найдены.</span></CommandEmpty>
                         <CommandGroup>

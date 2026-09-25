@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/services/db';
+import {ApiErrorResponse} from "@/types/api";
 
 export async function POST(request: Request) {
     try {

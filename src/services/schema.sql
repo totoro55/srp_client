@@ -38,8 +38,10 @@ CREATE TABLE IF NOT EXISTS user_role_exceptions (
                                                     username VARCHAR(100) UNIQUE NOT NULL,
     role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
     reason TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    granted_by VARCHAR(100),
+    expires_at TIMESTAMP WITH TIME ZONE,
+                                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                             );
 
 -- 6. Сиды базовых системных ролей по умолчанию
 INSERT INTO roles (name, description)

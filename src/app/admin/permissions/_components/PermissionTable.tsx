@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPermissionDialog } from './dialogs/EditPermissionDialog';
-import { DeleteConfirmDialog } from '../../roles/_components/dialogs/DeleteConfirmDialog'; // переиспользуем созданный ранее диалог удаления
-import { Trash2, Pencil, Search, Filter } from "lucide-react";
+import {Trash2, Pencil, Search, Filter} from "lucide-react";
+import {useHasAccess} from "@/hooks/useHasAccess";
+import {cn} from "@/lib/utils";
 
 interface PermissionTableProps {
     permissions: Permission[];
@@ -22,6 +23,9 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
 
     const [searchQuery, setSearchQuery] = useState('');
     const [methodFilter, setMethodFilter] = useState('ALL_METHODS');
+
+    const canUpdate = useHasAccess("/api/admin/permissions", "PUT");
+    const canDelete = useHasAccess("/api/admin/permissions", "DELETE");
 
     const handleUpdate = async (method: string, routePath: string, description: string) => {
         if (!activePermission) return;
@@ -135,7 +139,9 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-8 w-8"
+                                                        disabled={!canUpdate}
                                                         onClick={() => { setActivePermission(p); setDialogType('edit'); }}
+                                                        title={canUpdate ? "Редактировать описание" : "Редактирование ограничено"}
                                                     >
                                                         <Pencil className="h-4 w-4" />
                                                     </Button>
@@ -144,8 +150,10 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                                        className={cn("h-8 w-8", canDelete ? "text-destructive hover:bg-destructive/10" : "text-muted-foreground/40")}
+                                                        disabled={!canDelete}
                                                         onClick={() => { setActivePermission(p); setDialogType('delete'); }}
+                                                        title={canDelete ? "Удалить роут из системы" : "Удаление ограничено"}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
@@ -166,15 +174,6 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                 permission={activePermission}
                 onClose={() => setDialogType(null)}
                 onSave={handleUpdate}
-            />
-
-            {/* Изолированный диалог удаления */}
-            <DeleteConfirmDialog
-                isOpen={dialogType === 'delete'}
-                title="Удалить защищаемый роут?"
-                description={`Вы собираетесь удалить правила контроля доступа для пути "${activePermission?.route_path}". Это действие может открыть доступ неавторизованным пользователям.`}
-                onClose={() => setDialogType(null)}
-                onConfirm={handleDelete}
             />
         </>
     );

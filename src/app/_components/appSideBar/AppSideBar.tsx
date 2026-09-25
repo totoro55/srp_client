@@ -1,7 +1,7 @@
 // src/components/AppSideBar.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react'; // Добавили useState
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
@@ -22,7 +22,7 @@ function isLinkVisible(href: string, userPermissions: { path: string; method: st
         if (perm.method !== 'ALL' && perm.method.toUpperCase() !== 'GET') return false;
 
         const regexPattern = perm.path
-            .replace(/([.+?^${}()|[\]\\])/g, '\\$1')
+            .replace(/([.+?^\${}()|[\]\\])/g, '\\$1')
             .replace(/\*/g, '.*');
 
         const routeRegex = new RegExp(`^${regexPattern}$`, 'i');
@@ -35,15 +35,47 @@ export function AppSideBar() {
     const { data: session } = useSession();
     const { open } = useSidebar();
 
-    const userRole = session?.user?.role;
+    const originalRole = session?.user?.role;
 
-    // Динамическая фильтрация маршрутов на основе прав из сессии
+    const [impersonatedRole] = useState<string | null>(() => {
+        if (typeof document === 'undefined') return null;
+        const cookies = document.cookie.split('; ');
+        const maskCookie = cookies.find(row => row.startsWith('impersonated_role='));
+        // maskCookie.split('=')[1] вернет чистую строку, например "GUEST"
+        return maskCookie ? maskCookie.split('=')[1] : null;
+    });
+
+    const activeRole = useMemo(() => {
+        if (originalRole === 'ADMIN' && impersonatedRole) {
+            return impersonatedRole;
+        }
+        return originalRole;
+    }, [originalRole, impersonatedRole]);
+
+    // 2. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ МАРШРУТОВ САЙДБАРА
     const dynamicNavigation = useMemo((): NavigationGroup[] => {
-        if (!userRole) return [];
+        if (!activeRole) return [];
 
-        const permissions = session?.user?.permissions || [];
-        if (userRole === 'ADMIN') return APP_NAVIGATION_MAP;
+        // Если активная роль — ADMIN (вы не в режиме теста), показываем абсолютно ВСЁ
+        if (activeRole === 'ADMIN') return APP_NAVIGATION_MAP;
 
+        // 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ДЛЯ РЕЖИМА ТЕСТИРОВАНИЯ ФРОНТЕНДА:
+        // Если оригинальный админ включил маску (например, GUEST), мы ЗАПРЕЩАЕМ сайдбару
+        // использовать оригинальный админский wildcard '*', иначе меню не скроется.
+        let permissions = session?.user?.permissions || [];
+
+        if (originalRole === 'ADMIN' && impersonatedRole) {
+            if (activeRole === 'GUEST') {
+                // Для теста роли GUEST принудительно оставляем доступ только к главной странице
+                permissions = [{ path: '/', method: 'GET' }];
+            } else {
+                // Для любой другой тестируемой роли временно очищаем массив на фронтенде,
+                // чтобы сайдбар скрыл защищенные ИБ-разделы
+                permissions = [];
+            }
+        }
+
+        // Фильтруем карту маршрутов на основе вычисленного массива прав permissions
         return APP_NAVIGATION_MAP.map((group) => {
             const visibleItems = group.items.filter((item) =>
                 isLinkVisible(item.href, permissions)
@@ -52,23 +84,20 @@ export function AppSideBar() {
             return {
                 id: group.id,
                 label: group.label,
-                icon: group.icon, // 🔥 Переносим ссылку на компонент иконки из конфига
+                icon: group.icon,
                 items: visibleItems,
             };
         }).filter(group => group.items.length > 0);
-
-    }, [userRole, session?.user?.permissions]);
+    }, [activeRole, originalRole, impersonatedRole, session?.user?.permissions]);
 
     return (
         <Sidebar variant="sidebar" collapsible="icon">
             <SidebarContent>
                 {dynamicNavigation.map((group) => {
-                    // Вытаскиваем компонент иконки и сохраняем его в переменную с заглавной буквы
                     const GroupIcon = group.icon;
 
                     return (
                         <SidebarGroup key={group.id} className="animate-in fade-in duration-200">
-
                             <SidebarGroupLabel className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground select-none">
                                 {GroupIcon && <GroupIcon className="w-3.5 h-3.5 shrink-0 text-primary" />}
                                 <span>{group.label}</span>
