@@ -28,7 +28,7 @@ export function MatrixToolbar({
         <AdminToolbar
             search={searchQuery}
             onSearchChange={onSearchChange}
-            searchPlaceholder="Поиск пути, метода или описания..."
+            searchPlaceholder="Поиск кода или описания..."
         >
             {searchQuery ? (
                 <Button type="button" variant="ghost" size="sm" onClick={() => onSearchChange('')} className="h-9 text-xs">

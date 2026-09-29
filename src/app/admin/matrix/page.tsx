@@ -5,6 +5,7 @@ import {useState, useEffect, useCallback, useTransition} from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
+import { usePermission } from '@/hooks/useAccess';
 
 interface Role {
     id: number;
@@ -14,8 +15,8 @@ interface Role {
 
 interface Permission {
     id: number;
-    route_path: string;
-    method: string;
+    code: string;
+    title: string;
     description?: string;
 }
 
@@ -54,6 +55,7 @@ export default function AdminMatrixPage() {
     const [error, setError] = useState<string | null>(null);
 
     const [, startTransition] = useTransition();
+    const canWrite = usePermission("admin.matrix:write");
 
     // Функция реактивного обновления данных с сервера
     const fetchMatrixData = useCallback(async (showLoader = false) => {
@@ -138,6 +140,7 @@ export default function AdminMatrixPage() {
                 permissions={permissions}
                 relations={relations}
                 isLoading={isLoading}
+                canWrite={canWrite}
                 onTogglePermission={handleTogglePermission}
             />
         </AdminPageShell>

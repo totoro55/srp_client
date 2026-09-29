@@ -1,7 +1,6 @@
-// src/auth.ts
 import { NextAuthOptions } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { authenticateLDAPUser } from "@/services/ldap"; // Your separated service
+import { authenticateLDAPUser } from "@/services/ldap";
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -25,9 +24,10 @@ export const authOptions: NextAuthOptions = {
         async jwt({ token, user }) {
             if (user) {
                 token.role = user.role;
+                token.roleId = user.roleId;
+                token.isSuperuser = user.isSuperuser;
                 token.username = user.username;
                 token.displayName = user.displayName;
-                token.permissions = user.permissions;
                 token.department = user.department;
             }
             return token;
@@ -35,9 +35,10 @@ export const authOptions: NextAuthOptions = {
         async session({ session, token }) {
             if (token && session.user) {
                 session.user.role = token.role;
+                session.user.roleId = token.roleId;
+                session.user.isSuperuser = token.isSuperuser;
                 session.user.username = token.username;
                 session.user.displayName = token.displayName;
-                session.user.permissions = token.permissions;
                 session.user.department = token.department;
             }
             return session;
@@ -50,7 +51,7 @@ export const authOptions: NextAuthOptions = {
     session: {
         strategy: "jwt",
         maxAge: 60 * 60 * 8,
-        updateAge: 60 * 60
+        updateAge: 60 * 60,
     },
     secret: process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET,
 };

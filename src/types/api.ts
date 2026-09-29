@@ -22,32 +22,17 @@ export interface ApiSuccessResponse<T> {
 
 export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
-// Тип сущности Permission из БД
 export interface Permission {
     id: number;
-    route_path: string;
-    method: string;
+    code: string;
+    title: string;
     description: string | null;
-    created_at: string;
 }
 
 export interface Role {
     id: number;
     name: string;
     description: string | null;
-}
-
-// Структура связи, которую мы получаем из БД
-export interface RolePermissionMatrixRow {
-    permission_id: number;
-    route_path: string;
-    method: string;
-    allowed_roles: number[]; // Массив ID ролей, у которых есть доступ к этому роуту
-}
-
-export interface MatrixDataResponse {
-    roles: Role[];
-    matrix: RolePermissionMatrixRow[];
 }
 
 export interface MatrixToggleRequest {
@@ -59,14 +44,18 @@ export interface MatrixToggleRequest {
     is_checked?: boolean;
 }
 
+export interface SessionAccess {
+    role: string | null;
+    roleId: number | null;
+    isSuperuser: boolean;
+    originalIsSuperuser: boolean;
+    codes: string[];
+    impersonatedRole: string | null;
+    impersonatedRoleId: number | null;
+}
+
 export interface ImpersonationStatus {
     impersonatedRole: string | null;
     impersonatedRoleId: number | null;
-    permissions: Array<{ path: string; method: string }>;
-}
-
-export interface DiscoveredAppRoutes {
-    pages: string[];
-    api: string[];
-    source: "manifest" | "filesystem";
+    codes: string[];
 }

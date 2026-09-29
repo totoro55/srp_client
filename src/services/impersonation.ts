@@ -1,15 +1,22 @@
-import { RequestCookies } from "next/dist/compiled/@edge-runtime/cookies";
 import { NextResponse } from "next/server";
-import { isAdminRole } from "@/lib/roles";
-import { UserPermission } from "@/types/next-auth";
+import {
+    getCachedRoleCodes,
+    setCachedRoleCodes,
+} from "@/services/permission-cache";
+
+type CookieReader = {
+    get(name: string): { value: string } | undefined;
+};
 
 export const IMPERSONATION_COOKIE_ROLE = "impersonated_role";
 export const IMPERSONATION_COOKIE_ROLE_ID = "impersonated_role_id";
 export const IMPERSONATION_COOKIE_MAX_AGE = 60 * 60 * 2;
 
-interface ImpersonationResult {
+export interface ActiveAccessContext {
     activeRole: string;
-    activePermissions: UserPermission[];
+    activeRoleId: number | null;
+    isSuperuser: boolean;
+    codes: string[];
     isImpersonating: boolean;
 }
 
@@ -39,62 +46,93 @@ export function clearImpersonationCookies(response: NextResponse): void {
     response.cookies.set(IMPERSONATION_COOKIE_ROLE_ID, "", options);
 }
 
-export async function loadRolePermissions(roleId: number): Promise<UserPermission[]> {
-    const { db } = await import("@/services/db");
+export async function loadRolePermissionCodes(roleId: number): Promise<string[]> {
+    const cached = getCachedRoleCodes(roleId);
+    if (cached) {
+        return cached;
+    }
 
-    const rolePerms = await db.query<{ path: string; method: string }>(
+    const { db } = await import("@/services/db");
+    const rows = await db.query<{ code: string }>(
         `
-        SELECT p.route_path as path, p.method
+        SELECT p.code
         FROM role_permissions rp
         JOIN permissions p ON rp.permission_id = p.id
         WHERE rp.role_id = $1
+          AND p.code IS NOT NULL
+          AND p.code NOT LIKE 'legacy:%'
         `,
         [roleId]
     );
 
-    return rolePerms.map((permission) => ({
-        path: permission.path,
-        method: permission.method,
-    }));
+    return setCachedRoleCodes(
+        roleId,
+        rows.map((row) => row.code)
+    );
+}
+
+export async function resolveRoleRecord(roleId?: number | null, roleName?: string | null) {
+    const { db } = await import("@/services/db");
+    if (typeof roleId === "number" && roleId > 0) {
+        const byId = await db.getRoleById(roleId);
+        if (byId) {
+            return byId;
+        }
+    }
+    if (roleName) {
+        return db.getRoleByName(roleName);
+    }
+    return null;
 }
 
 export async function getActiveSessionContext(
     originalRole: string | undefined,
-    originalPermissions: UserPermission[],
-    cookies: RequestCookies
-): Promise<ImpersonationResult> {
-    const result: ImpersonationResult = {
-        activeRole: originalRole || "",
-        activePermissions: originalPermissions,
+    originalRoleId: number | undefined,
+    originalIsSuperuser: boolean,
+    cookies: CookieReader
+): Promise<ActiveAccessContext> {
+    const originalRecord = await resolveRoleRecord(originalRoleId, originalRole);
+    const result: ActiveAccessContext = {
+        activeRole: originalRecord?.name || originalRole || "",
+        activeRoleId: originalRecord?.id ?? originalRoleId ?? null,
+        isSuperuser: originalRecord?.is_superuser ?? originalIsSuperuser,
+        codes: [],
         isImpersonating: false,
     };
 
+    if (!originalRecord?.is_superuser && !originalIsSuperuser) {
+        if (result.activeRoleId) {
+            result.codes = await loadRolePermissionCodes(result.activeRoleId);
+        }
+        return result;
+    }
+
     const impersonatedRole = cookies.get(IMPERSONATION_COOKIE_ROLE)?.value;
-    const impersonatedRoleId = cookies.get(IMPERSONATION_COOKIE_ROLE_ID)?.value;
+    const impersonatedRoleIdRaw = cookies.get(IMPERSONATION_COOKIE_ROLE_ID)?.value;
+    const impersonatedRoleId = Number.parseInt(impersonatedRoleIdRaw ?? "", 10);
 
-    if (!isAdminRole(originalRole) || !impersonatedRole) {
+    if (!impersonatedRole) {
         return result;
     }
 
-    result.activeRole = impersonatedRole;
+    const masked = await resolveRoleRecord(
+        Number.isInteger(impersonatedRoleId) ? impersonatedRoleId : null,
+        impersonatedRole
+    );
+
+    if (!masked) {
+        result.codes = [];
+        result.isImpersonating = true;
+        result.isSuperuser = false;
+        result.activeRole = impersonatedRole;
+        result.activeRoleId = null;
+        return result;
+    }
+
+    result.activeRole = masked.name;
+    result.activeRoleId = masked.id;
     result.isImpersonating = true;
-
-    if (impersonatedRole === "ADMIN" || impersonatedRole === "admin") {
-        return result;
-    }
-
-    const parsedRoleId = Number.parseInt(impersonatedRoleId ?? "", 10);
-    if (!Number.isInteger(parsedRoleId) || parsedRoleId <= 0) {
-        result.activePermissions = [];
-        return result;
-    }
-
-    try {
-        result.activePermissions = await loadRolePermissions(parsedRoleId);
-    } catch (error) {
-        console.error("Ошибка при динамическом сборе прав для тестируемой роли:", error);
-        result.activePermissions = [];
-    }
-
+    result.isSuperuser = masked.is_superuser;
+    result.codes = masked.is_superuser ? [] : await loadRolePermissionCodes(masked.id);
     return result;
 }

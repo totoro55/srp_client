@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck } from "lucide-react";
-import { useHasAccess } from "@/hooks/useHasAccess";
+import { usePermission } from "@/hooks/useAccess";
 import { AdminFormDialog, AdminFormValues, FieldConfig } from './_components/AdminFormDialog';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
@@ -53,7 +53,7 @@ export default function AdminRolesPage() {
     const [isDeleting, setIsDeleting] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    const canWrite = useHasAccess("/api/admin/roles", "POST");
+    const canWrite = usePermission("admin.roles:write");
 
     const loadData = useCallback(async (showLoader = false) => {
         if (showLoader) setIsLoading(true);

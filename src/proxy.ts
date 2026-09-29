@@ -1,31 +1,8 @@
 import { getToken } from "next-auth/jwt";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { isAdminRole } from "@/lib/roles";
-import { UserPermission } from "@/types/next-auth";
-
-function isRouteAllowed(
-    currentPath: string,
-    currentMethod: string,
-    allowedPermissions: UserPermission[]
-): boolean {
-    if (!allowedPermissions || allowedPermissions.length === 0) return false;
-
-    const [cleanPath] = currentPath.split("?");
-
-    return allowedPermissions.some((perm) => {
-        const methodMatches =
-            perm.method === "ALL" || perm.method.toUpperCase() === currentMethod.toUpperCase();
-        if (!methodMatches) return false;
-
-        const regexPattern = perm.path
-            .replace(/([.+?^${}()|[\]\\])/g, "\\$1")
-            .replace(/\*/g, ".*");
-
-        const routeRegex = new RegExp(`^${regexPattern}$`, "i");
-        return routeRegex.test(cleanPath);
-    });
-}
+import { hasPermissionCode, matchRoutePolicy } from "@/lib/access";
+import type { PermissionCode } from "@/lib/permissions";
 
 function denyApi(message: string, status: number, code: string): NextResponse {
     return NextResponse.json(
@@ -73,8 +50,10 @@ export async function proxy(req: NextRequest) {
             secret: process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET,
         });
 
-        if (pathname === "/login") {
-            if (token) {
+        const policy = matchRoutePolicy(pathname, method);
+
+        if (policy?.access.kind === "public" || pathname === "/login") {
+            if (pathname === "/login" && token) {
                 return NextResponse.redirect(new URL("/", req.url));
             }
             return NextResponse.next();
@@ -85,43 +64,55 @@ export async function proxy(req: NextRequest) {
         }
 
         const originalRole = token.role as string | undefined;
+        const originalRoleId = token.roleId as number | undefined;
+        const originalIsSuperuser = Boolean(token.isSuperuser) || originalRole === "ADMIN" || originalRole === "admin";
 
-        // Сброс/смена маски должна работать и во время имперсонации: смотрим родную роль JWT.
         if (pathname === "/api/admin/impersonate") {
-            if (!isAdminRole(originalRole)) {
+            if (!originalIsSuperuser) {
                 return denyApi("Доступ ограничен", 403, "FORBIDDEN");
             }
             return NextResponse.next();
         }
 
-        const originalPermissions = (token.permissions as UserPermission[] | undefined) || [];
-
         const { getActiveSessionContext } = await import("@/services/impersonation");
-        const { activeRole, activePermissions } = await getActiveSessionContext(
+        const active = await getActiveSessionContext(
             originalRole,
-            originalPermissions,
+            originalRoleId,
+            originalIsSuperuser,
             req.cookies
         );
 
-        if (!activeRole) {
+        if (!active.activeRole) {
             return denyRequest(req, 403, "Доступ ограничен");
         }
 
-        if (isAdminRole(activeRole)) {
+        if (!policy) {
+            return denyRequest(req, 403, "Доступ ограничен политиками ИБ компании");
+        }
+
+        if (policy.access.kind === "authenticated") {
             return NextResponse.next();
         }
 
-        const hasAccess = isRouteAllowed(pathname, method, activePermissions);
-
-        if (!hasAccess) {
-            return denyRequest(
-                req,
-                403,
-                "Доступ ограничен политиками ИБ компании"
-            );
+        if (policy.access.kind === "superuser") {
+            if (!originalIsSuperuser) {
+                return denyRequest(req, 403, "Доступ ограничен политиками ИБ компании");
+            }
+            return NextResponse.next();
         }
 
-        return NextResponse.next();
+        if (active.isSuperuser) {
+            return NextResponse.next();
+        }
+
+        if (
+            policy.access.kind === "permission" &&
+            hasPermissionCode(active.codes, policy.access.permission as PermissionCode)
+        ) {
+            return NextResponse.next();
+        }
+
+        return denyRequest(req, 403, "Доступ ограничен политиками ИБ компании");
     } catch (error) {
         console.error("Критическая ошибка рантайма в proxy.ts:", error);
         return denyRequest(req, 500, "Внутренняя ошибка проверки доступа");

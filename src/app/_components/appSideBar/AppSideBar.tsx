@@ -3,13 +3,11 @@
 
 import { useMemo } from 'react';
 import { usePathname } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
 import { APP_NAVIGATION_MAP, NavigationGroup } from '@/lib/routes-config';
 import { SidebarUserMenu } from './SidebarUserMenu';
 import { SidebarNavItem } from './SidebarNavItem';
-import { useImpersonationMask } from "@/hooks/useImpersonationMask";
-import { isAdminRole } from "@/lib/roles";
+import { useAccess } from "@/hooks/useAccess";
 import {
     Sidebar,
     SidebarContent,
@@ -19,58 +17,22 @@ import {
     SidebarFooter
 } from "@/components/ui/sidebar";
 
-function isLinkVisible(href: string, userPermissions: { path: string; method: string }[]): boolean {
-    return userPermissions.some((perm) => {
-        if (perm.method !== 'ALL' && perm.method.toUpperCase() !== 'GET') return false;
-
-        const regexPattern = perm.path
-            .replace(/([.+?^\${}()|[\]\\])/g, '\\$1')
-            .replace(/\*/g, '.*');
-
-        const routeRegex = new RegExp(`^${regexPattern}$`, 'i');
-        return routeRegex.test(href) || routeRegex.test(href + '/');
-    });
-}
-
 export function AppSideBar() {
     const pathname = usePathname();
-    const { data: session } = useSession();
     const { open } = useSidebar();
-
-    const originalRole = session?.user?.role;
-    const { impersonatedRole, permissions: maskPermissions } = useImpersonationMask();
-
-    const activeRole = useMemo(() => {
-        if (isAdminRole(originalRole) && impersonatedRole) {
-            return impersonatedRole;
-        }
-        return originalRole;
-    }, [originalRole, impersonatedRole]);
+    const access = useAccess();
 
     const dynamicNavigation = useMemo((): NavigationGroup[] => {
-        if (!activeRole) return [];
-
-        if (isAdminRole(activeRole)) return APP_NAVIGATION_MAP;
-
-        const permissions =
-            isAdminRole(originalRole) && impersonatedRole
-                ? maskPermissions
-                : session?.user?.permissions || [];
-
-        // Фильтруем карту маршрутов на основе вычисленного массива прав permissions
         return APP_NAVIGATION_MAP.map((group) => {
-            const visibleItems = group.items.filter((item) =>
-                isLinkVisible(item.href, permissions)
-            );
-
+            const visibleItems = group.items.filter((item) => access.has(item.permission));
             return {
                 id: group.id,
                 label: group.label,
                 icon: group.icon,
                 items: visibleItems,
             };
-        }).filter(group => group.items.length > 0);
-    }, [activeRole, originalRole, impersonatedRole, maskPermissions, session?.user?.permissions]);
+        }).filter((group) => group.items.length > 0);
+    }, [access]);
 
     return (
         <Sidebar variant="sidebar" collapsible="icon">

@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import { db } from '@/services/db';
 import { createErrorResponse } from '@/lib/api-error';
 import { ApiResponse } from '@/types/api';
-import { adminAuthErrorResponse, requireAdmin } from "@/lib/require-admin";
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 
 export async function GET(): Promise<NextResponse<ApiResponse<string[]>>> {
     try {
-        await requireAdmin();
+        await requirePermission("admin.roles:read");
         // Выполняем быстрый запрос к представлению в схеме public
         const positions = await db.query<{ position_name: string }>(
             'SELECT position_name FROM unique_positions WHERE position_name IS NOT NULL ORDER BY position_name ASC'

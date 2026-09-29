@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { db } from "@/services/db";
-import { adminAuthErrorResponse, requireAdmin } from "@/lib/require-admin";
+import {
+    adminAuthErrorResponse,
+    getActiveAccess,
+    requireOriginalSuperuser,
+} from "@/lib/require-admin";
 import { createErrorResponse } from "@/lib/api-error";
 import {
-    IMPERSONATION_COOKIE_ROLE,
-    IMPERSONATION_COOKIE_ROLE_ID,
     clearImpersonationCookies,
-    loadRolePermissions,
     setImpersonationCookies,
 } from "@/services/impersonation";
+
 import { ApiResponse, ImpersonationStatus } from "@/types/api";
 
 interface ImpersonatePostBody {
@@ -27,25 +28,14 @@ function parsePositiveInt(value: unknown): number | null {
 
 export async function GET(): Promise<NextResponse<ApiResponse<ImpersonationStatus>>> {
     try {
-        await requireAdmin();
-
-        const jar = await cookies();
-        const impersonatedRole = jar.get(IMPERSONATION_COOKIE_ROLE)?.value ?? null;
-        const roleIdRaw = jar.get(IMPERSONATION_COOKIE_ROLE_ID)?.value ?? null;
-        const impersonatedRoleId = parsePositiveInt(roleIdRaw);
-
-        let permissions: ImpersonationStatus["permissions"] = [];
-
-        if (impersonatedRole && impersonatedRole !== "ADMIN" && impersonatedRole !== "admin" && impersonatedRoleId) {
-            permissions = await loadRolePermissions(impersonatedRoleId);
-        }
-
+        await requireOriginalSuperuser();
+        const active = await getActiveAccess();
         return NextResponse.json({
             success: true,
             data: {
-                impersonatedRole,
-                impersonatedRoleId,
-                permissions,
+                impersonatedRole: active.isImpersonating ? active.activeRole : null,
+                impersonatedRoleId: active.isImpersonating ? active.activeRoleId : null,
+                codes: active.codes,
             },
         });
     } catch (error) {
@@ -57,7 +47,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<ImpersonationStatu
 
 export async function POST(request: Request) {
     try {
-        await requireAdmin();
+        await requireOriginalSuperuser();
 
         const body = (await request.json()) as ImpersonatePostBody;
         const roleName = typeof body.roleName === "string" ? body.roleName.trim() : "";
@@ -74,16 +64,17 @@ export async function POST(request: Request) {
             return createErrorResponse("BAD_REQUEST", "Некорректный идентификатор роли", 400);
         }
 
-        const roles = await db.query<{ id: number; name: string }>(
-            "SELECT id, name FROM roles WHERE id = $1",
-            [roleId]
-        );
-
-        if (roles.length === 0 || roles[0].name !== roleName) {
+        const role = await db.getRoleById(roleId);
+        if (!role || role.name !== roleName) {
             return createErrorResponse("BAD_REQUEST", "Роль не найдена", 400);
         }
 
-        setImpersonationCookies(response, roles[0].name, roles[0].id);
+        if (role.is_superuser) {
+            clearImpersonationCookies(response);
+            return response;
+        }
+
+        setImpersonationCookies(response, role.name, role.id);
         return response;
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);

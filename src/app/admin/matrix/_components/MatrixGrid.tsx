@@ -9,7 +9,7 @@ import { MatrixToolbar } from './MatrixToolbar';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
 
 interface Role { id: number; name: string; description?: string; }
-interface Permission { id: number; route_path: string; method: string; description?: string; }
+interface Permission { id: number; code: string; title: string; description?: string; }
 interface Relation { role_id: number; permission_id: number; }
 
 interface MatrixGridProps {
@@ -17,10 +17,11 @@ interface MatrixGridProps {
     permissions: Permission[];
     relations: Relation[];
     isLoading?: boolean;
+    canWrite?: boolean;
     onTogglePermission: (roleId: number, permissionId: number, checked: boolean) => Promise<void>;
 }
 
-export function MatrixGrid({ roles, permissions, relations, isLoading = false, onTogglePermission }: MatrixGridProps) {
+export function MatrixGrid({ roles, permissions, relations, isLoading = false, canWrite = false, onTogglePermission }: MatrixGridProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
     const [loadingKeys, setLoadingKeys] = useState<string[]>([]);
@@ -28,10 +29,10 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
     // 1. Фильтрация путей по поисковому запросу
     const filteredPermissions = useMemo(() => {
         return permissions.filter(p => {
-            const pathMatches = p.route_path.toLowerCase().includes(searchQuery.toLowerCase());
+            const codeMatches = p.code.toLowerCase().includes(searchQuery.toLowerCase());
+            const titleMatches = p.title.toLowerCase().includes(searchQuery.toLowerCase());
             const descMatches = p.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
-            const methodMatches = p.method.toLowerCase().includes(searchQuery.toLowerCase());
-            return pathMatches || descMatches || methodMatches;
+            return codeMatches || titleMatches || descMatches;
         });
     }, [permissions, searchQuery]);
 
@@ -76,7 +77,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
                 <Table containerClassName="h-full min-h-0 rounded-md border" className="w-full min-w-[640px]">
                     <TableHeader>
                         <TableRow className="bg-muted/30">
-                            <TableHead className="w-[320px] min-w-[280px]">Защищаемый роут / Метод</TableHead>
+                            <TableHead className="w-[320px] min-w-[280px]">Код доступа</TableHead>
                             {isLoading
                                 ? Array.from({ length: 3 }, (_, index) => (
                                     <TableHead key={index} className="min-w-[120px] text-center">
@@ -96,7 +97,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
                         ) : filteredPermissions.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={filteredRoles.length + 1} className="py-10 text-center text-xs text-muted-foreground">
-                                    Роуты не найдены по заданным фильтрам.
+                                    Роли и права не найдены по заданным фильтрам.
                                 </TableCell>
                             </TableRow>
                         ) : (
@@ -105,8 +106,8 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
                                         <TableCell className="align-middle py-3">
                                             <div className="flex flex-col gap-1 min-w-0">
                                                 <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="inline-flex shrink-0 items-center rounded-md bg-secondary px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ring-muted">{perm.method}</span>
-                                                    <span className="font-mono text-xs font-semibold text-foreground truncate" title={perm.route_path}>{perm.route_path}</span>
+                                                    <span className="font-mono text-xs font-semibold text-foreground truncate" title={perm.code}>{perm.code}</span>
+                                                    <span className="truncate text-xs">{perm.title}</span>
                                                 </div>
                                                 {perm.description && <span className="text-[11px] text-muted-foreground truncate" title={perm.description}>{perm.description}</span>}
                                             </div>
@@ -118,7 +119,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
                                                     <div className="flex items-center justify-center">
                                                         <Checkbox
                                                             checked={isChecked(role.id, perm.id)}
-                                                            disabled={loadingKeys.includes(key)}
+                                                            disabled={!canWrite || loadingKeys.includes(key)}
                                                             onCheckedChange={(checked) => handleCheckboxChange(role.id, perm.id, !!checked)}
                                                             className="h-4 w-4 transition-transform data-[state=checked]:scale-105"
                                                         />

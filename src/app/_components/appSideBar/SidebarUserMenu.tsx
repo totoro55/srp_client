@@ -26,8 +26,8 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
-import { isAdminRole } from "@/lib/roles";
-import { useImpersonationMask } from "@/hooks/useImpersonationMask";
+import { isSuperuser } from "@/lib/roles";
+import { useAccess } from "@/hooks/useAccess";
 
 interface Role {
     id: number;
@@ -47,7 +47,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
 
     // Стейты для логики имперсонации
     const [roles, setRoles] = useState<Role[]>([]);
-    const { impersonatedRole } = useImpersonationMask();
+    const { impersonatedRole, originalIsSuperuser } = useAccess();
     const currentMask = impersonatedRole ?? 'RESET';
 
     useEffect(() => {
@@ -56,7 +56,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
         });
 
         // 🔥 ИСПРАВЛЕНИЕ: В эффекте оставляем ТОЛЬКО асинхронный fetch ролей
-        if (isAdminRole(session?.user?.role)) {
+        if (isSuperuser(session?.user?.isSuperuser, session?.user?.role)) {
             fetch('/api/admin/matrix')
                 .then(res => res.json())
                 .then(json => {
@@ -69,7 +69,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
     }, [session]);
 
     const isAuthenticated = status === 'authenticated' && session?.user;
-    const isOriginalAdmin = isAdminRole(session?.user?.role);
+    const isOriginalAdmin = originalIsSuperuser || isSuperuser(session?.user?.isSuperuser, session?.user?.role);
     const isCurrentlyImpersonating = currentMask !== 'RESET';
 
     // Обработчик вызова смены тестируемой роли
