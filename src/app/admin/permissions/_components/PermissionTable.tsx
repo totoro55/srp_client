@@ -8,6 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPermissionDialog } from './dialogs/EditPermissionDialog';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {Trash2, Pencil, Search, Filter} from "lucide-react";
 import {useHasAccess} from "@/hooks/useHasAccess";
 import {cn} from "@/lib/utils";
@@ -27,8 +37,8 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
     const canUpdate = useHasAccess("/api/admin/permissions", "PUT");
     const canDelete = useHasAccess("/api/admin/permissions", "DELETE");
 
-    const handleUpdate = async (method: string, routePath: string, description: string) => {
-        if (!activePermission) return;
+    const handleUpdate = async (method: string, routePath: string, description: string): Promise<boolean> => {
+        if (!activePermission) return false;
         try {
             const res = await fetch('/api/admin/permissions', {
                 method: 'PUT',
@@ -40,9 +50,14 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                     description: description
                 })
             });
-            if (res.ok) onRefresh();
-        } catch (err) {
+            if (res.ok) {
+                onRefresh();
+                return true;
+            }
+            return false;
+        } catch {
             console.error('Ошибка сети при обновлении');
+            return false;
         }
     };
 
@@ -50,7 +65,10 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
         if (!activePermission) return;
         try {
             const res = await fetch(`/api/admin/permissions?id=${activePermission.id}`, { method: 'DELETE' });
-            if (res.ok) onRefresh();
+            if (res.ok) {
+                onRefresh();
+                setDialogType(null);
+            }
         } catch {
             console.error('Ошибка сети при удалении');
         }
@@ -146,7 +164,6 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                                                         <Pencil className="h-4 w-4" />
                                                     </Button>
 
-                                                    {/* ИСПРАВЛЕНИЕ: Избавляемся от вложенных кнопок */}
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -168,13 +185,31 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                 </CardContent>
             </Card>
 
-            {/* Изолированный диалог изменения */}
             <EditPermissionDialog
                 isOpen={dialogType === 'edit'}
                 permission={activePermission}
                 onClose={() => setDialogType(null)}
                 onSave={handleUpdate}
             />
+
+            <AlertDialog open={dialogType === 'delete'} onOpenChange={(open) => { if (!open) setDialogType(null); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Удалить защищаемый роут?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {activePermission
+                                ? `${activePermission.method} ${activePermission.route_path} будет удалён из каталога прав.`
+                                : "Запись будет удалена из каталога прав."}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Отмена</AlertDialogCancel>
+                        <AlertDialogAction variant="destructive" onClick={() => void handleDelete()}>
+                            Удалить
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 }

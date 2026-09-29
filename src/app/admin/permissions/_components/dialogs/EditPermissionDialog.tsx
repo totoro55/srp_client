@@ -12,7 +12,7 @@ interface EditPermissionDialogProps {
     isOpen: boolean;
     permission: Permission | null;
     onClose: () => void;
-    onSave: (method: string, routePath: string, description: string) => Promise<void>;
+    onSave: (method: string, routePath: string, description: string) => Promise<boolean>;
 }
 
 export function EditPermissionDialog({ isOpen, permission, onClose, onSave }: EditPermissionDialogProps) {
@@ -38,9 +38,11 @@ export function EditPermissionDialog({ isOpen, permission, onClose, onSave }: Ed
         if (!routePath) return;
 
         setLoading(true);
-        await onSave(method, routePath, description);
+        const saved = await onSave(method, routePath, description);
         setLoading(false);
-        onClose();
+        if (saved) {
+            onClose();
+        }
     };
 
     const formKey = permission ? `edit-perm-${permission.id}` : 'edit-perm-empty';

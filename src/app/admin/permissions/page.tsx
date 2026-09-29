@@ -59,7 +59,7 @@ export default function AdminPermissionsPage() {
         };
     }, []);
 
-    const handleFormSubmit = async (payload: { route_path: string; method: string; description: string }): Promise<boolean> => {
+    const handleFormSubmit = async (payload: { route_path: string; method: string; description: string }): Promise<'created' | 'duplicate' | 'error'> => {
         setGlobalError(null);
         try {
             const response = await fetch('/api/admin/permissions', {
@@ -72,13 +72,16 @@ export default function AdminPermissionsPage() {
 
             if (json.success) {
                 refreshPermissions();
-                return true;
+                return 'created';
+            }
+            if (json.error.message.includes('уже существует')) {
+                return 'duplicate';
             }
             setGlobalError(json.error.message);
-            return false;
+            return 'error';
         } catch {
             setGlobalError('Не удалось отправить форму. Проверьте подключение.');
-            return false;
+            return 'error';
         }
     };
 

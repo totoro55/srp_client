@@ -64,3 +64,9 @@ export interface ImpersonationStatus {
     impersonatedRoleId: number | null;
     permissions: Array<{ path: string; method: string }>;
 }
+
+export interface DiscoveredAppRoutes {
+    pages: string[];
+    api: string[];
+    source: "manifest" | "filesystem";
+}

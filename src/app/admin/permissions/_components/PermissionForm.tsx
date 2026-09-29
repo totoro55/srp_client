@@ -11,14 +11,21 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Check, ChevronsUpDown, Folder, Terminal, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ApiResponse, DiscoveredAppRoutes } from "@/types/api";
 
 interface PermissionFormProps {
-    onSubmit: (data: { route_path: string; method: string; description: string }) => Promise<boolean>;
+    onSubmit: (data: { route_path: string; method: string; description: string }) => Promise<'created' | 'duplicate' | 'error'>;
 }
 
-interface StructuredRoutes {
-    pages: string[];
-    api: string[];
+function pathsToRegister(basePath: string, isWildcard: boolean): string[] {
+    const normalized = basePath.length > 1 && basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+    if (!isWildcard) {
+        return [normalized];
+    }
+    if (normalized === "/") {
+        return ["/*"];
+    }
+    return [normalized, `${normalized}/*`];
 }
 
 export function PermissionForm({ onSubmit }: PermissionFormProps) {
@@ -29,41 +36,57 @@ export function PermissionForm({ onSubmit }: PermissionFormProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-    const [routes, setRoutes] = useState<StructuredRoutes>({ pages: [], api: [] });
+    const [routes, setRoutes] = useState<Pick<DiscoveredAppRoutes, "pages" | "api">>({ pages: [], api: [] });
     const [openCombo, setOpenCombo] = useState(false);
     const [activeTab, setActiveTab] = useState<'pages' | 'api'>('pages');
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     useEffect(() => {
         if (isDialogOpen) {
             fetch('/api/admin/available-routes')
-                .then(res => res.json())
+                .then(res => res.json() as Promise<ApiResponse<DiscoveredAppRoutes>>)
                 .then(json => {
-                    if (json.success) setRoutes(json.data);
+                    if (json.success) {
+                        setRoutes({ pages: json.data.pages, api: json.data.api });
+                    }
                 })
                 .catch(() => console.error('Ошибка загрузки локальных роутов'));
         }
     }, [isDialogOpen]);
 
-    const getFullRoutePath = () => {
-        if (!basePath) return '';
-        if (isWildcard) return `${basePath}/*`;
-        return basePath;
-    };
-
     const handleSubmit = async (e: SyntheticEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const finalPath = getFullRoutePath();
-        if (!finalPath) return;
+        if (!basePath) return;
 
         setIsSubmitting(true);
-        const success = await onSubmit({ route_path: finalPath, method, description });
+        setSubmitError(null);
+
+        const paths = pathsToRegister(basePath, isWildcard);
+        let createdCount = 0;
+        let failed = false;
+        for (const routePath of paths) {
+            const result = await onSubmit({ route_path: routePath, method, description });
+            if (result === 'created' || result === 'duplicate') {
+                if (result === 'created') createdCount += 1;
+                continue;
+            }
+            failed = true;
+            break;
+        }
+
         setIsSubmitting(false);
 
-        if (success) {
+        if (!failed && (createdCount > 0 || paths.length > 0)) {
+            if (createdCount === 0 && paths.length > 0) {
+                setSubmitError('Эти пути уже зарегистрированы.');
+                return;
+            }
             setBasePath('');
             setDescription('');
             setIsWildcard(false);
             setIsDialogOpen(false);
+        } else {
+            setSubmitError('Не все пути удалось сохранить. Проверьте, что запись ещё не существует.');
         }
     };
 
@@ -137,7 +160,7 @@ export function PermissionForm({ onSubmit }: PermissionFormProps) {
                                                 <CommandItem
                                                     key={route}
                                                     value={route}
-                                                    onSelect={(v) => { setBasePath(v); setOpenCombo(false); }}
+                                                    onSelect={() => { setBasePath(route); setOpenCombo(false); }}
                                                     className="font-mono text-[11px] flex items-center gap-2"
                                                 >
                                                     <Check className={cn("h-3 w-3 shrink-0", basePath === route ? "opacity-100" : "opacity-0")} />
@@ -158,7 +181,7 @@ export function PermissionForm({ onSubmit }: PermissionFormProps) {
                             <div className="space-y-0.5 max-w-[75%]">
                                 <label className="text-xs font-semibold">Применить ко всем подпутям</label>
                                 <div className="text-[11px] text-muted-foreground font-mono truncate">
-                                    Итог: <span className="text-primary font-bold">{getFullRoutePath()}</span>
+                                    Итог: <span className="text-primary font-bold">{pathsToRegister(basePath, isWildcard).join(", ")}</span>
                                 </div>
                             </div>
                             <Switch checked={isWildcard} onCheckedChange={setIsWildcard} />
@@ -175,6 +198,8 @@ export function PermissionForm({ onSubmit }: PermissionFormProps) {
                             className="h-20 resize-none"
                         />
                     </div>
+
+                    {submitError && <p className="text-xs text-destructive">{submitError}</p>}
 
                     {/* КНОПКИ ОТПРАВКИ */}
                     <div className="flex justify-end gap-3 border-t pt-4 mt-2">
