@@ -138,11 +138,6 @@ export default function AdminRolesPage() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-            <div className="shrink-0">
-                <h1 className="text-2xl font-bold tracking-tight">Управление доступами LDAP</h1>
-                <p className="text-muted-foreground text-xs">Конфигурация ролей, соответствий должностей AD и исключений.</p>
-            </div>
-
             <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <TabsList className="grid h-10 w-full max-w-[600px] shrink-0 grid-cols-3 rounded-md border bg-muted/50 p-1">
                     <TabsTrigger value="roles" className="text-xs gap-1.5"><Users className="w-3.5 h-3.5"/> Роли</TabsTrigger>

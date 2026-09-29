@@ -63,14 +63,6 @@ export default function AdminPermissionsPage() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between border-b pb-4">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Управление роутами безопасности</h1>
-                    <p className="text-muted-foreground text-sm">Список защищаемых эндпоинтов и интерфейсных страниц системы.</p>
-                </div>
-                {canCreate && <PermissionForm onSubmit={handleFormSubmit} />}
-            </div>
-
             <ConfirmDialog
                 open={globalError !== null}
                 title="Произошла ошибка"
@@ -87,7 +79,12 @@ export default function AdminPermissionsPage() {
             />
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <PermissionTable permissions={permissions} isLoading={isLoading} onRefresh={refreshPermissions} />
+                <PermissionTable
+                    permissions={permissions}
+                    isLoading={isLoading}
+                    onRefresh={refreshPermissions}
+                    headerAction={canCreate ? <PermissionForm onSubmit={handleFormSubmit} /> : undefined}
+                />
             </div>
         </div>
     );

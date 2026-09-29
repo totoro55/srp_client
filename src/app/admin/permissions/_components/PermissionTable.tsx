@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, ReactNode } from 'react';
 import { Permission } from '@/types/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -18,9 +18,10 @@ interface PermissionTableProps {
     permissions: Permission[];
     isLoading?: boolean;
     onRefresh: () => void;
+    headerAction?: ReactNode;
 }
 
-export function PermissionTable({ permissions, isLoading = false, onRefresh }: PermissionTableProps) {
+export function PermissionTable({ permissions, isLoading = false, onRefresh, headerAction }: PermissionTableProps) {
     const [activePermission, setActivePermission] = useState<Permission | null>(null);
     const [dialogType, setDialogType] = useState<'edit' | 'delete' | null>(null);
 
@@ -92,7 +93,7 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh }: P
                         </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-muted/50">
+                    <div className="flex flex-col gap-3 border-t border-muted/50 pt-2 sm:flex-row sm:items-center">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
@@ -102,6 +103,7 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh }: P
                                 className="pl-9"
                             />
                         </div>
+                        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
                         <div className="w-full sm:w-[200px]">
                             <Select value={methodFilter} onValueChange={(val) => setMethodFilter(val ?? 'ALL_METHODS')}>
                                 <SelectTrigger className="w-full">
@@ -119,6 +121,8 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh }: P
                                     <SelectItem value="ALL">ALL (Любой)</SelectItem>
                                 </SelectContent>
                             </Select>
+                        </div>
+                        {headerAction}
                         </div>
                     </div>
                 </CardHeader>

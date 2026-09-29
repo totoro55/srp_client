@@ -1,22 +1,30 @@
 'use client'
-import {SidebarTrigger} from "@/components/ui/sidebar";
-import {Separator} from "@/components/ui/separator";
-import {usePathname} from "next/navigation";
-import {APP_ROUTES} from "@/app/_components/appRoutes";
+
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
+import { usePathname } from "next/navigation";
+import { getPageHeading } from "@/lib/routes-config";
 
 export default function Header() {
-
-    const pathname = usePathname()
-    const title = APP_ROUTES.find(r=>r.href===pathname)?.title;
+    const pathname = usePathname();
+    const heading = getPageHeading(pathname);
 
     return (
-        <header className='w-full xl:p-3 p-1.5 border-b
-         flex flex-row items-center justify-start'>
+        <header className="flex w-full shrink-0 flex-row items-center justify-start border-b p-1.5 xl:p-3">
             <SidebarTrigger />
-            {title && <>
-                <Separator orientation="vertical" className="xl:mx-3 mx-1.5" />
-                <h1 className="font-bold xl:text-lg text-m">{title}</h1>
-            </>}
+            {heading && (
+                <>
+                    <Separator orientation="vertical" className="mx-1.5 h-6 xl:mx-3" />
+                    <div className="min-w-0">
+                        <h1 className="truncate text-base font-bold xl:text-lg">{heading.title}</h1>
+                        {heading.description && (
+                            <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                                {heading.description}
+                            </p>
+                        )}
+                    </div>
+                </>
+            )}
         </header>
-    )
+    );
 }

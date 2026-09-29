@@ -117,13 +117,6 @@ export default function AdminMatrixPage() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-            <div className="shrink-0">
-                <h1 className="text-3xl font-bold tracking-tight">Матрица прав безопасности</h1>
-                <p className="text-muted-foreground font-normal text-sm">
-                    Динамическое разграничение ролевых политик (RBAC) [INDEX]. Настройки применяются бэкендом в реальном времени.
-                </p>
-            </div>
-
             <ConfirmDialog
                 open={error !== null}
                 title="Ошибка конфигурации ИБ"
