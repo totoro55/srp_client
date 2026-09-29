@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { isAdminRole } from "@/lib/roles";
 import { ApiResponse, ImpersonationStatus } from "@/types/api";
 
@@ -11,36 +11,70 @@ const EMPTY_MASK: ImpersonationStatus = {
     permissions: [],
 };
 
+type Listener = () => void;
+
+let maskSnapshot: ImpersonationStatus = EMPTY_MASK;
+let loadPromise: Promise<void> | null = null;
+const listeners = new Set<Listener>();
+
+function emit(): void {
+    listeners.forEach((listener) => {
+        listener();
+    });
+}
+
+function subscribe(listener: Listener): () => void {
+    listeners.add(listener);
+    return () => {
+        listeners.delete(listener);
+    };
+}
+
+function getSnapshot(): ImpersonationStatus {
+    return maskSnapshot;
+}
+
+function getServerSnapshot(): ImpersonationStatus {
+    return EMPTY_MASK;
+}
+
+function applyMask(next: ImpersonationStatus): void {
+    maskSnapshot = next;
+    emit();
+}
+
+function loadImpersonationStatus(): void {
+    if (loadPromise) {
+        return;
+    }
+
+    loadPromise = fetch("/api/admin/impersonate")
+        .then(async (response) => {
+            const json = (await response.json()) as ApiResponse<ImpersonationStatus>;
+            if (!json.success) {
+                applyMask(EMPTY_MASK);
+                return;
+            }
+
+            applyMask({
+                impersonatedRole: json.data.impersonatedRole,
+                impersonatedRoleId: json.data.impersonatedRoleId,
+                permissions: json.data.permissions ?? [],
+            });
+        })
+        .catch(() => {
+            applyMask(EMPTY_MASK);
+        });
+}
+
 export function useImpersonationMask(): ImpersonationStatus {
     const { data: session } = useSession();
-    const [mask, setMask] = useState<ImpersonationStatus>(EMPTY_MASK);
+    const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-    useEffect(() => {
-        if (!isAdminRole(session?.user?.role)) {
-            setMask(EMPTY_MASK);
-            return;
-        }
+    if (!isAdminRole(session?.user?.role)) {
+        return EMPTY_MASK;
+    }
 
-        let cancelled = false;
-
-        fetch("/api/admin/impersonate")
-            .then((res) => res.json())
-            .then((json: ApiResponse<ImpersonationStatus>) => {
-                if (cancelled || !json.success) return;
-                setMask({
-                    impersonatedRole: json.data.impersonatedRole,
-                    impersonatedRoleId: json.data.impersonatedRoleId,
-                    permissions: json.data.permissions ?? [],
-                });
-            })
-            .catch(() => {
-                if (!cancelled) setMask(EMPTY_MASK);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [session?.user?.role]);
-
-    return mask;
+    loadImpersonationStatus();
+    return snapshot;
 }
