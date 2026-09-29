@@ -49,3 +49,18 @@ export interface MatrixDataResponse {
     roles: Role[];
     matrix: RolePermissionMatrixRow[];
 }
+
+export interface MatrixToggleRequest {
+    roleId?: number;
+    permissionId?: number;
+    checked?: boolean;
+    role_id?: number;
+    permission_id?: number;
+    is_checked?: boolean;
+}
+
+export interface ImpersonationStatus {
+    impersonatedRole: string | null;
+    impersonatedRoleId: number | null;
+    permissions: Array<{ path: string; method: string }>;
+}

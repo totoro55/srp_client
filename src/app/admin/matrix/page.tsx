@@ -23,6 +23,11 @@ interface Relation {
     permission_id: number;
 }
 
+interface MatrixApiError {
+    code?: string;
+    message?: string;
+}
+
 interface MatrixApiResponse {
     success: boolean;
     data?: {
@@ -30,7 +35,13 @@ interface MatrixApiResponse {
         permissions: Permission[];
         relations: Relation[];
     };
-    error?: string;
+    error?: string | MatrixApiError;
+}
+
+function matrixErrorMessage(error: MatrixApiResponse["error"], fallback: string): string {
+    if (typeof error === "string" && error.length > 0) return error;
+    if (error && typeof error === "object" && error.message) return error.message;
+    return fallback;
 }
 
 export default function AdminMatrixPage() {
@@ -56,7 +67,7 @@ export default function AdminMatrixPage() {
                 setPermissions(json.data.permissions);
                 setRelations(json.data.relations);
             } else {
-                setError(json.error || 'Не удалось загрузить конфигурацию матрицы доступов');
+                setError(matrixErrorMessage(json.error, "Не удалось загрузить конфигурацию матрицы доступов"));
             }
         } catch (err) {
             setError('Ошибка сети при обращении к серверу ИБ');
@@ -95,7 +106,7 @@ export default function AdminMatrixPage() {
 
             // Если сервер вернул ошибку, откатываем данные назад и запрашиваем актуальное состояние
             if (!json.success) {
-                setError(json.error || 'СУБД отклонила изменение прав');
+                setError(matrixErrorMessage(json.error, "СУБД отклонила изменение прав"));
                 await fetchMatrixData();
             }
         } catch (err) {

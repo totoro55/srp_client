@@ -3,25 +3,29 @@ import { NextResponse } from 'next/server';
 import { db } from '@/services/db';
 import { ApiResponse, Permission } from '@/types/api';
 import {createErrorResponse} from "@/lib/api-error";
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/require-admin";
 
 export async function GET(): Promise<NextResponse<ApiResponse<Permission[]>>> {
     try {
+        await requireAdmin();
         const permissions = await db.query<Permission>(
             'SELECT * FROM permissions ORDER BY id DESC'
         );
         return NextResponse.json({ success: true, data: permissions });
     } catch (error) {
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
         return createErrorResponse(
             'DATABASE_ERROR',
             'Не удалось загрузить разрешения из базы данных',
-            500,
-            error instanceof Error ? error.message : error
+            500
         );
     }
 }
 
 export async function POST(request: Request): Promise<NextResponse<ApiResponse<{ id: number }>>> {
     try {
+        await requireAdmin();
         const body = await request.json();
         const { route_path, method, description } = body as Partial<Omit<Permission, 'id' | 'created_at'>>;
 
@@ -51,17 +55,19 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
 
         return NextResponse.json({ success: true, data: { id: result[0].id } });
     } catch (error) {
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
         return createErrorResponse(
             'INTERNAL_SERVER_ERROR',
             'Внутренняя ошибка сервера при создании разрешения',
-            500,
-            error instanceof Error ? error.message : error
+            500
         );
     }
 }
 
 export async function DELETE(request: Request) {
     try {
+        await requireAdmin();
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
 
@@ -70,12 +76,15 @@ export async function DELETE(request: Request) {
         await db.query('DELETE FROM permissions WHERE id = \$1', [parseInt(id, 10)]);
         return NextResponse.json({ success: true });
     } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось удалить роут', 500, error);
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
+        return createErrorResponse('DATABASE_ERROR', 'Не удалось удалить роут', 500);
     }
 }
 
 export async function PUT(request: Request) {
     try {
+        await requireAdmin();
         const body = await request.json();
         const { id, route_path, method, description } = body;
 
@@ -92,6 +101,8 @@ export async function PUT(request: Request) {
 
         return NextResponse.json({ success: true });
     } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось обновить роут', 500, error);
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
+        return createErrorResponse('DATABASE_ERROR', 'Не удалось обновить роут', 500);
     }
 }

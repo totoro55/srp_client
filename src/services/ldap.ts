@@ -1,8 +1,21 @@
 // src/services/ldap.ts
 import { Client } from "ldapts";
 import { User } from "next-auth";
+import { escapeLdapFilterValue } from "@/lib/ldap-filter";
+
+const MAX_SAM_ACCOUNT_NAME_LENGTH = 64;
 
 export async function authenticateLDAPUser(username: string, password: string): Promise<User | null> {
+    const normalizedUsername = username.trim();
+
+    if (!normalizedUsername || normalizedUsername.length > MAX_SAM_ACCOUNT_NAME_LENGTH) {
+        return null;
+    }
+
+    if (!password) {
+        return null;
+    }
+
     const client = new Client({ url: process.env.LDAP_URL! });
 
     try {
@@ -11,7 +24,7 @@ export async function authenticateLDAPUser(username: string, password: string): 
 
         const { searchEntries } = await client.search(process.env.LDAP_BASE_DN!, {
             scope: "sub",
-            filter: `(sAMAccountName=${username})`,
+            filter: `(sAMAccountName=${escapeLdapFilterValue(normalizedUsername)})`,
             attributes: ["dn", "displayName", "mail", "sAMAccountName", "title", "department"],
         });
 

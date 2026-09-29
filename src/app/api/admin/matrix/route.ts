@@ -1,17 +1,31 @@
-// src/app/api/admin/matrix/route.ts
-import { NextResponse } from 'next/server';
-import { db } from '@/services/db';
+import { NextResponse } from "next/server";
+import { db } from "@/services/db";
+import { ApiResponse, MatrixToggleRequest } from "@/types/api";
+import { createErrorResponse } from "@/lib/api-error";
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/require-admin";
 
-import { ApiResponse} from '@/types/api';
-import {createErrorResponse} from "@/lib/api-error";
+function parsePositiveInt(value: unknown): number | null {
+    const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    if (!Number.isInteger(numeric) || numeric <= 0) {
+        return null;
+    }
+    return numeric;
+}
+
+function parseCheckedFlag(body: MatrixToggleRequest): boolean | null {
+    if (typeof body.checked === "boolean") return body.checked;
+    if (typeof body.is_checked === "boolean") return body.is_checked;
+    return null;
+}
 
 export async function GET() {
     try {
-        // Исключаем ADMIN из выборки для матрицы прав
+        await requireAdmin();
+
         const roles = await db.query(`
-      SELECT id, name, description 
-      FROM roles 
-      WHERE name != 'ADMIN' 
+      SELECT id, name, description
+      FROM roles
+      WHERE name != 'ADMIN'
       ORDER BY name ASC
     `);
 
@@ -27,40 +41,46 @@ export async function GET() {
 
         return NextResponse.json({
             success: true,
-            data: { roles, permissions, relations }
+            data: { roles, permissions, relations },
         });
     } catch (error) {
-        return NextResponse.json({ success: false, error: 'Ошибка сервера' }, { status: 500 });
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
+        return createErrorResponse("DATABASE_ERROR", "Ошибка сервера", 500);
     }
 }
 
-// Изменение состояния чекбокса (Связывание / Разрыв связи)
-export async function POST(request: Request): Promise<NextResponse<ApiResponse<{ updated: boolean }>>> {
+export async function POST(
+    request: Request
+): Promise<NextResponse<ApiResponse<{ updated: boolean }>>> {
     try {
-        const { role_id, permission_id, is_checked } = await request.json() as {
-            role_id: number;
-            permission_id: number;
-            is_checked: boolean;
-        };
+        await requireAdmin();
 
-        if (!role_id || !permission_id) {
-            return createErrorResponse('BAD_REQUEST', 'Отсутствуют обязательные параметры', 400);
+        const body = (await request.json()) as MatrixToggleRequest;
+        const roleId = parsePositiveInt(body.roleId ?? body.role_id);
+        const permissionId = parsePositiveInt(body.permissionId ?? body.permission_id);
+        const isChecked = parseCheckedFlag(body);
+
+        if (!roleId || !permissionId || isChecked === null) {
+            return createErrorResponse("BAD_REQUEST", "Отсутствуют обязательные параметры", 400);
         }
 
-        if (is_checked) {
+        if (isChecked) {
             await db.query(
-                'INSERT INTO role_permissions (role_id, permission_id) VALUES (\$1, \$2) ON CONFLICT DO NOTHING',
-                [role_id, permission_id]
+                "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                [roleId, permissionId]
             );
         } else {
             await db.query(
-                'DELETE FROM role_permissions WHERE role_id = \$1 AND permission_id = \$2',
-                [role_id, permission_id]
+                "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2",
+                [roleId, permissionId]
             );
         }
 
         return NextResponse.json({ success: true, data: { updated: true } });
     } catch (error) {
-        return createErrorResponse('DATABASE_ERROR', 'Не удалось обновить права доступа', 500, error);
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
+        return createErrorResponse("DATABASE_ERROR", "Не удалось обновить права доступа", 500);
     }
 }

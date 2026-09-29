@@ -26,6 +26,8 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
+import { isAdminRole } from "@/lib/roles";
+import { useImpersonationMask } from "@/hooks/useImpersonationMask";
 
 interface Role {
     id: number;
@@ -45,12 +47,8 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
 
     // Стейты для логики имперсонации
     const [roles, setRoles] = useState<Role[]>([]);
-    const [currentMask, setCurrentMask] = useState<string>(() => {
-        if (typeof document === 'undefined') return 'RESET'; // Подстраховка для SSR сервера
-        const cookies = document.cookie.split('; ');
-        const maskCookie = cookies.find(row => row.startsWith('impersonated_role='));
-        return maskCookie ? maskCookie.split('=')[1] : 'RESET';
-    });
+    const { impersonatedRole } = useImpersonationMask();
+    const currentMask = impersonatedRole ?? 'RESET';
 
     useEffect(() => {
         startTransition(() => {
@@ -58,7 +56,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
         });
 
         // 🔥 ИСПРАВЛЕНИЕ: В эффекте оставляем ТОЛЬКО асинхронный fetch ролей
-        if (session?.user?.role === 'ADMIN') {
+        if (isAdminRole(session?.user?.role)) {
             fetch('/api/admin/matrix')
                 .then(res => res.json())
                 .then(json => {
@@ -71,7 +69,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
     }, [session]);
 
     const isAuthenticated = status === 'authenticated' && session?.user;
-    const isOriginalAdmin = session?.user?.role === 'ADMIN';
+    const isOriginalAdmin = isAdminRole(session?.user?.role);
     const isCurrentlyImpersonating = currentMask !== 'RESET';
 
     // Обработчик вызова смены тестируемой роли
@@ -87,8 +85,6 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
             })
         });
 
-        setCurrentMask(roleName);
-        // Жестко обновляем интерфейс, чтобы прокси-слой proxy.ts применил новые ограничения
         window.location.reload();
     };
 

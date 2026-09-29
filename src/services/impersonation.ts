@@ -1,6 +1,11 @@
-// src/services/impersonation.ts
 import { RequestCookies } from "next/dist/compiled/@edge-runtime/cookies";
+import { NextResponse } from "next/server";
+import { isAdminRole } from "@/lib/roles";
 import { UserPermission } from "@/types/next-auth";
+
+export const IMPERSONATION_COOKIE_ROLE = "impersonated_role";
+export const IMPERSONATION_COOKIE_ROLE_ID = "impersonated_role_id";
+export const IMPERSONATION_COOKIE_MAX_AGE = 60 * 60 * 2;
 
 interface ImpersonationResult {
     activeRole: string;
@@ -8,57 +13,87 @@ interface ImpersonationResult {
     isImpersonating: boolean;
 }
 
-/**
- * Сервис проверки и применения режима имперсонации (тестирования ролей)
- * @param originalRole Изначальная роль пользователя из JWT токена
- * @param originalPermissions Изначальный массив прав из JWT токена
- * @param cookies Экземпляр кук текущего HTTP запроса
- */
+export function impersonationCookieOptions(maxAge: number) {
+    return {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax" as const,
+        secure: process.env.NODE_ENV === "production",
+        maxAge,
+    };
+}
+
+export function setImpersonationCookies(
+    response: NextResponse,
+    roleName: string,
+    roleId: number
+): void {
+    const options = impersonationCookieOptions(IMPERSONATION_COOKIE_MAX_AGE);
+    response.cookies.set(IMPERSONATION_COOKIE_ROLE, roleName, options);
+    response.cookies.set(IMPERSONATION_COOKIE_ROLE_ID, String(roleId), options);
+}
+
+export function clearImpersonationCookies(response: NextResponse): void {
+    const options = impersonationCookieOptions(0);
+    response.cookies.set(IMPERSONATION_COOKIE_ROLE, "", options);
+    response.cookies.set(IMPERSONATION_COOKIE_ROLE_ID, "", options);
+}
+
+export async function loadRolePermissions(roleId: number): Promise<UserPermission[]> {
+    const { db } = await import("@/services/db");
+
+    const rolePerms = await db.query<{ path: string; method: string }>(
+        `
+        SELECT p.route_path as path, p.method
+        FROM role_permissions rp
+        JOIN permissions p ON rp.permission_id = p.id
+        WHERE rp.role_id = $1
+        `,
+        [roleId]
+    );
+
+    return rolePerms.map((permission) => ({
+        path: permission.path,
+        method: permission.method,
+    }));
+}
+
 export async function getActiveSessionContext(
     originalRole: string | undefined,
     originalPermissions: UserPermission[],
     cookies: RequestCookies
 ): Promise<ImpersonationResult> {
-
-    // Базовый контекст по умолчанию (совпадает с оригинальным токеном)
     const result: ImpersonationResult = {
         activeRole: originalRole || "",
         activePermissions: originalPermissions,
-        isImpersonating: false
+        isImpersonating: false,
     };
 
-    // Считываем куки подмены роли, установленные через UI шапки
-    const impersonatedRole = cookies.get("impersonated_role")?.value;
-    const impersonatedRoleId = cookies.get("impersonated_role_id")?.value;
+    const impersonatedRole = cookies.get(IMPERSONATION_COOKIE_ROLE)?.value;
+    const impersonatedRoleId = cookies.get(IMPERSONATION_COOKIE_ROLE_ID)?.value;
 
-    // ИБ-ЗАЩИТА: Маску роли разрешено применять СТРОГО только если оригинальный пользователь — ADMIN
-    if (originalRole === 'ADMIN' && impersonatedRole) {
-        result.activeRole = impersonatedRole;
-        result.isImpersonating = true;
+    if (!isAdminRole(originalRole) || !impersonatedRole) {
+        return result;
+    }
 
-        // Если админ тестирует роль, отличную от ADMIN (например, GUEST),
-        // нам нужно вытащить из базы данных её реальные ограничения
-        if (impersonatedRoleId && impersonatedRole !== 'ADMIN') {
-            try {
-                const { db } = await import("@/services/db");
+    result.activeRole = impersonatedRole;
+    result.isImpersonating = true;
 
-                const rolePerms = await db.query<{ path: string; method: string }>(`
-          SELECT p.route_path as path, p.method 
-          FROM role_permissions rp
-          JOIN permissions p ON rp.permission_id = p.id
-          WHERE rp.role_id = $1
-        `, [parseInt(impersonatedRoleId, 10)]);
+    if (impersonatedRole === "ADMIN" || impersonatedRole === "admin") {
+        return result;
+    }
 
-                result.activePermissions = rolePerms.map(p => ({
-                    path: p.path,
-                    method: p.method
-                }));
-            } catch (error) {
-                console.error("Ошибка при динамическом сборе прав для тестируемой роли:", error);
-                // В случае сбоя сбрасываем права в безопасный пустой массив
-                result.activePermissions = [];
-            }
-        }
+    const parsedRoleId = Number.parseInt(impersonatedRoleId ?? "", 10);
+    if (!Number.isInteger(parsedRoleId) || parsedRoleId <= 0) {
+        result.activePermissions = [];
+        return result;
+    }
+
+    try {
+        result.activePermissions = await loadRolePermissions(parsedRoleId);
+    } catch (error) {
+        console.error("Ошибка при динамическом сборе прав для тестируемой роли:", error);
+        result.activePermissions = [];
     }
 
     return result;

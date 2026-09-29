@@ -1,13 +1,15 @@
 // src/components/AppSideBar.tsx
 'use client';
 
-import { useMemo, useState } from 'react'; // Добавили useState
+import { useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
 import { APP_NAVIGATION_MAP, NavigationGroup } from '@/lib/routes-config';
 import { SidebarUserMenu } from './SidebarUserMenu';
 import { SidebarNavItem } from './SidebarNavItem';
+import { useImpersonationMask } from "@/hooks/useImpersonationMask";
+import { isAdminRole } from "@/lib/roles";
 import {
     Sidebar,
     SidebarContent,
@@ -36,44 +38,24 @@ export function AppSideBar() {
     const { open } = useSidebar();
 
     const originalRole = session?.user?.role;
-
-    const [impersonatedRole] = useState<string | null>(() => {
-        if (typeof document === 'undefined') return null;
-        const cookies = document.cookie.split('; ');
-        const maskCookie = cookies.find(row => row.startsWith('impersonated_role='));
-        // maskCookie.split('=')[1] вернет чистую строку, например "GUEST"
-        return maskCookie ? maskCookie.split('=')[1] : null;
-    });
+    const { impersonatedRole, permissions: maskPermissions } = useImpersonationMask();
 
     const activeRole = useMemo(() => {
-        if (originalRole === 'ADMIN' && impersonatedRole) {
+        if (isAdminRole(originalRole) && impersonatedRole) {
             return impersonatedRole;
         }
         return originalRole;
     }, [originalRole, impersonatedRole]);
 
-    // 2. ДИНАМИЧЕСКАЯ ФИЛЬТРАЦИЯ МАРШРУТОВ САЙДБАРА
     const dynamicNavigation = useMemo((): NavigationGroup[] => {
         if (!activeRole) return [];
 
-        // Если активная роль — ADMIN (вы не в режиме теста), показываем абсолютно ВСЁ
-        if (activeRole === 'ADMIN') return APP_NAVIGATION_MAP;
+        if (isAdminRole(activeRole)) return APP_NAVIGATION_MAP;
 
-        // 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ДЛЯ РЕЖИМА ТЕСТИРОВАНИЯ ФРОНТЕНДА:
-        // Если оригинальный админ включил маску (например, GUEST), мы ЗАПРЕЩАЕМ сайдбару
-        // использовать оригинальный админский wildcard '*', иначе меню не скроется.
-        let permissions = session?.user?.permissions || [];
-
-        if (originalRole === 'ADMIN' && impersonatedRole) {
-            if (activeRole === 'GUEST') {
-                // Для теста роли GUEST принудительно оставляем доступ только к главной странице
-                permissions = [{ path: '/', method: 'GET' }];
-            } else {
-                // Для любой другой тестируемой роли временно очищаем массив на фронтенде,
-                // чтобы сайдбар скрыл защищенные ИБ-разделы
-                permissions = [];
-            }
-        }
+        const permissions =
+            isAdminRole(originalRole) && impersonatedRole
+                ? maskPermissions
+                : session?.user?.permissions || [];
 
         // Фильтруем карту маршрутов на основе вычисленного массива прав permissions
         return APP_NAVIGATION_MAP.map((group) => {
@@ -88,7 +70,7 @@ export function AppSideBar() {
                 items: visibleItems,
             };
         }).filter(group => group.items.length > 0);
-    }, [activeRole, originalRole, impersonatedRole, session?.user?.permissions]);
+    }, [activeRole, originalRole, impersonatedRole, maskPermissions, session?.user?.permissions]);
 
     return (
         <Sidebar variant="sidebar" collapsible="icon">

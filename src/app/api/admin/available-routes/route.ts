@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/require-admin";
+import { createErrorResponse } from "@/lib/api-error";
 
 // Список строго технических роутов, которые не нужно выводить в UI
 const BLACKLISTED_ROUTES = [
@@ -46,6 +48,7 @@ function scanProjectRoutes(dirPath: string, baseAppPath: string, routesList: str
 
 export async function GET() {
     try {
+        await requireAdmin();
         let baseAppPath = path.join(process.cwd(), 'src', 'app');
         if (!fs.existsSync(baseAppPath)) baseAppPath = path.join(process.cwd(), 'app');
 
@@ -70,6 +73,8 @@ export async function GET() {
             }
         });
     } catch (error) {
-        return NextResponse.json({ success: false, error: { message: 'Ошибка сканирования' } }, { status: 500 });
+        const authResponse = adminAuthErrorResponse(error);
+        if (authResponse) return authResponse;
+        return createErrorResponse('INTERNAL_SERVER_ERROR', 'Ошибка сканирования', 500);
     }
 }
