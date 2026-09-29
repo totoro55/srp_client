@@ -4,7 +4,6 @@
 import {useState, useEffect, useCallback, useTransition} from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
-import { Loader2 } from "lucide-react";
 
 interface Role {
     id: number;
@@ -117,9 +116,8 @@ export default function AdminMatrixPage() {
     };
 
     return (
-        <div className="w-full space-y-6 animate-in fade-in duration-300">
-            {/* Заголовок страницы */}
-            <div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+            <div className="shrink-0">
                 <h1 className="text-3xl font-bold tracking-tight">Матрица прав безопасности</h1>
                 <p className="text-muted-foreground font-normal text-sm">
                     Динамическое разграничение ролевых политик (RBAC) [INDEX]. Настройки применяются бэкендом в реальном времени.
@@ -141,21 +139,15 @@ export default function AdminMatrixPage() {
                 }}
             />
 
-            {/* Экран загрузки (Спиннер) */}
-            {isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-xs font-medium">Загрузка справочников СУБД...</span>
-                </div>
-            ) : (
-                /* САМА МАТРИЦА С ФИЛЬТРАМИ */
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <MatrixGrid
                     roles={roles}
                     permissions={permissions}
                     relations={relations}
+                    isLoading={isLoading}
                     onTogglePermission={handleTogglePermission}
                 />
-            )}
+            </div>
         </div>
     );
 }

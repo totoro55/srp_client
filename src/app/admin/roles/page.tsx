@@ -11,6 +11,7 @@ import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck, Search } from "lucid
 import { useHasAccess } from "@/hooks/useHasAccess";
 import { AdminFormDialog, AdminFormValues, FieldConfig } from './_components/AdminFormDialog';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
 import { ApiResponse } from '@/types/api';
 
 type MutationEntityType = 'ROLE' | 'MAPPING' | 'EXCEPTION';
@@ -49,16 +50,22 @@ export default function AdminRolesPage() {
     const [dialog, setDialog] = useState<{ isOpen: boolean; mode: 'create' | 'edit'; targetData?: Record<string, unknown> }>({ isOpen: false, mode: 'create' });
     const [deleteTarget, setDeleteTarget] = useState<(Role | Mapping | UserException) | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
     const canWrite = useHasAccess("/api/admin/roles", "POST");
 
-    const loadData = useCallback(async () => {
-        const res = await fetch('/api/admin/roles');
-        const json = await res.json();
-        if (json.success) setData(json.data);
+    const loadData = useCallback(async (showLoader = false) => {
+        if (showLoader) setIsLoading(true);
+        try {
+            const res = await fetch('/api/admin/roles');
+            const json = await res.json();
+            if (json.success) setData(json.data);
+        } finally {
+            setIsLoading(false);
+        }
     }, []);
 
-    useEffect(() => { loadData(); }, [loadData]);
+    useEffect(() => { void loadData(true); }, [loadData]);
 
     useEffect(() => {
         fetch('/api/admin/available-positions')
@@ -130,21 +137,21 @@ export default function AdminRolesPage() {
     }, [data, activeTab, search]);
 
     return (
-        <div className="w-full space-y-6">
-            <div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+            <div className="shrink-0">
                 <h1 className="text-2xl font-bold tracking-tight">Управление доступами LDAP</h1>
                 <p className="text-muted-foreground text-xs">Конфигурация ролей, соответствий должностей AD и исключений.</p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="w-full">
-                <TabsList className="grid grid-cols-3 max-w-[600px] h-10 border bg-muted/50 p-1 rounded-md">
+            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <TabsList className="grid h-10 w-full max-w-[600px] shrink-0 grid-cols-3 rounded-md border bg-muted/50 p-1">
                     <TabsTrigger value="roles" className="text-xs gap-1.5"><Users className="w-3.5 h-3.5"/> Роли</TabsTrigger>
                     <TabsTrigger value="mappings" className="text-xs gap-1.5"><Briefcase className="w-3.5 h-3.5"/> Должности</TabsTrigger>
                     <TabsTrigger value="exceptions" className="text-xs gap-1.5"><UserCheck className="w-3.5 h-3.5"/> Исключения</TabsTrigger>
                 </TabsList>
 
-                <Card className="mt-4 border shadow-sm">
-                    <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4">
+                <Card className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden border shadow-sm">
+                    <CardHeader className="flex shrink-0 flex-col items-start justify-between gap-4 pb-4 sm:flex-row sm:items-center">
                         <div className="relative w-full sm:max-w-xs">
                             <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                             <Input placeholder="Быстрый поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-8 text-xs" />
@@ -155,8 +162,8 @@ export default function AdminRolesPage() {
                             </Button>
                         )}
                     </CardHeader>
-                    <CardContent className="overflow-x-auto">
-                        <Table>
+                    <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                        <Table containerClassName="h-full min-h-0 rounded-md border">
                             <TableHeader>
                                 <TableRow className="bg-muted/30">
                                     {activeTab === 'roles' && <>
@@ -178,7 +185,9 @@ export default function AdminRolesPage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredItems.length === 0 ? (
+                                {isLoading ? (
+                                    <AdminTableSkeleton columns={activeTab === 'exceptions' ? 5 : activeTab === 'roles' ? 4 : 3} />
+                                ) : filteredItems.length === 0 ? (
                                     <TableRow><TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-8">Записей не найдено</TableCell></TableRow>
                                 ) : filteredItems.map((item) => (
                                     <TableRow key={item.id} className="text-xs">

@@ -10,6 +10,7 @@ import {useHasAccess} from "@/hooks/useHasAccess";
 export default function AdminPermissionsPage() {
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [globalError, setGlobalError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
     const canCreate = useHasAccess("/api/admin/permissions", "POST");
 
 
@@ -25,38 +26,14 @@ export default function AdminPermissionsPage() {
             }
         } catch {
             setGlobalError('Сетевая ошибка при обновлении данных');
+        } finally {
+            setIsLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        let isMounted = true;
-
-        async function fetchInitialPermissions() {
-            try {
-                const res = await fetch('/api/admin/permissions');
-                const json: ApiResponse<Permission[]> = await res.json();
-
-                if (isMounted) {
-                    if (json.success) {
-                        setPermissions(json.data);
-                        setGlobalError(null);
-                    } else {
-                        setGlobalError(json.error.message);
-                    }
-                }
-            } catch {
-                if (isMounted) {
-                    setGlobalError('Сетевая ошибка при первоначальной загрузке данных');
-                }
-            }
-        }
-
-        fetchInitialPermissions();
-
-        return () => {
-            isMounted = false;
-        };
-    }, []);
+        void refreshPermissions();
+    }, [refreshPermissions]);
 
     const handleFormSubmit = async (payload: { route_path: string; method: string; description: string }): Promise<'created' | 'duplicate' | 'error'> => {
         setGlobalError(null);
@@ -85,10 +62,9 @@ export default function AdminPermissionsPage() {
     };
 
     return (
-        <div className="w-full">
-            {/* Шапка с кнопкой вовнутрь */}
-            <div className="flex items-center justify-between border-b pb-4">
-                <div className="pb-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between border-b pb-4">
+                <div>
                     <h1 className="text-3xl font-bold tracking-tight">Управление роутами безопасности</h1>
                     <p className="text-muted-foreground text-sm">Список защищаемых эндпоинтов и интерфейсных страниц системы.</p>
                 </div>
@@ -110,9 +86,8 @@ export default function AdminPermissionsPage() {
                 }}
             />
 
-            {/* Таблица занимает всю ширину */}
-            <div className="w-full">
-                <PermissionTable permissions={permissions} onRefresh={refreshPermissions} />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <PermissionTable permissions={permissions} isLoading={isLoading} onRefresh={refreshPermissions} />
             </div>
         </div>
     );

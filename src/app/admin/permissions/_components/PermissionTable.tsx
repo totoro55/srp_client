@@ -9,16 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPermissionDialog } from './dialogs/EditPermissionDialog';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
 import {Trash2, Pencil, Search, Filter} from "lucide-react";
 import {useHasAccess} from "@/hooks/useHasAccess";
 import {cn} from "@/lib/utils";
 
 interface PermissionTableProps {
     permissions: Permission[];
+    isLoading?: boolean;
     onRefresh: () => void;
 }
 
-export function PermissionTable({ permissions, onRefresh }: PermissionTableProps) {
+export function PermissionTable({ permissions, isLoading = false, onRefresh }: PermissionTableProps) {
     const [activePermission, setActivePermission] = useState<Permission | null>(null);
     const [dialogType, setDialogType] = useState<'edit' | 'delete' | null>(null);
 
@@ -80,8 +82,9 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
 
     return (
         <>
-            <Card className="w-full min-w-0">
-                <CardHeader className="space-y-4">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Card className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+                <CardHeader className="shrink-0 space-y-4">
                     <div className="flex flex-row items-center justify-between w-full">
                         <div>
                             <CardTitle className="text-lg">Контролируемые роуты</CardTitle>
@@ -120,24 +123,25 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                     </div>
                 </CardHeader>
 
-                <CardContent className="w-full min-w-0 grid grid-cols-1">
-                    <div className="w-full min-w-0 overflow-x-auto rounded-md border">
-                        <Table className="w-full">
-                            <TableHeader>
+                <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                    <Table containerClassName="h-full min-h-0 rounded-md border" className="w-full">
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-[100px]">Метод</TableHead>
+                                <TableHead>Путь</TableHead>
+                                <TableHead>Описание</TableHead>
+                                <TableHead className="w-[100px] text-right">Действия</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isLoading ? (
+                                <AdminTableSkeleton columns={4} />
+                            ) : filteredPermissions.length === 0 ? (
                                 <TableRow>
-                                    <TableHead className="w-[100px]">Метод</TableHead>
-                                    <TableHead>Путь</TableHead>
-                                    <TableHead>Описание</TableHead>
-                                    <TableHead className="w-[100px] text-right">Действия</TableHead>
+                                    <TableCell colSpan={4} className="text-center text-muted-foreground py-10">Роуты не найдены по заданным фильтрам.</TableCell>
                                 </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {filteredPermissions.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={4} className="text-center text-muted-foreground py-10">Роуты не найдены по заданным фильтрам.</TableCell>
-                                    </TableRow>
-                                ) : (
-                                    filteredPermissions.map((p) => (
+                            ) : (
+                                filteredPermissions.map((p) => (
                                         <TableRow key={p.id}>
                                             <TableCell>
                         <span className="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium ring-1 ring-inset ring-muted">
@@ -176,9 +180,9 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                                 )}
                             </TableBody>
                         </Table>
-                    </div>
                 </CardContent>
             </Card>
+            </div>
 
             <EditPermissionDialog
                 isOpen={dialogType === 'edit'}
