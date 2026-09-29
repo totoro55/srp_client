@@ -8,16 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPermissionDialog } from './dialogs/EditPermissionDialog';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import {Trash2, Pencil, Search, Filter} from "lucide-react";
 import {useHasAccess} from "@/hooks/useHasAccess";
 import {cn} from "@/lib/utils";
@@ -33,6 +24,7 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
 
     const [searchQuery, setSearchQuery] = useState('');
     const [methodFilter, setMethodFilter] = useState('ALL_METHODS');
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const canUpdate = useHasAccess("/api/admin/permissions", "PUT");
     const canDelete = useHasAccess("/api/admin/permissions", "DELETE");
@@ -63,6 +55,7 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
 
     const handleDelete = async () => {
         if (!activePermission) return;
+        setIsDeleting(true);
         try {
             const res = await fetch(`/api/admin/permissions?id=${activePermission.id}`, { method: 'DELETE' });
             if (res.ok) {
@@ -71,6 +64,8 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
             }
         } catch {
             console.error('Ошибка сети при удалении');
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -192,24 +187,23 @@ export function PermissionTable({ permissions, onRefresh }: PermissionTableProps
                 onSave={handleUpdate}
             />
 
-            <AlertDialog open={dialogType === 'delete'} onOpenChange={(open) => { if (!open) setDialogType(null); }}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Удалить защищаемый роут?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            {activePermission
-                                ? `${activePermission.method} ${activePermission.route_path} будет удалён из каталога прав.`
-                                : "Запись будет удалена из каталога прав."}
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Отмена</AlertDialogCancel>
-                        <AlertDialogAction variant="destructive" onClick={() => void handleDelete()}>
-                            Удалить
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            <ConfirmDialog
+                open={dialogType === 'delete'}
+                title="Удалить защищаемый роут?"
+                description={
+                    activePermission
+                        ? `${activePermission.method} ${activePermission.route_path} будет удалён из каталога прав.`
+                        : "Запись будет удалена из каталога прав."
+                }
+                confirmLabel="Удалить"
+                isPending={isDeleting}
+                onConfirm={handleDelete}
+                onOpenChange={(open) => {
+                    if (!open && !isDeleting) {
+                        setDialogType(null);
+                    }
+                }}
+            />
         </>
     );
 }

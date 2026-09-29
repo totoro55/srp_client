@@ -3,7 +3,8 @@
 
 import {useState, useEffect, useCallback, useTransition} from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
-import { ShieldAlert, Loader2 } from "lucide-react";
+import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { Loader2 } from "lucide-react";
 
 interface Role {
     id: number;
@@ -125,16 +126,20 @@ export default function AdminMatrixPage() {
                 </p>
             </div>
 
-            {/* Вывод критических ошибок */}
-            {error && (
-                <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-start gap-3">
-                    <ShieldAlert className="h-5 w-5 shrink-0 mt-0.5" />
-                    <div className="flex flex-col gap-0.5">
-                        <span className="font-bold text-sm">Ошибка конфигурации ИБ</span>
-                        <span className="text-xs opacity-90">{error}</span>
-                    </div>
-                </div>
-            )}
+            <ConfirmDialog
+                open={error !== null}
+                title="Ошибка конфигурации ИБ"
+                description={error ?? ''}
+                confirmLabel="Понятно"
+                confirmVariant="default"
+                showCancel={false}
+                onConfirm={() => setError(null)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setError(null);
+                    }
+                }}
+            />
 
             {/* Экран загрузки (Спиннер) */}
             {isLoading ? (

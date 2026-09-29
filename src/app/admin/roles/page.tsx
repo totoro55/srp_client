@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck, Search } from "lucide-react";
 import { useHasAccess } from "@/hooks/useHasAccess";
 import { AdminFormDialog, AdminFormValues, FieldConfig } from './_components/AdminFormDialog';
+import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { ApiResponse } from '@/types/api';
 
 type MutationEntityType = 'ROLE' | 'MAPPING' | 'EXCEPTION';
@@ -18,6 +19,19 @@ function entityTypeFromTab(tab: AdminTab): MutationEntityType {
     if (tab === 'roles') return 'ROLE';
     if (tab === 'mappings') return 'MAPPING';
     return 'EXCEPTION';
+}
+
+function deleteDescription(tab: AdminTab, item: Role | Mapping | UserException): string {
+    if (tab === 'roles' && 'name' in item) {
+        return `Роль «${item.name}» будет удалена безвозвратно. Связанные назначения должностей и исключения могут быть затронуты.`;
+    }
+    if (tab === 'mappings' && 'ldapPosition' in item) {
+        return `Соответствие должности «${item.ldapPosition}» роли «${item.roleName}» будет удалено.`;
+    }
+    if (tab === 'exceptions' && 'username' in item) {
+        return `Исключение для пользователя «${item.username}» будет удалено.`;
+    }
+    return 'Запись будет удалена безвозвратно.';
 }
 
 function apiErrorMessage(json: { success: boolean; error?: string | { message?: string } }): string {
@@ -33,6 +47,8 @@ export default function AdminRolesPage() {
     const [search, setSearch] = useState('');
 
     const [dialog, setDialog] = useState<{ isOpen: boolean; mode: 'create' | 'edit'; targetData?: Record<string, unknown> }>({ isOpen: false, mode: 'create' });
+    const [deleteTarget, setDeleteTarget] = useState<(Role | Mapping | UserException) | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const canWrite = useHasAccess("/api/admin/roles", "POST");
 
@@ -93,10 +109,16 @@ export default function AdminRolesPage() {
         await loadData();
     };
 
-    const handleDelete = async (id: number) => {
-        if (!confirm('Вы уверены, что хотите удалить эту запись?')) return;
-        await fetch(`/api/admin/roles?type=${entityTypeFromTab(activeTab)}&id=${id}`, { method: 'DELETE' });
-        loadData();
+    const handleDelete = async () => {
+        if (!deleteTarget) return;
+        setIsDeleting(true);
+        try {
+            await fetch(`/api/admin/roles?type=${entityTypeFromTab(activeTab)}&id=${deleteTarget.id}`, { method: 'DELETE' });
+            setDeleteTarget(null);
+            await loadData();
+        } finally {
+            setIsDeleting(false);
+        }
     };
 
     // Декларативная фильтрация списков
@@ -114,7 +136,7 @@ export default function AdminRolesPage() {
                 <p className="text-muted-foreground text-xs">Конфигурация ролей, соответствий должностей AD и исключений.</p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); }} className="w-full">
+            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="w-full">
                 <TabsList className="grid grid-cols-3 max-w-[600px] h-10 border bg-muted/50 p-1 rounded-md">
                     <TabsTrigger value="roles" className="text-xs gap-1.5"><Users className="w-3.5 h-3.5"/> Роли</TabsTrigger>
                     <TabsTrigger value="mappings" className="text-xs gap-1.5"><Briefcase className="w-3.5 h-3.5"/> Должности</TabsTrigger>
@@ -178,7 +200,7 @@ export default function AdminRolesPage() {
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-0.5">
                                                 {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDialog({ isOpen: true, mode: 'edit', targetData: item as unknown as Record<string, unknown> })}><Pencil className="h-3.5 w-3.5"/></Button>}
-                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleDelete(item.id)}><Trash2 className="h-3.5 w-3.5"/></Button>}
+                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(item)}><Trash2 className="h-3.5 w-3.5"/></Button>}
                                             </div>
                                         </TableCell>
                                     </TableRow>
@@ -197,6 +219,19 @@ export default function AdminRolesPage() {
                 initialData={dialog.targetData}
                 onClose={() => setDialog({ isOpen: false, mode: 'create' })}
                 onSave={handleSave}
+            />
+            <ConfirmDialog
+                open={deleteTarget !== null}
+                title="Удалить запись?"
+                description={deleteTarget ? deleteDescription(activeTab, deleteTarget) : ''}
+                confirmLabel="Удалить"
+                isPending={isDeleting}
+                onConfirm={handleDelete}
+                onOpenChange={(open) => {
+                    if (!open && !isDeleting) {
+                        setDeleteTarget(null);
+                    }
+                }}
             />
         </div>
     );

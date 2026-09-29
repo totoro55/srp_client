@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Permission, ApiResponse } from '@/types/api';
 import { PermissionForm } from './_components/PermissionForm';
 import { PermissionTable } from './_components/PermissionTable';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ShieldAlert } from "lucide-react";
+import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import {useHasAccess} from "@/hooks/useHasAccess";
 
 export default function AdminPermissionsPage() {
@@ -96,13 +95,20 @@ export default function AdminPermissionsPage() {
                 {canCreate && <PermissionForm onSubmit={handleFormSubmit} />}
             </div>
 
-            {globalError && (
-                <Alert variant="destructive">
-                    <ShieldAlert className="h-4 w-4" />
-                    <AlertTitle>Произошла ошибка</AlertTitle>
-                    <AlertDescription>{globalError}</AlertDescription>
-                </Alert>
-            )}
+            <ConfirmDialog
+                open={globalError !== null}
+                title="Произошла ошибка"
+                description={globalError ?? ''}
+                confirmLabel="Понятно"
+                confirmVariant="default"
+                showCancel={false}
+                onConfirm={() => setGlobalError(null)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setGlobalError(null);
+                    }
+                }}
+            />
 
             {/* Таблица занимает всю ширину */}
             <div className="w-full">
