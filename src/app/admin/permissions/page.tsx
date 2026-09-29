@@ -5,6 +5,7 @@ import { Permission, ApiResponse } from '@/types/api';
 import { PermissionForm } from './_components/PermissionForm';
 import { PermissionTable } from './_components/PermissionTable';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
 import {useHasAccess} from "@/hooks/useHasAccess";
 
 export default function AdminPermissionsPage() {
@@ -62,7 +63,7 @@ export default function AdminPermissionsPage() {
     };
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <AdminPageShell>
             <ConfirmDialog
                 open={globalError !== null}
                 title="Произошла ошибка"
@@ -78,14 +79,12 @@ export default function AdminPermissionsPage() {
                 }}
             />
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <PermissionTable
-                    permissions={permissions}
-                    isLoading={isLoading}
-                    onRefresh={refreshPermissions}
-                    headerAction={canCreate ? <PermissionForm onSubmit={handleFormSubmit} /> : undefined}
-                />
-            </div>
-        </div>
+            <PermissionTable
+                permissions={permissions}
+                isLoading={isLoading}
+                onRefresh={refreshPermissions}
+                headerAction={canCreate ? <PermissionForm onSubmit={handleFormSubmit} /> : undefined}
+            />
+        </AdminPageShell>
     );
 }

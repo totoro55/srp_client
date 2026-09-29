@@ -92,8 +92,8 @@ export function PermissionForm({ onSubmit }: PermissionFormProps) {
 
     return (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger render={<Button className="flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Добавить роут
+            <DialogTrigger render={<Button size="sm" className="h-9 gap-1.5 text-xs">
+                <Plus className="h-3.5 w-3.5" /> Добавить роут
             </Button>}/>
             {/* Сделали ширину диалога чуть компактнее (max-w-md), так как элементы идут вертикально */}
             <DialogContent className="max-w-md w-full p-6">

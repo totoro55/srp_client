@@ -6,12 +6,13 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, Briefcase, UserCheck } from "lucide-react";
 import { useHasAccess } from "@/hooks/useHasAccess";
 import { AdminFormDialog, AdminFormValues, FieldConfig } from './_components/AdminFormDialog';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
+import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
+import { AdminToolbar } from '@/app/admin/_components/AdminToolbar';
 import { ApiResponse } from '@/types/api';
 
 type MutationEntityType = 'ROLE' | 'MAPPING' | 'EXCEPTION';
@@ -137,25 +138,27 @@ export default function AdminRolesPage() {
     }, [data, activeTab, search]);
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <TabsList className="grid h-10 w-full max-w-[600px] shrink-0 grid-cols-3 rounded-md border bg-muted/50 p-1">
-                    <TabsTrigger value="roles" className="text-xs gap-1.5"><Users className="w-3.5 h-3.5"/> Роли</TabsTrigger>
-                    <TabsTrigger value="mappings" className="text-xs gap-1.5"><Briefcase className="w-3.5 h-3.5"/> Должности</TabsTrigger>
-                    <TabsTrigger value="exceptions" className="text-xs gap-1.5"><UserCheck className="w-3.5 h-3.5"/> Исключения</TabsTrigger>
+        <AdminPageShell>
+            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as AdminTab); setSearch(''); setDeleteTarget(null); }} className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+                <TabsList className="grid h-9 w-full max-w-[540px] shrink-0 grid-cols-3">
+                    <TabsTrigger value="roles" className="gap-1.5 text-xs"><Users className="h-3.5 w-3.5"/> Роли</TabsTrigger>
+                    <TabsTrigger value="mappings" className="gap-1.5 text-xs"><Briefcase className="h-3.5 w-3.5"/> Должности</TabsTrigger>
+                    <TabsTrigger value="exceptions" className="gap-1.5 text-xs"><UserCheck className="h-3.5 w-3.5"/> Исключения</TabsTrigger>
                 </TabsList>
 
-                <Card className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden border shadow-sm">
-                    <CardHeader className="flex shrink-0 flex-col items-start justify-between gap-4 pb-4 sm:flex-row sm:items-center">
-                        <div className="relative w-full sm:max-w-xs">
-                            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                            <Input placeholder="Быстрый поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-8 text-xs" />
-                        </div>
-                        {canWrite && (
-                            <Button size="sm" onClick={() => setDialog({ isOpen: true, mode: 'create' })} className="text-xs h-8 gap-1.5">
-                                <Plus className="w-3.5 h-3.5"/> Добавить запись
-                            </Button>
-                        )}
+                <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <CardHeader className="shrink-0">
+                        <AdminToolbar
+                            search={search}
+                            onSearchChange={setSearch}
+                            searchPlaceholder="Поиск по таблице..."
+                        >
+                            {canWrite && (
+                                <Button size="sm" onClick={() => setDialog({ isOpen: true, mode: 'create' })} className="h-9 gap-1.5 text-xs">
+                                    <Plus className="h-3.5 w-3.5"/> Добавить запись
+                                </Button>
+                            )}
+                        </AdminToolbar>
                     </CardHeader>
                     <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden">
                         <Table containerClassName="h-full min-h-0 rounded-md border">
@@ -183,7 +186,7 @@ export default function AdminRolesPage() {
                                 {isLoading ? (
                                     <AdminTableSkeleton columns={activeTab === 'exceptions' ? 5 : activeTab === 'roles' ? 4 : 3} />
                                 ) : filteredItems.length === 0 ? (
-                                    <TableRow><TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-8">Записей не найдено</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={5} className="py-10 text-center text-xs text-muted-foreground">Записей не найдено</TableCell></TableRow>
                                 ) : filteredItems.map((item) => (
                                     <TableRow key={item.id} className="text-xs">
                                         {activeTab === 'roles' && <>
@@ -202,9 +205,9 @@ export default function AdminRolesPage() {
                                             <TableCell className="text-muted-foreground">{item.expiresAt ? new Date(item.expiresAt).toLocaleDateString() : 'Бессрочно'}</TableCell>
                                         </>}
                                         <TableCell className="text-right">
-                                            <div className="flex justify-end gap-0.5">
-                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDialog({ isOpen: true, mode: 'edit', targetData: item as unknown as Record<string, unknown> })}><Pencil className="h-3.5 w-3.5"/></Button>}
-                                                {canWrite && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(item)}><Trash2 className="h-3.5 w-3.5"/></Button>}
+                                            <div className="flex justify-end gap-1">
+                                                {canWrite && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDialog({ isOpen: true, mode: 'edit', targetData: item as unknown as Record<string, unknown> })}><Pencil className="h-4 w-4"/></Button>}
+                                                {canWrite && <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(item)}><Trash2 className="h-4 w-4"/></Button>}
                                             </div>
                                         </TableCell>
                                     </TableRow>
@@ -237,6 +240,6 @@ export default function AdminRolesPage() {
                     }
                 }}
             />
-        </div>
+        </AdminPageShell>
     );
 }

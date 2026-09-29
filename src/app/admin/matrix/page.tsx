@@ -4,6 +4,7 @@
 import {useState, useEffect, useCallback, useTransition} from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
 
 interface Role {
     id: number;
@@ -69,7 +70,7 @@ export default function AdminMatrixPage() {
             } else {
                 setError(matrixErrorMessage(json.error, "Не удалось загрузить конфигурацию матрицы доступов"));
             }
-        } catch (err) {
+        } catch {
             setError('Ошибка сети при обращении к серверу ИБ');
         } finally {
             setIsLoading(false);
@@ -109,14 +110,14 @@ export default function AdminMatrixPage() {
                 setError(matrixErrorMessage(json.error, "СУБД отклонила изменение прав"));
                 await fetchMatrixData();
             }
-        } catch (err) {
+        } catch {
             setError('Ошибка сети. Не удалось сохранить изменения матрицы.');
             await fetchMatrixData();
         }
     };
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <AdminPageShell>
             <ConfirmDialog
                 open={error !== null}
                 title="Ошибка конфигурации ИБ"
@@ -132,15 +133,13 @@ export default function AdminMatrixPage() {
                 }}
             />
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <MatrixGrid
-                    roles={roles}
-                    permissions={permissions}
-                    relations={relations}
-                    isLoading={isLoading}
-                    onTogglePermission={handleTogglePermission}
-                />
-            </div>
-        </div>
+            <MatrixGrid
+                roles={roles}
+                permissions={permissions}
+                relations={relations}
+                isLoading={isLoading}
+                onTogglePermission={handleTogglePermission}
+            />
+        </AdminPageShell>
     );
 }

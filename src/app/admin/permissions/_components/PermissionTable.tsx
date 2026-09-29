@@ -2,15 +2,15 @@
 
 import { useState, useMemo, ReactNode } from 'react';
 import { Permission } from '@/types/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPermissionDialog } from './dialogs/EditPermissionDialog';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
-import {Trash2, Pencil, Search, Filter} from "lucide-react";
+import { AdminToolbar } from '@/app/admin/_components/AdminToolbar';
+import {Trash2, Pencil, Filter} from "lucide-react";
 import {useHasAccess} from "@/hooks/useHasAccess";
 import {cn} from "@/lib/utils";
 
@@ -83,54 +83,37 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh, hea
 
     return (
         <>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Card className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-                <CardHeader className="shrink-0 space-y-4">
-                    <div className="flex flex-row items-center justify-between w-full">
-                        <div>
-                            <CardTitle className="text-lg">Контролируемые роуты</CardTitle>
-                            <CardDescription>Список путей, находящихся под защитой системы</CardDescription>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3 border-t border-muted/50 pt-2 sm:flex-row sm:items-center">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Поиск по пути или описанию..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-9"
-                            />
-                        </div>
-                        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-                        <div className="w-full sm:w-[200px]">
-                            <Select value={methodFilter} onValueChange={(val) => setMethodFilter(val ?? 'ALL_METHODS')}>
-                                <SelectTrigger className="w-full">
-                                    <div className="flex items-center gap-2">
-                                        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                                        <SelectValue placeholder="Метод" />
-                                    </div>
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL_METHODS">Все методы</SelectItem>
-                                    <SelectItem value="GET">GET</SelectItem>
-                                    <SelectItem value="POST">POST</SelectItem>
-                                    <SelectItem value="PUT">PUT</SelectItem>
-                                    <SelectItem value="DELETE">DELETE</SelectItem>
-                                    <SelectItem value="ALL">ALL (Любой)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
+                <CardHeader className="shrink-0">
+                    <AdminToolbar
+                        search={searchQuery}
+                        onSearchChange={setSearchQuery}
+                        searchPlaceholder="Поиск по пути или описанию..."
+                    >
+                        <Select value={methodFilter} onValueChange={(val) => setMethodFilter(val ?? 'ALL_METHODS')}>
+                            <SelectTrigger className="h-9 w-full text-xs sm:w-[180px]">
+                                <div className="flex items-center gap-2">
+                                    <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <SelectValue placeholder="Метод" />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL_METHODS">Все методы</SelectItem>
+                                <SelectItem value="GET">GET</SelectItem>
+                                <SelectItem value="POST">POST</SelectItem>
+                                <SelectItem value="PUT">PUT</SelectItem>
+                                <SelectItem value="DELETE">DELETE</SelectItem>
+                                <SelectItem value="ALL">ALL (Любой)</SelectItem>
+                            </SelectContent>
+                        </Select>
                         {headerAction}
-                        </div>
-                    </div>
+                    </AdminToolbar>
                 </CardHeader>
 
                 <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                     <Table containerClassName="h-full min-h-0 rounded-md border" className="w-full">
                         <TableHeader>
-                            <TableRow>
+                            <TableRow className="bg-muted/30">
                                 <TableHead className="w-[100px]">Метод</TableHead>
                                 <TableHead>Путь</TableHead>
                                 <TableHead>Описание</TableHead>
@@ -142,18 +125,18 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh, hea
                                 <AdminTableSkeleton columns={4} />
                             ) : filteredPermissions.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="text-center text-muted-foreground py-10">Роуты не найдены по заданным фильтрам.</TableCell>
+                                    <TableCell colSpan={4} className="py-10 text-center text-xs text-muted-foreground">Роуты не найдены по заданным фильтрам.</TableCell>
                                 </TableRow>
                             ) : (
                                 filteredPermissions.map((p) => (
-                                        <TableRow key={p.id}>
+                                        <TableRow key={p.id} className="text-xs">
                                             <TableCell>
-                        <span className="inline-flex items-center rounded-md bg-secondary px-2 py-1 text-xs font-medium ring-1 ring-inset ring-muted">
+                        <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ring-muted">
                           {p.method}
                         </span>
                                             </TableCell>
-                                            <TableCell className="font-mono text-sm max-w-[200px] truncate">{p.route_path}</TableCell>
-                                            <TableCell className="text-muted-foreground text-sm">{p.description || '—'}</TableCell>
+                                            <TableCell className="max-w-[200px] truncate font-mono">{p.route_path}</TableCell>
+                                            <TableCell className="text-muted-foreground">{p.description || '—'}</TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-1">
                                                     <Button
@@ -186,7 +169,6 @@ export function PermissionTable({ permissions, isLoading = false, onRefresh, hea
                         </Table>
                 </CardContent>
             </Card>
-            </div>
 
             <EditPermissionDialog
                 isOpen={dialogType === 'edit'}

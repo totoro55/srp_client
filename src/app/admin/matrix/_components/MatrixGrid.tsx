@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MatrixToolbar } from './MatrixToolbar';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
-import { ShieldCheck } from "lucide-react";
 
 interface Role { id: number; name: string; description?: string; }
 interface Permission { id: number; route_path: string; method: string; description?: string; }
@@ -62,17 +61,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
 
     return (
         <Card className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-            <CardHeader className="flex shrink-0 flex-col space-y-4 pb-4">
-                <div className="flex flex-row items-center justify-between w-full">
-                    <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <ShieldCheck className="h-5 w-5 text-primary" /> Матрица доступов
-                        </CardTitle>
-                        <CardDescription>Управление пересечениями системных ролей и защищаемых эндпоинтов</CardDescription>
-                    </div>
-                </div>
-
-                {/* 🔥 ВЫЗОВ ДЕКОМПОЗИРОВАННОЙ ПАНЕЛИ ТУЛБАРА */}
+            <CardHeader className="shrink-0">
                 <MatrixToolbar
                     roles={roles}
                     searchQuery={searchQuery}
@@ -86,7 +75,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
             <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 <Table containerClassName="h-full min-h-0 rounded-md border" className="w-full min-w-[640px]">
                     <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-muted/30">
                             <TableHead className="w-[320px] min-w-[280px]">Защищаемый роут / Метод</TableHead>
                             {isLoading
                                 ? Array.from({ length: 3 }, (_, index) => (
@@ -105,7 +94,11 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, o
                         {isLoading ? (
                             <AdminTableSkeleton columns={4} rows={10} />
                         ) : filteredPermissions.length === 0 ? (
-                            <TableRow><TableCell colSpan={filteredRoles.length + 1} className="text-center text-muted-foreground py-12">Роуты не найдены.</TableCell></TableRow>
+                            <TableRow>
+                                <TableCell colSpan={filteredRoles.length + 1} className="py-10 text-center text-xs text-muted-foreground">
+                                    Роуты не найдены по заданным фильтрам.
+                                </TableCell>
+                            </TableRow>
                         ) : (
                             filteredPermissions.map(perm => (
                                     <TableRow key={perm.id} className="hover:bg-muted/30">
