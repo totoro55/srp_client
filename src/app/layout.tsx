@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {SidebarProvider} from "@/components/ui/sidebar";
 import Header from "@/app/_components/header/header";
 import { AccessBanner } from "@/app/_components/AccessBanner";
+import { NoticeBanner } from "@/app/_components/NoticeBanner";
 import {AppSideBar} from "@/app/_components/appSideBar/AppSideBar";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
@@ -44,6 +45,7 @@ export default function RootLayout({
         <SidebarProvider defaultOpen={false}>
           <AppSideBar />
           <main className="w-full">
+            <NoticeBanner />
             <AccessBanner />
             <Header />
             {children}

@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, MapPinned, ShieldAlert, Home, Users } from "lucide-react";
+import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -64,6 +64,21 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
             },
         ],
     },
+    {
+        id: "application",
+        label: "Приложение",
+        icon: Settings,
+        items: [
+            {
+                name: "Настройки",
+                href: "/admin/settings",
+                icon: Settings,
+                title: "Настройки",
+                description: "Обслуживание, объявления и просмотр ролей",
+                permission: "settings:read",
+            },
+        ],
+    },
 ];
 
 export interface PageHeading {
@@ -74,6 +89,7 @@ export interface PageHeading {
 const EXTRA_PAGE_HEADINGS: Record<string, PageHeading> = {
     "/login": { title: "Авторизация" },
     "/forbidden": { title: "Доступ ограничен" },
+    "/maintenance": { title: "Обслуживание" },
 };
 
 export function getPageHeading(pathname: string): PageHeading | null {

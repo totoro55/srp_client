@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/services/db";
 import { adminAuthErrorResponse, requireActorFullAccess } from "@/lib/require-admin";
 import { createErrorResponse } from "@/lib/api-error";
+import { getAppSettings } from "@/services/app-settings";
 import { clearImpersonationCookies, setImpersonationCookies } from "@/services/impersonation";
 import { audit } from "@/server/authz/resolve-access";
 
@@ -23,6 +24,11 @@ export async function POST(request: Request) {
             clearImpersonationCookies(response);
             await audit(actor.username, "preview.stop", "");
             return response;
+        }
+
+        const settings = await getAppSettings();
+        if (!settings.rolePreviewEnabled) {
+            return createErrorResponse("FORBIDDEN", "Просмотр от имени роли выключен", 403);
         }
 
         const roleId = parsePositiveInt(body.roleId);

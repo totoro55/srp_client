@@ -116,7 +116,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                     <DropdownMenuSeparator />
 
                     {/* 🔥 НОВЫЙ ВЛОЖЕННЫЙ ПЕРЕКЛЮЧАТЕЛЬ РОЛЕЙ ДЛЯ ТЕСТИРОВАНИЯ ИБ ПРАВ */}
-                    {isOriginalAdmin && (
+                    {isOriginalAdmin && (access.previewChoices.length > 0 || isCurrentlyImpersonating) && (
                         <>
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger className="text-xs gap-2 cursor-pointer">

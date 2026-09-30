@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useTransition } from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
-import { useAccess } from '@/hooks/useAccess';
+import { reloadAccess, useAccess } from '@/hooks/useAccess';
 import type { ScopeKind } from '@/lib/permissions';
 
 interface Role {
@@ -105,7 +105,9 @@ export default function AdminMatrixPage() {
             if (!json.success) {
                 setRelations(previous);
                 setError(matrixErrorMessage(json.error, "Сервер отклонил изменение прав"));
+                return;
             }
+            reloadAccess();
         } catch {
             setRelations(previous);
             setError('Ошибка сети. Не удалось сохранить изменения матрицы.');

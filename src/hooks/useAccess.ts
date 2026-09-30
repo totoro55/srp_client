@@ -63,6 +63,16 @@ function resetAccessStore(): void {
     applyAccess(EMPTY_ACCESS);
 }
 
+export function reloadAccess(): void {
+    const username = accessSnapshot.username ?? loadedFor;
+    if (!username) {
+        return;
+    }
+    loadedFor = null;
+    loadPromise = null;
+    loadAccess(username);
+}
+
 function loadAccess(username: string): void {
     if (loadPromise && loadedFor === username) {
         return;

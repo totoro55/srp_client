@@ -17,6 +17,18 @@ export const PERMISSION_CATALOG = [
         title: "Любая премия",
         description: "Сумма и состав премии любого сотрудника",
     },
+    {
+        code: "settings:read",
+        group: "Приложение",
+        title: "Просмотр настроек",
+        description: "Обслуживание, объявления и просмотр ролей",
+    },
+    {
+        code: "settings:write",
+        group: "Приложение",
+        title: "Изменение настроек",
+        description: "Включение обслуживания, тексты и разрешение просмотра ролей",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
+import { getAppSettings } from "@/services/app-settings";
 import { isDevLoginName } from "@/services/dev-auth";
 import { IMPERSONATION_COOKIE_ROLE_ID } from "@/services/impersonation";
 import { db } from "@/services/db";
@@ -60,15 +61,21 @@ export async function getRequestAccess(): Promise<AccessView | null> {
         return null;
     }
 
+    const settings = await getAppSettings();
     const jar = await cookies();
     const previewRaw = jar.get(IMPERSONATION_COOKIE_ROLE_ID)?.value;
     const previewRoleId = Number.parseInt(previewRaw ?? "", 10);
-
-    return resolveAccess(
+    const access = await resolveAccess(
         session.user.username,
         session.user.title ?? "",
-        Number.isInteger(previewRoleId) && previewRoleId > 0 ? previewRoleId : null
+        settings.rolePreviewEnabled && Number.isInteger(previewRoleId) && previewRoleId > 0 ? previewRoleId : null
     );
+
+    if (!settings.rolePreviewEnabled) {
+        return { ...access, previewChoices: [] };
+    }
+
+    return access;
 }
 
 export async function resolveAccess(

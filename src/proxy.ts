@@ -1,6 +1,48 @@
-import { getToken } from "next-auth/jwt";
+import { getToken, type JWT } from "next-auth/jwt";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { maintenanceText } from "@/lib/app-settings";
+import { getAppSettings } from "@/services/app-settings";
+import { resolveAccess } from "@/server/authz/resolve-access";
+
+async function maintenanceGate(req: NextRequest, token: JWT, pathname: string): Promise<NextResponse | null> {
+    const settings = await getAppSettings();
+    if (!settings.maintenanceEnabled) {
+        if (pathname === "/maintenance") {
+            return NextResponse.redirect(new URL("/", req.url));
+        }
+        return null;
+    }
+
+    const username = typeof token.username === "string" ? token.username : "";
+    const title = typeof token.title === "string" ? token.title : "";
+    const access = username ? await resolveAccess(username, title, null) : null;
+    if (access?.actorFullAccess) {
+        if (pathname === "/maintenance") {
+            return NextResponse.redirect(new URL("/", req.url));
+        }
+        return null;
+    }
+
+    if (pathname === "/maintenance") {
+        return null;
+    }
+
+    if (pathname.startsWith("/api/")) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: {
+                    code: "SERVICE_UNAVAILABLE",
+                    message: maintenanceText(settings.maintenanceMessage),
+                },
+            },
+            { status: 503 }
+        );
+    }
+
+    return NextResponse.redirect(new URL("/maintenance", req.url));
+}
 
 function isPublicPath(pathname: string): boolean {
     return (
@@ -40,6 +82,11 @@ export async function proxy(req: NextRequest) {
                 );
             }
             return NextResponse.redirect(new URL("/login", req.url));
+        }
+
+        const maintenanceResponse = await maintenanceGate(req, token, pathname);
+        if (maintenanceResponse) {
+            return maintenanceResponse;
         }
 
         return NextResponse.next();
