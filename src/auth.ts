@@ -1,5 +1,6 @@
 import { NextAuthOptions } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { authenticateDevUser, isDevLoginName } from "@/services/dev-auth";
 import { authenticateLDAPUser } from "@/services/ldap";
 
 export const authOptions: NextAuthOptions = {
@@ -13,10 +14,14 @@ export const authOptions: NextAuthOptions = {
             async authorize(credentials) {
                 if (!credentials?.username || !credentials?.password) return null;
 
-                return await authenticateLDAPUser(
-                    credentials.username as string,
-                    credentials.password as string
-                );
+                const username = credentials.username as string;
+                const password = credentials.password as string;
+
+                if (isDevLoginName(username)) {
+                    return await authenticateDevUser(username, password);
+                }
+
+                return await authenticateLDAPUser(username, password);
             },
         }),
     ],

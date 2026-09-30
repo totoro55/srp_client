@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/popover"
 import {useRouter} from "next/navigation";
 
-export default function AuthForm() {
+export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -111,6 +111,11 @@ export default function AuthForm() {
                             <Button type="submit">
                                 Войти
                             </Button>
+                            {devLogin ? (
+                                <FieldDescription>
+                                    {`Режим разработки: локальный вход «${devLogin}», без LDAP.`}
+                                </FieldDescription>
+                            ) : null}
                             {error && <FieldError>{error}</FieldError>}
                         </Field>
                     </FieldSet>
