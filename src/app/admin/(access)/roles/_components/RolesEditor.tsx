@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ export function RolesEditor() {
     const [description, setDescription] = useState("");
     const [scopeKind, setScopeKind] = useState<ScopeKind>("division");
     const [createOpen, setCreateOpen] = useState(false);
+    const [editingRole, setEditingRole] = useState<RoleRow | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
@@ -63,44 +64,52 @@ export function RolesEditor() {
         return () => window.clearTimeout(timer);
     }, []);
 
-    async function onCreate(event: FormEvent) {
-        event.preventDefault();
-        setFormError(null);
-        const response = await fetch("/api/admin/roles", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, code, description, scopeKind }),
-        });
-        const json = await response.json();
-        if (!json.success) {
-            setFormError(json.error?.message ?? "Не удалось создать роль");
-            return;
-        }
+    function resetForm() {
         setName("");
         setCode("");
         setDescription("");
         setScopeKind("division");
-        setCreateOpen(false);
-        await load();
+        setEditingRole(null);
+        setFormError(null);
     }
 
-    async function onSave(role: RoleRow) {
-        setError(null);
+    function openCreate() {
+        resetForm();
+        setCreateOpen(true);
+    }
+
+    function openEdit(role: RoleRow) {
+        setEditingRole(role);
+        setName(role.name);
+        setCode(role.code);
+        setDescription(role.description ?? "");
+        setScopeKind(role.scopeKind);
+        setFormError(null);
+        setCreateOpen(true);
+    }
+
+    async function onSubmit(event: FormEvent) {
+        event.preventDefault();
+        setFormError(null);
         const response = await fetch("/api/admin/roles", {
-            method: "PATCH",
+            method: editingRole ? "PATCH" : "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                id: role.id,
-                name: role.name,
-                description: role.description ?? "",
-                scopeKind: role.scopeKind,
+                id: editingRole?.id,
+                name,
+                code,
+                description,
+                scopeKind,
             }),
         });
         const json = await response.json();
         if (!json.success) {
-            setError(json.error?.message ?? "Не удалось сохранить роль");
-            await load();
+            setFormError(json.error?.message ?? "Не удалось сохранить роль");
+            return;
         }
+        resetForm();
+        setCreateOpen(false);
+        await load();
     }
 
     async function onDelete(role: RoleRow) {
@@ -120,10 +129,6 @@ export function RolesEditor() {
         await onDelete(pendingRole);
         setDeleting(false);
         setPendingRole(null);
-    }
-
-    function updateRole(id: number, patch: Partial<RoleRow>) {
-        setRoles((current) => current.map((role) => (role.id === id ? { ...role, ...patch } : role)));
     }
 
     return (
@@ -146,15 +151,18 @@ export function RolesEditor() {
             {access.username && canWrite ? (
                 <>
                     <div>
-                        <Button type="button" size="sm" onClick={() => { setFormError(null); setCreateOpen(true); }}>
+                        <Button type="button" size="sm" onClick={openCreate}>
                             Добавить роль
                         </Button>
                     </div>
-                    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                    <Dialog open={createOpen} onOpenChange={(open) => {
+                        setCreateOpen(open);
+                        if (!open) resetForm();
+                    }}>
                         <DialogContent>
-                            <form className="flex flex-col gap-4" onSubmit={onCreate}>
+                            <form className="flex flex-col gap-4" onSubmit={onSubmit}>
                                 <DialogHeader>
-                                    <DialogTitle>Новая роль</DialogTitle>
+                                    <DialogTitle>{editingRole ? "Изменить роль" : "Новая роль"}</DialogTitle>
                                 </DialogHeader>
                                 <div className="grid gap-4">
                                     <div className="flex flex-col gap-1.5">
@@ -163,7 +171,14 @@ export function RolesEditor() {
                                     </div>
                                     <div className="flex flex-col gap-1.5">
                                         <Label htmlFor="role-code">Код</Label>
-                                        <Input id="role-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="код_роли" required />
+                                        <Input
+                                            id="role-code"
+                                            value={code}
+                                            onChange={(event) => setCode(event.target.value)}
+                                            placeholder="код_роли"
+                                            required
+                                            disabled={editingRole !== null}
+                                        />
                                     </div>
                                     <div className="flex flex-col gap-1.5">
                                         <Label htmlFor="role-description">Описание</Label>
@@ -174,19 +189,23 @@ export function RolesEditor() {
                                         <select
                                             id="role-scope"
                                             value={scopeKind}
+                                            disabled={editingRole?.isSystem === true}
                                             onChange={(event) => setScopeKind(event.target.value as ScopeKind)}
-                                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                                            className="h-9 rounded-md border bg-background px-3 text-sm disabled:opacity-50"
                                         >
                                             {SCOPE_KINDS.map((kind) => (
                                                 <option key={kind} value={kind}>{SCOPE_KIND_LABELS[kind]}</option>
                                             ))}
                                         </select>
+                                        {editingRole?.isSystem ? (
+                                            <p className="text-xs text-muted-foreground">У администратора область всегда дивизион.</p>
+                                        ) : null}
                                     </div>
                                     {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm">Добавить</Button>
+                                    <Button type="submit" size="sm">{editingRole ? "Сохранить" : "Добавить"}</Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>
@@ -235,53 +254,36 @@ export function RolesEditor() {
                     ) : null}
                     {visibleRoles.map((role) => (
                         <TableRow key={role.id}>
-                            <TableCell>
-                                <Input
-                                    value={role.name}
-                                    disabled={!canWrite}
-                                    onChange={(event) => updateRole(role.id, { name: event.target.value })}
-                                    onBlur={(event) => void onSave({ ...role, name: event.target.value })}
-                                    className="h-8 text-xs"
-                                />
-                            </TableCell>
+                            <TableCell>{role.name}</TableCell>
                             <TableCell className="font-mono text-xs">{role.code}</TableCell>
+                            <TableCell>{SCOPE_KIND_LABELS[role.scopeKind]}</TableCell>
+                            <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{role.description || "—"}</TableCell>
                             <TableCell>
-                                <select
-                                    value={role.scopeKind}
-                                    disabled={!canWrite || role.isSystem}
-                                    onChange={(event) => {
-                                        const next = { ...role, scopeKind: event.target.value as ScopeKind };
-                                        updateRole(role.id, { scopeKind: next.scopeKind });
-                                        void onSave(next);
-                                    }}
-                                    className="h-8 rounded-md border bg-background px-2 text-xs"
-                                >
-                                    {SCOPE_KINDS.map((kind) => (
-                                        <option key={kind} value={kind}>{SCOPE_KIND_LABELS[kind]}</option>
-                                    ))}
-                                </select>
-                            </TableCell>
-                            <TableCell>
-                                <Input
-                                    value={role.description ?? ""}
-                                    disabled={!canWrite}
-                                    onChange={(event) => updateRole(role.id, { description: event.target.value })}
-                                    onBlur={(event) => void onSave({ ...role, description: event.target.value })}
-                                    className="h-8 text-xs"
-                                />
-                            </TableCell>
-                            <TableCell>
-                                {canWrite && !role.isSystem ? (
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        className="text-muted-foreground hover:text-destructive"
-                                        aria-label={`Удалить роль ${role.name}`}
-                                        onClick={() => setPendingRole(role)}
-                                    >
-                                        <Trash2 />
-                                    </Button>
+                                {canWrite ? (
+                                    <div className="flex justify-end">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="text-muted-foreground"
+                                            aria-label={`Изменить роль ${role.name}`}
+                                            onClick={() => openEdit(role)}
+                                        >
+                                            <Pencil />
+                                        </Button>
+                                        {!role.isSystem ? (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                className="text-muted-foreground hover:text-destructive"
+                                                aria-label={`Удалить роль ${role.name}`}
+                                                onClick={() => setPendingRole(role)}
+                                            >
+                                                <Trash2 />
+                                            </Button>
+                                        ) : null}
+                                    </div>
                                 ) : null}
                             </TableCell>
                         </TableRow>

@@ -9,7 +9,10 @@ export async function GET(): Promise<NextResponse<ApiResponse<string[]>>> {
         await requirePermission("access.read");
         // Выполняем быстрый запрос к представлению в схеме public
         const positions = await db.query<{ position_name: string }>(
-            'SELECT position_name FROM unique_positions WHERE position_name IS NOT NULL ORDER BY position_name ASC'
+            `SELECT DISTINCT title AS position_name
+             FROM employees
+             WHERE title IS NOT NULL AND btrim(title) <> ''
+             ORDER BY title ASC`
         );
 
         // Превращаем массив объектов [{ position_name: '...' }] в плоский массив строк
@@ -21,7 +24,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<string[]>>> {
         if (authResponse) return authResponse;
         return createErrorResponse(
             'DATABASE_ERROR',
-            'Не удалось загрузить список должностей из представления unique_positions',
+            'Не удалось загрузить список должностей',
             500
         );
     }
