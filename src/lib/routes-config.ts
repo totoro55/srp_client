@@ -59,7 +59,7 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 href: "/admin/scopes",
                 icon: MapPinned,
                 title: "Области",
-                description: "Территории, назначенные сотруднику",
+                description: "Назначение территорий из справочника",
                 permission: "access.read",
             },
         ],

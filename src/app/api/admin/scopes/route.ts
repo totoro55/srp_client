@@ -35,27 +35,9 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
     try {
         const access = await requirePermission("access.write");
         const body = (await request.json()) as {
-            kind?: unknown;
-            code?: unknown;
-            name?: unknown;
             username?: unknown;
             territoryId?: unknown;
         };
-
-        if (body.kind === "territory") {
-            const code = typeof body.code === "string" ? body.code.trim() : "";
-            const name = typeof body.name === "string" ? body.name.trim() : "";
-            if (!code || !name) {
-                return createErrorResponse("BAD_REQUEST", "Укажите код и название территории", 400);
-            }
-            try {
-                await db.query("INSERT INTO territories (code, name) VALUES ($1, $2)", [code, name]);
-            } catch {
-                return createErrorResponse("BAD_REQUEST", "Территория с таким кодом уже есть", 400);
-            }
-            await audit(access.username, "territory.create", `${code} ${name}`);
-            return NextResponse.json({ success: true, data: { created: true } });
-        }
 
         const username = typeof body.username === "string" ? body.username.trim() : "";
         const territoryId = parsePositiveInt(body.territoryId);
@@ -84,23 +66,15 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
 export async function DELETE(request: Request): Promise<NextResponse<ApiResponse<{ deleted: boolean }>>> {
     try {
         const access = await requirePermission("access.write");
-        const url = new URL(request.url);
-        const grantId = Number(url.searchParams.get("grantId"));
-        const territoryId = Number(url.searchParams.get("territoryId"));
+        const grantId = Number(new URL(request.url).searchParams.get("grantId"));
 
-        if (Number.isInteger(grantId) && grantId > 0) {
-            await db.query("DELETE FROM scope_grants WHERE id = $1", [grantId]);
-            await audit(access.username, "scope.revoke", String(grantId));
-            return NextResponse.json({ success: true, data: { deleted: true } });
+        if (!Number.isInteger(grantId) || grantId <= 0) {
+            return createErrorResponse("BAD_REQUEST", "Нечего удалять", 400);
         }
 
-        if (Number.isInteger(territoryId) && territoryId > 0) {
-            await db.query("DELETE FROM territories WHERE id = $1", [territoryId]);
-            await audit(access.username, "territory.delete", String(territoryId));
-            return NextResponse.json({ success: true, data: { deleted: true } });
-        }
-
-        return createErrorResponse("BAD_REQUEST", "Нечего удалять", 400);
+        await db.query("DELETE FROM scope_grants WHERE id = $1", [grantId]);
+        await audit(access.username, "scope.revoke", String(grantId));
+        return NextResponse.json({ success: true, data: { deleted: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;

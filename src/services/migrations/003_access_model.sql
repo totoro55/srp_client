@@ -57,20 +57,7 @@ SELECT 10, 'title', ldap_position, role_id
 FROM ldap_position_mappings
 ON CONFLICT (match_type, match_value) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS territories (
-    id SERIAL PRIMARY KEY,
-    code VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS employees (
-    id SERIAL PRIMARY KEY,
-    ldap_login VARCHAR(100) NOT NULL UNIQUE,
-    full_name VARCHAR(255),
-    title VARCHAR(255),
-    branch_code VARCHAR(50),
-    branch_name VARCHAR(255)
-);
+-- employees и territories наполняет DAG Airflow. Приложение их только читает.
 
 CREATE TABLE IF NOT EXISTS scope_grants (
     id SERIAL PRIMARY KEY,

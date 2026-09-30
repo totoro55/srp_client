@@ -29,11 +29,8 @@ export function ScopesEditor() {
     const canWrite = access.has("access.write");
     const [territories, setTerritories] = useState<Territory[]>([]);
     const [grants, setGrants] = useState<Grant[]>([]);
-    const [code, setCode] = useState("");
-    const [name, setName] = useState("");
     const [username, setUsername] = useState("");
     const [territoryId, setTerritoryId] = useState("");
-    const [territoryOpen, setTerritoryOpen] = useState(false);
     const [grantOpen, setGrantOpen] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
@@ -69,25 +66,6 @@ export function ScopesEditor() {
         }, 0);
         return () => window.clearTimeout(timer);
     }, []);
-
-    async function addTerritory(event: FormEvent) {
-        event.preventDefault();
-        setError(null);
-        const response = await fetch("/api/admin/scopes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: "territory", code, name }),
-        });
-        const json = await response.json();
-        if (!json.success) {
-            setError(json.error?.message ?? "Не удалось добавить территорию");
-            return;
-        }
-        setCode("");
-        setName("");
-        setTerritoryOpen(false);
-        await load();
-    }
 
     async function addGrant(event: FormEvent) {
         event.preventDefault();
@@ -126,7 +104,7 @@ export function ScopesEditor() {
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
             <p className="text-sm text-muted-foreground">
-                Здесь назначаются территории директору. Филиал управляющего и линейного сотрудника берётся из карточки сотрудника, не из этого списка. Пока кадровый справочник пуст, такую область проверить не на чем.
+                Здесь назначаются территории директору. Справочники сотрудников и территорий наполняет загрузка данных, приложение их не меняет. Филиал линейного сотрудника берётся из карточки сотрудника.
             </p>
             {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
             <ConfirmDialog
@@ -142,43 +120,15 @@ export function ScopesEditor() {
             />
             {canWrite ? (
                 <div className="flex flex-wrap gap-2">
-                    <Button type="button" size="sm" onClick={() => { setError(null); setTerritoryOpen(true); }}>
-                        Добавить территорию
-                    </Button>
                     <Button
                         type="button"
                         size="sm"
-                        variant="outline"
                         disabled={territories.length === 0}
-                        title={territories.length === 0 ? "Сначала добавьте территорию" : undefined}
+                        title={territories.length === 0 ? "В справочнике пока нет территорий" : undefined}
                         onClick={() => { setError(null); setGrantOpen(true); }}
                     >
                         Назначить
                     </Button>
-                    <Dialog open={territoryOpen} onOpenChange={setTerritoryOpen}>
-                        <DialogContent>
-                            <form className="flex flex-col gap-4" onSubmit={addTerritory}>
-                                <DialogHeader>
-                                    <DialogTitle>Новая территория</DialogTitle>
-                                </DialogHeader>
-                                <div className="grid gap-4">
-                                    <div className="flex flex-col gap-1.5">
-                                        <Label htmlFor="territory-code">Код</Label>
-                                        <Input id="territory-code" value={code} onChange={(event) => setCode(event.target.value)} required />
-                                    </div>
-                                    <div className="flex flex-col gap-1.5">
-                                        <Label htmlFor="territory-name">Название</Label>
-                                        <Input id="territory-name" value={name} onChange={(event) => setName(event.target.value)} required />
-                                    </div>
-                                    {error && territoryOpen ? <p className="text-sm text-destructive">{error}</p> : null}
-                                </div>
-                                <DialogFooter>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => setTerritoryOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm">Добавить</Button>
-                                </DialogFooter>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
                     <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
                         <DialogContent>
                             <form className="flex flex-col gap-4" onSubmit={addGrant}>
@@ -204,7 +154,7 @@ export function ScopesEditor() {
                                             ))}
                                         </select>
                                     </div>
-                                    {error && grantOpen ? <p className="text-sm text-destructive">{error}</p> : null}
+                                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setGrantOpen(false)}>Отмена</Button>
@@ -220,7 +170,7 @@ export function ScopesEditor() {
                 </p>
             ) : null}
             {territories.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Территорий пока нет.</p>
+                <p className="text-sm text-muted-foreground">Справочник территорий пока пуст.</p>
             ) : null}
             <AdminToolbar search={query} onSearchChange={setQuery} searchPlaceholder="Логин или территория">
                 <select
