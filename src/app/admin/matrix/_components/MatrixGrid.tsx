@@ -118,6 +118,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                             <div className="flex flex-col gap-1 min-w-0">
                                                 <div className="flex items-center gap-2 min-w-0">
                                                     <span className="text-[11px] text-muted-foreground">{perm.group}</span>
+                                                    <span className="truncate font-mono text-[11px] text-muted-foreground">{perm.code}</span>
                                                     <span className="truncate text-xs font-medium">{perm.title}</span>
                                                 </div>
                                                 {perm.description && <span className="text-[11px] text-muted-foreground truncate" title={perm.description}>{perm.description}</span>}

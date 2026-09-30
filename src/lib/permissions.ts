@@ -2,14 +2,14 @@ export const PERMISSION_CATALOG = [
     {
         code: "access.read",
         group: "Доступ",
-        title: "Просмотр настроек доступа",
-        description: "Матрица, правила трансляции и области",
+        title: "Просмотр настроек",
+        description: "Роли, матрица, трансляция и области",
     },
     {
         code: "access.write",
         group: "Доступ",
-        title: "Изменение настроек доступа",
-        description: "Галочки, правила и назначения областей",
+        title: "Изменение настроек",
+        description: "Роли, галочки матрицы, правила трансляции и назначения территорий",
     },
     {
         code: "bonus.any:read",
