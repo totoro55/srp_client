@@ -12,7 +12,7 @@ import { useAccess } from "@/hooks/useAccess";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface Territory {
-    id: number;
+    uuid: string;
     code: string;
     name: string;
 }
@@ -20,7 +20,7 @@ interface Territory {
 interface Grant {
     id: number;
     username: string;
-    territoryId: number;
+    territoryUuid: string;
     territoryName: string;
 }
 
@@ -30,7 +30,7 @@ export function ScopesEditor() {
     const [territories, setTerritories] = useState<Territory[]>([]);
     const [grants, setGrants] = useState<Grant[]>([]);
     const [username, setUsername] = useState("");
-    const [territoryId, setTerritoryId] = useState("");
+    const [territoryUuid, setTerritoryUuid] = useState("");
     const [grantOpen, setGrantOpen] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [query, setQuery] = useState("");
@@ -42,7 +42,7 @@ export function ScopesEditor() {
     const visibleGrants = useMemo(() => {
         const needle = query.trim().toLowerCase();
         return grants.filter((grant) => {
-            if (territoryFilter && String(grant.territoryId) !== territoryFilter) return false;
+            if (territoryFilter && grant.territoryUuid !== territoryFilter) return false;
             if (!needle) return true;
             return grant.username.toLowerCase().includes(needle)
                 || grant.territoryName.toLowerCase().includes(needle);
@@ -55,8 +55,8 @@ export function ScopesEditor() {
         if (!json.success) return;
         setTerritories(json.data.territories);
         setGrants(json.data.grants);
-        if (!territoryId && json.data.territories[0]) {
-            setTerritoryId(String(json.data.territories[0].id));
+        if (!territoryUuid && json.data.territories[0]) {
+            setTerritoryUuid(json.data.territories[0].uuid);
         }
     }
 
@@ -73,7 +73,7 @@ export function ScopesEditor() {
         const response = await fetch("/api/admin/scopes", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username, territoryId: Number(territoryId) }),
+            body: JSON.stringify({ username, territoryUuid }),
         });
         const json = await response.json();
         if (!json.success) {
@@ -144,13 +144,13 @@ export function ScopesEditor() {
                                         <Label htmlFor="grant-territory">Территория</Label>
                                         <select
                                             id="grant-territory"
-                                            value={territoryId}
-                                            onChange={(event) => setTerritoryId(event.target.value)}
+                                            value={territoryUuid}
+                                            onChange={(event) => setTerritoryUuid(event.target.value)}
                                             className="h-9 rounded-md border bg-background px-3 text-sm"
                                             required
                                         >
                                             {territories.map((territory) => (
-                                                <option key={territory.id} value={territory.id}>{territory.name}</option>
+                                                <option key={territory.uuid} value={territory.uuid}>{territory.name}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -181,7 +181,7 @@ export function ScopesEditor() {
                 >
                     <option value="">Все территории</option>
                     {territories.map((territory) => (
-                        <option key={territory.id} value={territory.id}>{territory.name}</option>
+                        <option key={territory.uuid} value={territory.uuid}>{territory.name}</option>
                     ))}
                 </select>
                 {query || territoryFilter ? (

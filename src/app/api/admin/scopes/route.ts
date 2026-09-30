@@ -5,22 +5,23 @@ import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
 import { ApiResponse } from "@/types/api";
 
-function parsePositiveInt(value: unknown): number | null {
-    const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    if (!Number.isInteger(numeric) || numeric <= 0) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseUuid(value: unknown): string | null {
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
         return null;
     }
-    return numeric;
+    return value;
 }
 
 export async function GET() {
     try {
         await requirePermission("access.read");
-        const territories = await db.query("SELECT id, code, name FROM territories ORDER BY name");
+        const territories = await db.query("SELECT uuid, code, name FROM territories ORDER BY name");
         const grants = await db.query(`
-            SELECT g.id, g.username, g.territory_id AS "territoryId", t.name AS "territoryName"
+            SELECT g.id, g.username, g.territory_uuid AS "territoryUuid", t.name AS "territoryName"
             FROM scope_grants g
-            JOIN territories t ON t.id = g.territory_id
+            JOIN territories t ON t.uuid = g.territory_uuid
             ORDER BY g.username, t.name
         `);
         return NextResponse.json({ success: true, data: { territories, grants } });
@@ -36,25 +37,25 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
         const access = await requirePermission("access.write");
         const body = (await request.json()) as {
             username?: unknown;
-            territoryId?: unknown;
+            territoryUuid?: unknown;
         };
 
         const username = typeof body.username === "string" ? body.username.trim() : "";
-        const territoryId = parsePositiveInt(body.territoryId);
-        if (!username || !territoryId) {
+        const territoryUuid = parseUuid(body.territoryUuid);
+        if (!username || !territoryUuid) {
             return createErrorResponse("BAD_REQUEST", "Укажите логин и территорию", 400);
         }
 
         try {
             await db.query(
-                "INSERT INTO scope_grants (username, territory_id) VALUES ($1, $2)",
-                [username, territoryId]
+                "INSERT INTO scope_grants (username, territory_uuid) VALUES ($1, $2)",
+                [username, territoryUuid]
             );
         } catch {
             return createErrorResponse("BAD_REQUEST", "Такое назначение уже есть", 400);
         }
 
-        await audit(access.username, "scope.grant", `${username} → ${territoryId}`);
+        await audit(access.username, "scope.grant", `${username} → ${territoryUuid}`);
         return NextResponse.json({ success: true, data: { created: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);

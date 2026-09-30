@@ -62,8 +62,8 @@ ON CONFLICT (match_type, match_value) DO NOTHING;
 CREATE TABLE IF NOT EXISTS scope_grants (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) NOT NULL,
-    territory_id INTEGER NOT NULL REFERENCES territories(id) ON DELETE CASCADE,
-    UNIQUE (username, territory_id)
+    territory_uuid UUID NOT NULL REFERENCES territories(uuid) ON DELETE CASCADE,
+    UNIQUE (username, territory_uuid)
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (

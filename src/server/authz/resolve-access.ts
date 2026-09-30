@@ -147,8 +147,8 @@ async function resolveActor(username: string, title: string): Promise<AccessView
         return finishActor(username, title, top[0], false);
     }
 
-    const employees = await db.query<{ id: number }>(
-        "SELECT id FROM employees WHERE lower(ldap_login) = lower($1) LIMIT 1",
+    const employees = await db.query<{ uuid: string }>(
+        "SELECT uuid FROM employees WHERE lower(login) = lower($1) LIMIT 1",
         [username]
     );
     if (employees.length > 0) {
@@ -195,18 +195,18 @@ async function scopeLabelFor(username: string, scopeKind: ScopeKind): Promise<st
     }
 
     if (scopeKind === "home_branch") {
-        const rows = await db.query<{ branch_name: string | null }>(
-            "SELECT branch_name FROM employees WHERE lower(ldap_login) = lower($1) LIMIT 1",
+        const rows = await db.query<{ branch: string | null }>(
+            "SELECT branch FROM employees WHERE lower(login) = lower($1) LIMIT 1",
             [username]
         );
-        return rows[0]?.branch_name || "Филиал не назначен";
+        return rows[0]?.branch || "Филиал не назначен";
     }
 
     const grants = await db.query<{ name: string }>(
         `
         SELECT t.name
         FROM scope_grants g
-        JOIN territories t ON t.id = g.territory_id
+        JOIN territories t ON t.uuid = g.territory_uuid
         WHERE lower(g.username) = lower($1)
         ORDER BY t.name
         `,
