@@ -1,24 +1,40 @@
-'use client';
+"use client";
 
 import { useSession } from "next-auth/react";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { isSuperuser } from "@/lib/roles";
-import { ApiResponse, SessionAccess } from "@/types/api";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import type { PermissionCode } from "@/lib/permissions";
+import { ApiResponse } from "@/types/api";
+
+export interface SessionAccess {
+    username: string | null;
+    roleCode: string | null;
+    roleName: string | null;
+    scopeLabel: string;
+    fullAccess: boolean;
+    actorFullAccess: boolean;
+    permissions: PermissionCode[];
+    previewRoleName: string | null;
+    conflict: boolean;
+    previewChoices: { id: number; name: string }[];
+}
 
 const EMPTY_ACCESS: SessionAccess = {
-    role: null,
-    roleId: null,
-    isSuperuser: false,
-    originalIsSuperuser: false,
-    codes: [],
-    impersonatedRole: null,
-    impersonatedRoleId: null,
+    username: null,
+    roleCode: null,
+    roleName: null,
+    scopeLabel: "",
+    fullAccess: false,
+    actorFullAccess: false,
+    permissions: [],
+    previewRoleName: null,
+    conflict: false,
+    previewChoices: [],
 };
 
 type Listener = () => void;
 
 let accessSnapshot: SessionAccess = EMPTY_ACCESS;
+let loadedFor: string | null = null;
 let loadPromise: Promise<void> | null = null;
 const listeners = new Set<Listener>();
 
@@ -39,18 +55,26 @@ function applyAccess(next: SessionAccess): void {
 }
 
 function resetAccessStore(): void {
+    loadedFor = null;
     loadPromise = null;
+    if (accessSnapshot === EMPTY_ACCESS) {
+        return;
+    }
     applyAccess(EMPTY_ACCESS);
 }
 
-function loadAccess(): void {
-    if (loadPromise) {
+function loadAccess(username: string): void {
+    if (loadPromise && loadedFor === username) {
         return;
     }
 
+    loadedFor = username;
     loadPromise = fetch("/api/me/access")
         .then(async (response) => {
             const json = (await response.json()) as ApiResponse<SessionAccess>;
+            if (loadedFor !== username) {
+                return;
+            }
             if (!json.success) {
                 applyAccess(EMPTY_ACCESS);
                 return;
@@ -58,6 +82,9 @@ function loadAccess(): void {
             applyAccess(json.data);
         })
         .catch(() => {
+            if (loadedFor !== username) {
+                return;
+            }
             applyAccess(EMPTY_ACCESS);
         });
 }
@@ -65,63 +92,33 @@ function loadAccess(): void {
 export function useAccess(): SessionAccess & { has: (permission: PermissionCode) => boolean } {
     const { data: session, status } = useSession();
     const snapshot = useSyncExternalStore(subscribe, () => accessSnapshot, () => EMPTY_ACCESS);
+    const username = session?.user?.username ?? null;
 
-    if (status === "authenticated") {
-        loadAccess();
-    } else if (status === "unauthenticated" && (accessSnapshot.role !== null || loadPromise)) {
-        resetAccessStore();
-    }
-
-    const originalIsSuperuser = isSuperuser(session?.user?.isSuperuser, session?.user?.role);
-    const waitingForServer = status === "authenticated" && snapshot.role === null;
-    const isSuperuserActive = waitingForServer ? originalIsSuperuser : snapshot.isSuperuser;
-    const codes = snapshot.codes;
+    useEffect(() => {
+        if (status === "authenticated" && username) {
+            loadAccess(username);
+            return;
+        }
+        if (status === "unauthenticated") {
+            resetAccessStore();
+        }
+    }, [status, username]);
 
     const has = useCallback(
-        (permission: PermissionCode) => isSuperuserActive || codes.includes(permission),
-        [isSuperuserActive, codes]
+        (permission: PermissionCode) => snapshot.permissions.includes(permission),
+        [snapshot.permissions]
     );
 
     return useMemo(
         () => ({
-            role: snapshot.role ?? session?.user?.role ?? null,
-            roleId: snapshot.roleId ?? session?.user?.roleId ?? null,
-            isSuperuser: isSuperuserActive,
-            originalIsSuperuser: snapshot.originalIsSuperuser || originalIsSuperuser,
-            codes,
-            impersonatedRole: snapshot.impersonatedRole,
-            impersonatedRoleId: snapshot.impersonatedRoleId,
+            ...snapshot,
             has,
         }),
-        [
-            snapshot.role,
-            snapshot.roleId,
-            snapshot.originalIsSuperuser,
-            snapshot.impersonatedRole,
-            snapshot.impersonatedRoleId,
-            session?.user?.role,
-            session?.user?.roleId,
-            originalIsSuperuser,
-            isSuperuserActive,
-            codes,
-            has,
-        ]
+        [snapshot, has]
     );
 }
 
 export function usePermission(permission: PermissionCode): boolean {
     const access = useAccess();
     return access.has(permission);
-}
-
-export function useImpersonationMask(): Pick<
-    SessionAccess,
-    "impersonatedRole" | "impersonatedRoleId" | "codes"
-> {
-    const access = useAccess();
-    return {
-        impersonatedRole: access.impersonatedRole,
-        impersonatedRoleId: access.impersonatedRoleId,
-        codes: access.codes,
-    };
 }

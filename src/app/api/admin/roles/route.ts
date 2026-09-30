@@ -1,126 +1,143 @@
 import { NextResponse } from "next/server";
 import { db } from "@/services/db";
-import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
-import { invalidateRolePermissionCache } from "@/services/permission-cache";
 import { createErrorResponse } from "@/lib/api-error";
-
-type AdminEntityType = "ROLE" | "MAPPING" | "EXCEPTION";
-
-interface RolesMutationBody {
-    type?: AdminEntityType;
-    id?: number;
-    name?: string;
-    description?: string | null;
-    ldapPosition?: string;
-    roleId?: number;
-    username?: string;
-    reason?: string | null;
-    expiresAt?: string | null;
-}
-
-const TABLE_BY_TYPE: Record<AdminEntityType, string> = {
-    ROLE: "roles",
-    MAPPING: "ldap_position_mappings",
-    EXCEPTION: "user_role_exceptions",
-};
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
+import { isScopeKind } from "@/lib/permissions";
+import { audit } from "@/server/authz/resolve-access";
+import { ApiResponse } from "@/types/api";
 
 export async function GET() {
     try {
-        await requirePermission("admin.roles:read");
-        const roles = await db.query("SELECT id, name, description, is_superuser AS \"isSuperuser\" FROM roles ORDER BY id ASC");
-        const mappings = await db.query(`
-            SELECT m.id, m.ldap_position AS "ldapPosition", m.role_id AS "roleId", r.name AS "roleName"
-            FROM ldap_position_mappings m JOIN roles r ON m.role_id = r.id ORDER BY m.id DESC
+        await requirePermission("access.read");
+        const roles = await db.query(`
+            SELECT id, code, name, description, scope_kind AS "scopeKind", is_system AS "isSystem"
+            FROM roles
+            ORDER BY name
         `);
-        const exceptions = await db.query(`
-            SELECT e.id, e.username, e.role_id AS "roleId", r.name AS "roleName",
-                   e.reason, e.granted_by AS "grantedBy", e.expires_at AS "expiresAt"
-            FROM user_role_exceptions e JOIN roles r ON e.role_id = r.id ORDER BY e.id DESC
-        `);
-        return NextResponse.json({ success: true, data: { roles, mappings, exceptions } });
+        return NextResponse.json({ success: true, data: roles });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;
-        return createErrorResponse("DATABASE_ERROR", "Ошибка БД", 500);
+        return createErrorResponse("DATABASE_ERROR", "Не удалось загрузить роли", 500);
     }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request): Promise<NextResponse<ApiResponse<{ created: boolean }>>> {
     try {
-        const admin = await requirePermission("admin.roles:write");
-        const payload = (await req.json()) as RolesMutationBody;
+        const access = await requirePermission("access.write");
+        const body = (await request.json()) as {
+            name?: unknown;
+            code?: unknown;
+            scopeKind?: unknown;
+            description?: unknown;
+        };
 
-        if (payload.type === "ROLE") {
-            await db.query(
-                "INSERT INTO roles (name, description) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description",
-                [payload.name, payload.description]
-            );
-        } else if (payload.type === "MAPPING") {
-            await db.query(
-                "INSERT INTO ldap_position_mappings (ldap_position, role_id) VALUES ($1, $2) ON CONFLICT (ldap_position) DO UPDATE SET role_id = EXCLUDED.role_id",
-                [payload.ldapPosition, payload.roleId]
-            );
-        } else if (payload.type === "EXCEPTION") {
-            await db.query(
-                "INSERT INTO user_role_exceptions (username, role_id, reason, granted_by, expires_at) VALUES ($1, $2, $3, $4, $5)",
-                [payload.username, payload.roleId, payload.reason, admin.username, payload.expiresAt]
-            );
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const code = typeof body.code === "string" ? body.code.trim().toLowerCase() : "";
+        const scopeKind = typeof body.scopeKind === "string" ? body.scopeKind : "";
+        const description = typeof body.description === "string" ? body.description.trim() : "";
+
+        if (!name || !/^[a-z][a-z0-9_]{1,40}$/.test(code) || !isScopeKind(scopeKind)) {
+            return createErrorResponse("BAD_REQUEST", "Укажите название, код латиницей и вид области", 400);
         }
-        invalidateRolePermissionCache();
-        return NextResponse.json({ success: true });
+
+        if (code === "admin") {
+            return createErrorResponse("BAD_REQUEST", "Код admin занят системной ролью", 400);
+        }
+
+        try {
+            await db.query(
+                "INSERT INTO roles (name, code, description, scope_kind, is_system) VALUES ($1, $2, $3, $4, false)",
+                [name, code, description || null, scopeKind]
+            );
+        } catch {
+            return createErrorResponse("BAD_REQUEST", "Роль с таким кодом уже есть", 400);
+        }
+
+        await audit(access.username, "role.create", `${code} / ${scopeKind}`);
+        return NextResponse.json({ success: true, data: { created: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;
-        return createErrorResponse("DATABASE_ERROR", "Ошибка сохранения", 500);
+        return createErrorResponse("DATABASE_ERROR", "Не удалось создать роль", 500);
     }
 }
 
-export async function PUT(req: Request) {
+export async function PATCH(request: Request): Promise<NextResponse<ApiResponse<{ updated: boolean }>>> {
     try {
-        const admin = await requirePermission("admin.roles:write");
-        const payload = (await req.json()) as RolesMutationBody;
+        const access = await requirePermission("access.write");
+        const body = (await request.json()) as {
+            id?: unknown;
+            name?: unknown;
+            scopeKind?: unknown;
+            description?: unknown;
+        };
 
-        if (payload.type === "ROLE") {
-            await db.query("UPDATE roles SET name = $1, description = $2 WHERE id = $3", [
-                payload.name,
-                payload.description,
-                payload.id,
-            ]);
-        } else if (payload.type === "MAPPING") {
-            await db.query(
-                "UPDATE ldap_position_mappings SET ldap_position = $1, role_id = $2 WHERE id = $3",
-                [payload.ldapPosition, payload.roleId, payload.id]
-            );
-        } else if (payload.type === "EXCEPTION") {
-            await db.query(
-                "UPDATE user_role_exceptions SET role_id = $1, reason = $2, granted_by = $3, expires_at = $4 WHERE id = $5",
-                [payload.roleId, payload.reason, admin.username, payload.expiresAt, payload.id]
-            );
+        const id = typeof body.id === "number" ? body.id : Number(body.id);
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const scopeKind = typeof body.scopeKind === "string" ? body.scopeKind : "";
+        const description = typeof body.description === "string" ? body.description.trim() : "";
+
+        if (!Number.isInteger(id) || id <= 0 || !name || !isScopeKind(scopeKind)) {
+            return createErrorResponse("BAD_REQUEST", "Укажите роль, название и вид области", 400);
         }
-        invalidateRolePermissionCache();
-        return NextResponse.json({ success: true });
+
+        const roles = await db.query<{ is_system: boolean; code: string }>(
+            "SELECT is_system, code FROM roles WHERE id = $1",
+            [id]
+        );
+        const role = roles[0];
+        if (!role) {
+            return createErrorResponse("NOT_FOUND", "Роль не найдена", 404);
+        }
+        if (role.is_system && scopeKind !== "division") {
+            return createErrorResponse("BAD_REQUEST", "У администратора область всегда дивизион", 400);
+        }
+
+        await db.query(
+            "UPDATE roles SET name = $1, description = $2, scope_kind = $3 WHERE id = $4",
+            [name, description || null, scopeKind, id]
+        );
+        await audit(access.username, "role.update", `${role.code} / ${scopeKind}`);
+        return NextResponse.json({ success: true, data: { updated: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;
-        return createErrorResponse("DATABASE_ERROR", "Ошибка обновления", 500);
+        return createErrorResponse("DATABASE_ERROR", "Не удалось изменить роль", 500);
     }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(request: Request): Promise<NextResponse<ApiResponse<{ deleted: boolean }>>> {
     try {
-        await requirePermission("admin.roles:write");
-        const { searchParams } = new URL(req.url);
-        const id = searchParams.get("id");
-        const type = searchParams.get("type");
-
-        if (id && (type === "ROLE" || type === "MAPPING" || type === "EXCEPTION")) {
-            await db.query(`DELETE FROM ${TABLE_BY_TYPE[type]} WHERE id = $1`, [parseInt(id, 10)]);
-            invalidateRolePermissionCache();
+        const access = await requirePermission("access.write");
+        const id = Number(new URL(request.url).searchParams.get("id"));
+        if (!Number.isInteger(id) || id <= 0) {
+            return createErrorResponse("BAD_REQUEST", "Некорректный идентификатор роли", 400);
         }
-        return NextResponse.json({ success: true });
+
+        const roles = await db.query<{ is_system: boolean; code: string }>(
+            "SELECT is_system, code FROM roles WHERE id = $1",
+            [id]
+        );
+        const role = roles[0];
+        if (!role) {
+            return createErrorResponse("NOT_FOUND", "Роль не найдена", 404);
+        }
+        if (role.is_system) {
+            return createErrorResponse("BAD_REQUEST", "Системную роль нельзя удалить", 400);
+        }
+
+        const rules = await db.query<{ id: number }>("SELECT id FROM role_rules WHERE role_id = $1 LIMIT 1", [id]);
+        if (rules.length > 0) {
+            return createErrorResponse("BAD_REQUEST", "Сначала удалите правила трансляции этой роли", 400);
+        }
+
+        await db.query("DELETE FROM roles WHERE id = $1", [id]);
+        await audit(access.username, "role.delete", role.code);
+        return NextResponse.json({ success: true, data: { deleted: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;
-        return createErrorResponse("DATABASE_ERROR", "Ошибка удаления", 500);
+        return createErrorResponse("DATABASE_ERROR", "Не удалось удалить роль", 500);
     }
 }

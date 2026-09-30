@@ -1,15 +1,5 @@
-// src/lib/routes-config.ts
 import type { PermissionCode } from "@/lib/permissions";
-import {
-    LayoutDashboard,
-    Settings,
-    Grid3X3,
-    KeyRound,
-    Layers,
-    ShieldAlert,
-    Folder,
-    Home,
-} from "lucide-react";
+import { Grid3X3, KeyRound, MapPinned, ShieldAlert, Home, Users } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -17,7 +7,7 @@ export interface RouteItem {
     icon: React.ComponentType<{ className?: string }>;
     title?: string;
     description?: string;
-    permission: PermissionCode;
+    permission?: PermissionCode;
 }
 
 export interface NavigationGroup {
@@ -29,46 +19,51 @@ export interface NavigationGroup {
 
 export const APP_NAVIGATION_MAP: NavigationGroup[] = [
     {
-        id: 'main',
+        id: "main",
         label: "Основное меню",
-        icon: Folder,
         items: [
-            { name: 'Главная панель', href: '/', icon: Home, title: 'Главная панель', permission: 'app.home:read' },
-            { name: 'Мониторинг', href: '/dashboard', icon: LayoutDashboard, title: 'Мониторинг', permission: 'app.dashboard:read' },
-            { name: 'Настройки', href: '/settings', icon: Settings, title: 'Настройки', permission: 'app.settings:read' },
-        ]
+            { name: "Главная", href: "/", icon: Home, title: "Главная" },
+        ],
     },
     {
-        id: 'security',
-        label: "Доступы и безопасность",
+        id: "security",
+        label: "Доступ",
         icon: ShieldAlert,
         items: [
             {
-                name: 'Матрица доступов',
-                href: '/admin/matrix',
+                name: "Роли",
+                href: "/admin/roles",
+                icon: Users,
+                title: "Роли",
+                description: "Создание ролей и вид их области",
+                permission: "access.read",
+            },
+            {
+                name: "Матрица",
+                href: "/admin/matrix",
                 icon: Grid3X3,
-                title: 'Матрица прав безопасности',
-                description: 'Назначение кодов доступа ролям',
-                permission: 'admin.matrix:read',
+                title: "Матрица прав",
+                description: "Какие права есть у роли",
+                permission: "access.read",
             },
             {
-                name: 'Роли и LDAP',
-                href: '/admin/roles',
+                name: "Трансляция",
+                href: "/admin/rules",
                 icon: KeyRound,
-                title: 'Управление доступами LDAP',
-                description: 'Роли, соответствия должностей AD и исключения',
-                permission: 'admin.roles:read',
+                title: "Трансляция ролей",
+                description: "Логин или должность определяют роль",
+                permission: "access.read",
             },
             {
-                name: 'Каталог прав',
-                href: '/admin/permissions',
-                icon: Layers,
-                title: 'Каталог прав доступа',
-                description: 'Справочник кодов, которые назначаются ролям в матрице',
-                permission: 'admin.catalog:read',
+                name: "Области",
+                href: "/admin/scopes",
+                icon: MapPinned,
+                title: "Области",
+                description: "Территории, назначенные сотруднику",
+                permission: "access.read",
             },
-        ]
-    }
+        ],
+    },
 ];
 
 export interface PageHeading {

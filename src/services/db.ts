@@ -84,8 +84,6 @@ class DbService {
     ): Promise<T[]> {
         if (!this.isInitialized) {
             await this.runMigrations();
-            const { syncPermissionCatalog } = await import("@/services/permission-catalog");
-            await syncPermissionCatalog();
         }
         const res = await this.pool.query<T>(text, params);
         return res.rows;
@@ -94,8 +92,6 @@ class DbService {
     public async getUserAuthContext(username: string, ldapPosition: string) {
         if (!this.isInitialized) {
             await this.runMigrations();
-            const { syncPermissionCatalog } = await import("@/services/permission-catalog");
-            await syncPermissionCatalog();
         }
 
         const queryText = `

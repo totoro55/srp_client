@@ -1,28 +1,31 @@
-// src/app/admin/matrix/page.tsx
 'use client';
 
-import {useState, useEffect, useCallback, useTransition} from 'react';
+import { useState, useEffect, useCallback, useTransition } from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
-import { usePermission } from '@/hooks/useAccess';
+import { useAccess } from '@/hooks/useAccess';
+import type { ScopeKind } from '@/lib/permissions';
 
 interface Role {
     id: number;
+    code: string;
     name: string;
-    description?: string;
+    description?: string | null;
+    scopeKind: ScopeKind;
+    isSystem: boolean;
 }
 
 interface Permission {
-    id: number;
     code: string;
+    group: string;
     title: string;
     description?: string;
 }
 
 interface Relation {
     role_id: number;
-    permission_id: number;
+    permission_code: string;
 }
 
 interface MatrixApiError {
@@ -50,14 +53,12 @@ export default function AdminMatrixPage() {
     const [roles, setRoles] = useState<Role[]>([]);
     const [permissions, setPermissions] = useState<Permission[]>([]);
     const [relations, setRelations] = useState<Relation[]>([]);
-
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
     const [, startTransition] = useTransition();
-    const canWrite = usePermission("admin.matrix:write");
+    const access = useAccess();
+    const canWrite = access.has("access.write");
 
-    // Функция реактивного обновления данных с сервера
     const fetchMatrixData = useCallback(async (showLoader = false) => {
         if (showLoader) setIsLoading(true);
         setError(null);
@@ -70,51 +71,44 @@ export default function AdminMatrixPage() {
                 setPermissions(json.data.permissions);
                 setRelations(json.data.relations);
             } else {
-                setError(matrixErrorMessage(json.error, "Не удалось загрузить конфигурацию матрицы доступов"));
+                setError(matrixErrorMessage(json.error, "Не удалось загрузить матрицу"));
             }
         } catch {
-            setError('Ошибка сети при обращении к серверу ИБ');
+            setError('Ошибка сети при обращении к серверу');
         } finally {
             setIsLoading(false);
         }
     }, []);
 
-    // Первоначальная загрузка данных при монтировании страницы
     useEffect(() => {
-        startTransition(()=>{
-            fetchMatrixData(true);
-        })
+        startTransition(() => {
+            void fetchMatrixData(true);
+        });
     }, [fetchMatrixData]);
 
-    // Обработчик переключения чекбоксов (отправка изменений в СУБД)
-    const handleTogglePermission = async (roleId: number, permissionId: number, checked: boolean) => {
-        try {
-            // 1. Оптимистичное обновление UI для мгновенного отклика без ожидания сети
-            setRelations(prev => {
-                if (checked) {
-                    return [...prev, { role_id: roleId, permission_id: permissionId }];
-                } else {
-                    return prev.filter(rel => !(rel.role_id === roleId && rel.permission_id === permissionId));
-                }
-            });
+    const handleTogglePermission = async (roleId: number, permissionCode: string, checked: boolean) => {
+        const previous = relations;
+        setRelations((prev) => {
+            if (checked) {
+                return [...prev, { role_id: roleId, permission_code: permissionCode }];
+            }
+            return prev.filter((rel) => !(rel.role_id === roleId && rel.permission_code === permissionCode));
+        });
 
-            // 2. Отправка POST запроса на бэкенд
+        try {
             const res = await fetch('/api/admin/matrix', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roleId, permissionId, checked })
+                body: JSON.stringify({ roleId, permissionCode, checked }),
             });
-
             const json = await res.json();
-
-            // Если сервер вернул ошибку, откатываем данные назад и запрашиваем актуальное состояние
             if (!json.success) {
-                setError(matrixErrorMessage(json.error, "СУБД отклонила изменение прав"));
-                await fetchMatrixData();
+                setRelations(previous);
+                setError(matrixErrorMessage(json.error, "Сервер отклонил изменение прав"));
             }
         } catch {
+            setRelations(previous);
             setError('Ошибка сети. Не удалось сохранить изменения матрицы.');
-            await fetchMatrixData();
         }
     };
 
@@ -122,19 +116,23 @@ export default function AdminMatrixPage() {
         <AdminPageShell>
             <ConfirmDialog
                 open={error !== null}
-                title="Ошибка конфигурации ИБ"
+                title="Ошибка настройки доступа"
                 description={error ?? ''}
                 confirmLabel="Понятно"
                 confirmVariant="default"
                 showCancel={false}
                 onConfirm={() => setError(null)}
                 onOpenChange={(open) => {
-                    if (!open) {
-                        setError(null);
-                    }
+                    if (!open) setError(null);
                 }}
             />
-
+            {access.username && !canWrite ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                    {access.previewRoleName
+                        ? "Просмотр от имени роли. Изменения недоступны."
+                        : "Нет права менять доступ."}
+                </p>
+            ) : null}
             <MatrixGrid
                 roles={roles}
                 permissions={permissions}

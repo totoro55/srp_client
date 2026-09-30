@@ -24,7 +24,7 @@ export function AppSideBar() {
 
     const dynamicNavigation = useMemo((): NavigationGroup[] => {
         return APP_NAVIGATION_MAP.map((group) => {
-            const visibleItems = group.items.filter((item) => access.has(item.permission));
+            const visibleItems = group.items.filter((item) => !item.permission || access.has(item.permission));
             return {
                 id: group.id,
                 label: group.label,

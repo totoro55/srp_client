@@ -36,13 +36,6 @@ export async function authenticateDevUser(username: string, password: string): P
     }
 
     try {
-        const { db } = await import("@/services/db");
-        const admin = await db.getRoleByName("ADMIN");
-        if (!admin) {
-            console.error("Локальный вход: в базе нет роли ADMIN");
-            return null;
-        }
-
         const accountName = devLoginHint() ?? DEFAULT_DEV_USERNAME;
         console.info(`Локальный вход ${accountName}: LDAP пропущен`);
 
@@ -50,9 +43,7 @@ export async function authenticateDevUser(username: string, password: string): P
             id: `dev:${accountName}`,
             username: accountName,
             displayName: "Администратор (разработка)",
-            role: admin.name,
-            roleId: admin.id,
-            isSuperuser: true,
+            title: "",
             department: "Разработка",
         };
     } catch (error) {

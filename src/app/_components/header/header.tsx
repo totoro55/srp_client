@@ -4,10 +4,13 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { usePathname } from "next/navigation";
 import { getPageHeading } from "@/lib/routes-config";
+import { useAccess } from "@/hooks/useAccess";
 
 export default function Header() {
     const pathname = usePathname();
     const heading = getPageHeading(pathname);
+    const access = useAccess();
+    const identity = access.roleName ? `${access.roleName} · ${access.scopeLabel}` : access.scopeLabel;
 
     return (
         <header className="flex w-full shrink-0 flex-row items-center justify-start border-b p-1.5 xl:p-3">
@@ -25,6 +28,9 @@ export default function Header() {
                     </div>
                 </>
             )}
+            {identity ? (
+                <p className="ml-auto truncate px-3 text-xs text-muted-foreground">{identity}</p>
+            ) : null}
         </header>
     );
 }

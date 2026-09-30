@@ -1,0 +1,283 @@
+'use client';
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
+import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAccess } from "@/hooks/useAccess";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+interface Territory {
+    id: number;
+    code: string;
+    name: string;
+}
+
+interface Grant {
+    id: number;
+    username: string;
+    territoryId: number;
+    territoryName: string;
+}
+
+export function ScopesEditor() {
+    const access = useAccess();
+    const canWrite = access.has("access.write");
+    const [territories, setTerritories] = useState<Territory[]>([]);
+    const [grants, setGrants] = useState<Grant[]>([]);
+    const [code, setCode] = useState("");
+    const [name, setName] = useState("");
+    const [username, setUsername] = useState("");
+    const [territoryId, setTerritoryId] = useState("");
+    const [territoryOpen, setTerritoryOpen] = useState(false);
+    const [grantOpen, setGrantOpen] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [query, setQuery] = useState("");
+    const [territoryFilter, setTerritoryFilter] = useState("");
+    const [pendingGrant, setPendingGrant] = useState<Grant | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
+
+    const visibleGrants = useMemo(() => {
+        const needle = query.trim().toLowerCase();
+        return grants.filter((grant) => {
+            if (territoryFilter && String(grant.territoryId) !== territoryFilter) return false;
+            if (!needle) return true;
+            return grant.username.toLowerCase().includes(needle)
+                || grant.territoryName.toLowerCase().includes(needle);
+        });
+    }, [grants, query, territoryFilter]);
+
+    async function load() {
+        const response = await fetch("/api/admin/scopes");
+        const json = await response.json();
+        if (!json.success) return;
+        setTerritories(json.data.territories);
+        setGrants(json.data.grants);
+        if (!territoryId && json.data.territories[0]) {
+            setTerritoryId(String(json.data.territories[0].id));
+        }
+    }
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void load();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
+
+    async function addTerritory(event: FormEvent) {
+        event.preventDefault();
+        setError(null);
+        const response = await fetch("/api/admin/scopes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: "territory", code, name }),
+        });
+        const json = await response.json();
+        if (!json.success) {
+            setError(json.error?.message ?? "Не удалось добавить территорию");
+            return;
+        }
+        setCode("");
+        setName("");
+        setTerritoryOpen(false);
+        await load();
+    }
+
+    async function addGrant(event: FormEvent) {
+        event.preventDefault();
+        setError(null);
+        const response = await fetch("/api/admin/scopes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, territoryId: Number(territoryId) }),
+        });
+        const json = await response.json();
+        if (!json.success) {
+            setError(json.error?.message ?? "Не удалось назначить территорию");
+            return;
+        }
+        setUsername("");
+        setGrantOpen(false);
+        await load();
+    }
+
+    async function confirmRevoke() {
+        if (!pendingGrant) return;
+        setDeleting(true);
+        setActionError(null);
+        const response = await fetch(`/api/admin/scopes?grantId=${pendingGrant.id}`, { method: "DELETE" });
+        const json = await response.json();
+        setDeleting(false);
+        if (!json.success) {
+            setActionError(json.error?.message ?? "Не удалось снять назначение");
+            setPendingGrant(null);
+            return;
+        }
+        setPendingGrant(null);
+        await load();
+    }
+
+    return (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+            <p className="text-sm text-muted-foreground">
+                Здесь назначаются территории директору. Филиал управляющего и линейного сотрудника берётся из карточки сотрудника, не из этого списка. Пока кадровый справочник пуст, такую область проверить не на чем.
+            </p>
+            {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
+            <ConfirmDialog
+                open={pendingGrant !== null}
+                title="Снять назначение"
+                description={pendingGrant ? `У ${pendingGrant.username} будет снята территория «${pendingGrant.territoryName}».` : ""}
+                confirmLabel="Снять"
+                isPending={deleting}
+                onConfirm={confirmRevoke}
+                onOpenChange={(open) => {
+                    if (!open) setPendingGrant(null);
+                }}
+            />
+            {canWrite ? (
+                <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" onClick={() => { setError(null); setTerritoryOpen(true); }}>
+                        Добавить территорию
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={territories.length === 0}
+                        title={territories.length === 0 ? "Сначала добавьте территорию" : undefined}
+                        onClick={() => { setError(null); setGrantOpen(true); }}
+                    >
+                        Назначить
+                    </Button>
+                    <Dialog open={territoryOpen} onOpenChange={setTerritoryOpen}>
+                        <DialogContent>
+                            <form className="flex flex-col gap-4" onSubmit={addTerritory}>
+                                <DialogHeader>
+                                    <DialogTitle>Новая территория</DialogTitle>
+                                </DialogHeader>
+                                <div className="grid gap-4">
+                                    <div className="flex flex-col gap-1.5">
+                                        <Label htmlFor="territory-code">Код</Label>
+                                        <Input id="territory-code" value={code} onChange={(event) => setCode(event.target.value)} required />
+                                    </div>
+                                    <div className="flex flex-col gap-1.5">
+                                        <Label htmlFor="territory-name">Название</Label>
+                                        <Input id="territory-name" value={name} onChange={(event) => setName(event.target.value)} required />
+                                    </div>
+                                    {error && territoryOpen ? <p className="text-sm text-destructive">{error}</p> : null}
+                                </div>
+                                <DialogFooter>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => setTerritoryOpen(false)}>Отмена</Button>
+                                    <Button type="submit" size="sm">Добавить</Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                    <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
+                        <DialogContent>
+                            <form className="flex flex-col gap-4" onSubmit={addGrant}>
+                                <DialogHeader>
+                                    <DialogTitle>Назначение территории</DialogTitle>
+                                </DialogHeader>
+                                <div className="grid gap-4">
+                                    <div className="flex flex-col gap-1.5">
+                                        <Label htmlFor="grant-username">Логин</Label>
+                                        <Input id="grant-username" value={username} onChange={(event) => setUsername(event.target.value)} required />
+                                    </div>
+                                    <div className="flex flex-col gap-1.5">
+                                        <Label htmlFor="grant-territory">Территория</Label>
+                                        <select
+                                            id="grant-territory"
+                                            value={territoryId}
+                                            onChange={(event) => setTerritoryId(event.target.value)}
+                                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                                            required
+                                        >
+                                            {territories.map((territory) => (
+                                                <option key={territory.id} value={territory.id}>{territory.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {error && grantOpen ? <p className="text-sm text-destructive">{error}</p> : null}
+                                </div>
+                                <DialogFooter>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => setGrantOpen(false)}>Отмена</Button>
+                                    <Button type="submit" size="sm">Назначить</Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
+            ) : access.username ? (
+                <p className="text-xs text-muted-foreground">
+                    {access.previewRoleName ? "Просмотр от имени роли. Изменения недоступны." : "Нет права менять доступ."}
+                </p>
+            ) : null}
+            {territories.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Территорий пока нет.</p>
+            ) : null}
+            <AdminToolbar search={query} onSearchChange={setQuery} searchPlaceholder="Логин или территория">
+                <select
+                    value={territoryFilter}
+                    onChange={(event) => setTerritoryFilter(event.target.value)}
+                    aria-label="Территория"
+                    className="h-9 w-full rounded-md border bg-background px-3 text-xs sm:w-48"
+                >
+                    <option value="">Все территории</option>
+                    {territories.map((territory) => (
+                        <option key={territory.id} value={territory.id}>{territory.name}</option>
+                    ))}
+                </select>
+                {query || territoryFilter ? (
+                    <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => { setQuery(""); setTerritoryFilter(""); }}>
+                        Сбросить
+                    </Button>
+                ) : null}
+            </AdminToolbar>
+            <Table>
+                <TableHeader>
+                    <TableRow>
+                        <TableHead>Логин</TableHead>
+                        <TableHead>Территория</TableHead>
+                        <TableHead />
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {visibleGrants.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={3} className="py-8 text-center text-xs text-muted-foreground">
+                                {grants.length === 0 ? "Назначений пока нет." : "Нет назначений по этому фильтру."}
+                            </TableCell>
+                        </TableRow>
+                    ) : null}
+                    {visibleGrants.map((grant) => (
+                        <TableRow key={grant.id}>
+                            <TableCell>{grant.username}</TableCell>
+                            <TableCell>{grant.territoryName}</TableCell>
+                            <TableCell>
+                                {canWrite ? (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-muted-foreground hover:text-destructive"
+                                        aria-label={`Снять территорию у ${grant.username}`}
+                                        onClick={() => setPendingGrant(grant)}
+                                    >
+                                        <Trash2 />
+                                    </Button>
+                                ) : null}
+                            </TableCell>
+                        </TableRow>
+                    ))}
+                </TableBody>
+            </Table>
+        </div>
+    );
+}

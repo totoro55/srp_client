@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/services/db";
-import { ApiResponse, MatrixToggleRequest } from "@/types/api";
 import { createErrorResponse } from "@/lib/api-error";
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
-import { PERMISSION_CATALOG } from "@/lib/permissions";
-import { invalidateRolePermissionCache } from "@/services/permission-cache";
+import { isPermissionCode, PERMISSION_CATALOG } from "@/lib/permissions";
+import { audit } from "@/server/authz/resolve-access";
+import { ApiResponse } from "@/types/api";
 
 function parsePositiveInt(value: unknown): number | null {
     const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -14,52 +14,29 @@ function parsePositiveInt(value: unknown): number | null {
     return numeric;
 }
 
-function parseCheckedFlag(body: MatrixToggleRequest): boolean | null {
-    if (typeof body.checked === "boolean") return body.checked;
-    if (typeof body.is_checked === "boolean") return body.is_checked;
-    return null;
-}
-
 export async function GET() {
     try {
-        await requirePermission("admin.matrix:read");
+        await requirePermission("access.read");
 
         const roles = await db.query(`
-            SELECT id, name, description
+            SELECT id, code, name, description, scope_kind AS "scopeKind", is_system AS "isSystem"
             FROM roles
-            WHERE is_superuser = false
-            ORDER BY name ASC
+            ORDER BY is_system DESC, name ASC
         `);
 
-        const permissions = await db.query<{
-            id: number;
-            code: string;
-            description: string | null;
-        }>(
-            `
-            SELECT id, code, description
-            FROM permissions
-            WHERE code = ANY($1::text[])
-            ORDER BY code ASC
-            `,
-            [PERMISSION_CATALOG.map((item) => item.code)]
+        const relations = await db.query<{ role_id: number; permission_code: string }>(
+            "SELECT role_id, permission_code FROM role_permission_codes"
         );
-
-        const titleByCode = new Map(PERMISSION_CATALOG.map((item) => [item.code, item.title]));
-
-        const relations = await db.query(`
-            SELECT role_id, permission_id FROM role_permissions
-        `);
 
         return NextResponse.json({
             success: true,
             data: {
                 roles,
-                permissions: permissions.map((permission) => ({
-                    id: permission.id,
-                    code: permission.code,
-                    title: titleByCode.get(permission.code) ?? permission.code,
-                    description: permission.description,
+                permissions: PERMISSION_CATALOG.map((item) => ({
+                    code: item.code,
+                    group: item.group,
+                    title: item.title,
+                    description: item.description,
                 })),
                 relations,
             },
@@ -71,34 +48,53 @@ export async function GET() {
     }
 }
 
-export async function POST(
-    request: Request
-): Promise<NextResponse<ApiResponse<{ updated: boolean }>>> {
+export async function POST(request: Request): Promise<NextResponse<ApiResponse<{ updated: boolean }>>> {
     try {
-        await requirePermission("admin.matrix:write");
+        const access = await requirePermission("access.write");
+        const body = (await request.json()) as {
+            roleId?: unknown;
+            permissionCode?: unknown;
+            checked?: unknown;
+        };
 
-        const body = (await request.json()) as MatrixToggleRequest;
-        const roleId = parsePositiveInt(body.roleId ?? body.role_id);
-        const permissionId = parsePositiveInt(body.permissionId ?? body.permission_id);
-        const isChecked = parseCheckedFlag(body);
+        const roleId = parsePositiveInt(body.roleId);
+        const permissionCode = typeof body.permissionCode === "string" ? body.permissionCode : "";
+        const checked = body.checked;
 
-        if (!roleId || !permissionId || isChecked === null) {
+        if (!roleId || !isPermissionCode(permissionCode) || typeof checked !== "boolean") {
             return createErrorResponse("BAD_REQUEST", "Отсутствуют обязательные параметры", 400);
         }
 
-        if (isChecked) {
+        const roles = await db.query<{ is_system: boolean; name: string }>(
+            "SELECT is_system, name FROM roles WHERE id = $1",
+            [roleId]
+        );
+        const role = roles[0];
+        if (!role) {
+            return createErrorResponse("BAD_REQUEST", "Роль не найдена", 400);
+        }
+        if (role.is_system) {
+            return createErrorResponse("BAD_REQUEST", "Права администратора не изменяются", 400);
+        }
+
+        if (checked) {
             await db.query(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                [roleId, permissionId]
+                "INSERT INTO role_permission_codes (role_id, permission_code) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                [roleId, permissionCode]
             );
         } else {
             await db.query(
-                "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2",
-                [roleId, permissionId]
+                "DELETE FROM role_permission_codes WHERE role_id = $1 AND permission_code = $2",
+                [roleId, permissionCode]
             );
         }
 
-        invalidateRolePermissionCache(roleId);
+        await audit(
+            access.username,
+            "matrix.toggle",
+            `${role.name}: ${permissionCode} ${checked ? "включено" : "снято"}`
+        );
+
         return NextResponse.json({ success: true, data: { updated: true } });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);

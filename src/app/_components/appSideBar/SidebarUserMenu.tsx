@@ -26,13 +26,7 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
-import { isSuperuser } from "@/lib/roles";
 import { useAccess } from "@/hooks/useAccess";
-
-interface Role {
-    id: number;
-    name: string;
-}
 
 interface SidebarUserMenuProps {
     isOpen: boolean;
@@ -44,45 +38,24 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
 
     const [mounted, setMounted] = useState(false);
     const [, startTransition] = useTransition();
-
-    // Стейты для логики имперсонации
-    const [roles, setRoles] = useState<Role[]>([]);
-    const { impersonatedRole, originalIsSuperuser } = useAccess();
-    const currentMask = impersonatedRole ?? 'RESET';
+    const access = useAccess();
+    const previewRoleName = access.previewRoleName;
 
     useEffect(() => {
         startTransition(() => {
             setMounted(true);
         });
-
-        // 🔥 ИСПРАВЛЕНИЕ: В эффекте оставляем ТОЛЬКО асинхронный fetch ролей
-        if (isSuperuser(session?.user?.isSuperuser, session?.user?.role)) {
-            fetch('/api/admin/matrix')
-                .then(res => res.json())
-                .then(json => {
-                    if (json.success && json.data?.roles) {
-                        setRoles(json.data.roles);
-                    }
-                })
-                .catch(err => console.error("Ошибка загрузки ролей для имперсонации:", err));
-        }
-    }, [session]);
+    }, []);
 
     const isAuthenticated = status === 'authenticated' && session?.user;
-    const isOriginalAdmin = originalIsSuperuser || isSuperuser(session?.user?.isSuperuser, session?.user?.role);
-    const isCurrentlyImpersonating = currentMask !== 'RESET';
+    const isOriginalAdmin = access.actorFullAccess;
+    const isCurrentlyImpersonating = Boolean(previewRoleName);
 
-    // Обработчик вызова смены тестируемой роли
-    const handleMaskChange = async (roleName: string) => {
-        const selectedRole = roles.find(r => r.name === roleName);
-
+    const handleMaskChange = async (roleId: number | null) => {
         await fetch('/api/admin/impersonate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                roleId: selectedRole?.id || 0,
-                roleName: roleName
-            })
+            body: JSON.stringify(roleId ? { roleId } : { reset: true })
         });
 
         window.location.reload();
@@ -118,7 +91,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                                 isCurrentlyImpersonating ? "text-amber-500 font-bold" : "text-muted-foreground"
                             )}>
                 {!isAuthenticated ? "Завершение сессии" :
-                    isCurrentlyImpersonating ? `Тест: ${currentMask}` : (session.user.department || session.user.role)}
+                    isCurrentlyImpersonating ? `Просмотр: ${previewRoleName}` : (access.roleName ? `${access.roleName} · ${access.scopeLabel}` : session.user.department)}
               </span>
                         </div>
                     )}
@@ -137,7 +110,7 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                     <div className="text-xs font-normal px-2 py-1.5 flex flex-col gap-0.5 select-none">
                         <span className="font-semibold text-foreground">Учетная запись</span>
                         <span className="text-[10px] text-muted-foreground font-mono truncate">
-              {session.user.username} {isCurrentlyImpersonating && "(Имперсонация)"}
+              {session.user.username} {isCurrentlyImpersonating && "(просмотр роли)"}
             </span>
                     </div>
                     <DropdownMenuSeparator />
@@ -152,20 +125,20 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                                 </DropdownMenuSubTrigger>
                                 <DropdownMenuSubContent className="w-48">
                                     <DropdownMenuItem
-                                        onClick={() => handleMaskChange('RESET')}
-                                        className={cn("text-xs gap-2 cursor-pointer font-semibold", currentMask === 'RESET' && "text-primary bg-primary/5")}
+                                        onClick={() => handleMaskChange(null)}
+                                        className={cn("text-xs gap-2 cursor-pointer font-semibold", !previewRoleName && "text-primary bg-primary/5")}
                                     >
-                                        <ShieldCheck className="h-3.5 w-3.5" /> <span>ADMIN</span>
+                                        <ShieldCheck className="h-3.5 w-3.5" /> <span>Своя роль</span>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    {roles.map((r) => (
+                                    {access.previewChoices.map((role) => (
                                         <DropdownMenuItem
-                                            key={r.id}
-                                            onClick={() => handleMaskChange(r.name)}
-                                            className={cn("text-xs gap-2 cursor-pointer", currentMask === r.name && "text-amber-500 bg-amber-500/5 font-bold")}
+                                            key={role.id}
+                                            onClick={() => handleMaskChange(role.id)}
+                                            className={cn("text-xs gap-2 cursor-pointer", previewRoleName === role.name && "text-amber-500 bg-amber-500/5 font-bold")}
                                         >
-                                            <div className={cn("h-1.5 w-1.5 rounded-full bg-muted-foreground/40", currentMask === r.name && "bg-amber-500")} />
-                                            <span>{r.name}</span>
+                                            <div className={cn("h-1.5 w-1.5 rounded-full bg-muted-foreground/40", previewRoleName === role.name && "bg-amber-500")} />
+                                            <span>{role.name}</span>
                                         </DropdownMenuItem>
                                     ))}
                                 </DropdownMenuSubContent>

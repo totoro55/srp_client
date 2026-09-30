@@ -1,89 +1,66 @@
 import { cookies } from "next/headers";
-import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { createErrorResponse } from "@/lib/api-error";
-import { hasPermissionCode } from "@/lib/access";
+import { can } from "@/lib/access";
 import type { PermissionCode } from "@/lib/permissions";
-import { getActiveSessionContext, type ActiveAccessContext } from "@/services/impersonation";
 import { ApiErrorResponse } from "@/types/api";
+import { getRequestAccess, resolveAccess, type AccessView } from "@/server/authz/resolve-access";
 
 export class AdminAuthError extends Error {
     readonly status: 401 | 403;
 
-    constructor(status: 401 | 403) {
-        super(status === 401 ? "UNAUTHORIZED" : "FORBIDDEN");
+    constructor(status: 401 | 403, message?: string) {
+        super(message ?? (status === 401 ? "Требуется авторизация" : "Доступ ограничен"));
         this.name = "AdminAuthError";
         this.status = status;
     }
 }
 
-export async function getActiveAccess(): Promise<ActiveAccessContext & { username: string }> {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user) {
+export async function getActiveAccess(): Promise<AccessView> {
+    const access = await getRequestAccess();
+    if (!access) {
         throw new AdminAuthError(401);
     }
-
-    const jar = await cookies();
-    const originalIsSuperuser =
-        session.user.isSuperuser || session.user.role === "ADMIN" || session.user.role === "admin";
-
-    const active = await getActiveSessionContext(
-        session.user.role,
-        session.user.roleId,
-        originalIsSuperuser,
-        jar
-    );
-
-    return {
-        ...active,
-        username: session.user.username || "SYSTEM",
-    };
+    return access;
 }
 
-export async function requireOriginalSuperuser(): Promise<{ username: string }> {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user) {
-        throw new AdminAuthError(401);
-    }
-
-    const originalIsSuperuser =
-        session.user.isSuperuser || session.user.role === "ADMIN" || session.user.role === "admin";
-
-    if (!originalIsSuperuser) {
+export async function requirePermission(permission: PermissionCode): Promise<AccessView> {
+    const access = await getActiveAccess();
+    if (!can(access, permission)) {
         throw new AdminAuthError(403);
     }
-
-    return { username: session.user.username || "SYSTEM" };
+    return access;
 }
 
-export async function requirePermission(permission: PermissionCode): Promise<{ username: string }> {
-    const active = await getActiveAccess();
-
-    if (active.isSuperuser || hasPermissionCode(active.codes, permission)) {
-        return { username: active.username };
+export async function requireActorFullAccess(): Promise<AccessView> {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.username) {
+        throw new AdminAuthError(401);
     }
 
-    throw new AdminAuthError(403);
+    const actor = await resolveAccess(session.user.username, session.user.title ?? "", null);
+    if (!actor.actorFullAccess) {
+        throw new AdminAuthError(403);
+    }
+    return actor;
 }
 
-/** @deprecated Use requireOriginalSuperuser or requirePermission */
-export async function requireAdmin(): Promise<{ username: string }> {
-    return requireOriginalSuperuser();
-}
-
-export function adminAuthErrorResponse(
-    error: unknown
-): NextResponse<ApiErrorResponse> | null {
+export function adminAuthErrorResponse(error: unknown): NextResponse<ApiErrorResponse> | null {
     if (!(error instanceof AdminAuthError)) {
         return null;
     }
 
     if (error.status === 401) {
-        return createErrorResponse("UNAUTHORIZED", "Требуется авторизация", 401);
+        return createErrorResponse("UNAUTHORIZED", error.message, 401);
     }
 
-    return createErrorResponse("FORBIDDEN", "Доступ ограничен", 403);
+    return createErrorResponse("FORBIDDEN", error.message, 403);
+}
+
+export async function readPreviewRoleId(): Promise<number | null> {
+    const jar = await cookies();
+    const previewRoleId = Number.parseInt(jar.get("impersonated_role_id")?.value ?? "", 10);
+    return Number.isInteger(previewRoleId) && previewRoleId > 0 ? previewRoleId : null;
 }

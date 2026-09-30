@@ -8,9 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MatrixToolbar } from './MatrixToolbar';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
 
-interface Role { id: number; name: string; description?: string; }
-interface Permission { id: number; code: string; title: string; description?: string; }
-interface Relation { role_id: number; permission_id: number; }
+interface Role { id: number; name: string; description?: string | null; isSystem?: boolean }
+interface Permission { code: string; group: string; title: string; description?: string }
+interface Relation { role_id: number; permission_code: string }
 
 interface MatrixGridProps {
     roles: Role[];
@@ -18,23 +18,30 @@ interface MatrixGridProps {
     relations: Relation[];
     isLoading?: boolean;
     canWrite?: boolean;
-    onTogglePermission: (roleId: number, permissionId: number, checked: boolean) => Promise<void>;
+    onTogglePermission: (roleId: number, permissionCode: string, checked: boolean) => Promise<void>;
 }
 
 export function MatrixGrid({ roles, permissions, relations, isLoading = false, canWrite = false, onTogglePermission }: MatrixGridProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+    const [group, setGroup] = useState("");
     const [loadingKeys, setLoadingKeys] = useState<string[]>([]);
+    const groups = useMemo(
+        () => [...new Set(permissions.map((permission) => permission.group))],
+        [permissions]
+    );
 
-    // 1. Фильтрация путей по поисковому запросу
     const filteredPermissions = useMemo(() => {
-        return permissions.filter(p => {
-            const codeMatches = p.code.toLowerCase().includes(searchQuery.toLowerCase());
-            const titleMatches = p.title.toLowerCase().includes(searchQuery.toLowerCase());
-            const descMatches = p.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
-            return codeMatches || titleMatches || descMatches;
+        const needle = searchQuery.trim().toLowerCase();
+        return permissions.filter((permission) => {
+            if (group && permission.group !== group) return false;
+            if (!needle) return true;
+            return permission.code.toLowerCase().includes(needle)
+                || permission.title.toLowerCase().includes(needle)
+                || permission.group.toLowerCase().includes(needle)
+                || (permission.description?.toLowerCase().includes(needle) ?? false);
         });
-    }, [permissions, searchQuery]);
+    }, [permissions, searchQuery, group]);
 
     // 2. Фильтрация столбцов-ролей по выбранным id
     const filteredRoles = useMemo(() => {
@@ -42,14 +49,15 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
         return roles.filter(r => selectedRoleIds.includes(r.id));
     }, [roles, selectedRoleIds]);
 
-    const isChecked = (roleId: number, permissionId: number) => {
-        return relations.some(rel => rel.role_id === roleId && rel.permission_id === permissionId);
+    const isChecked = (role: Role, permissionCode: string) => {
+        if (role.isSystem) return true;
+        return relations.some((rel) => rel.role_id === role.id && rel.permission_code === permissionCode);
     };
 
-    const handleCheckboxChange = async (roleId: number, permissionId: number, checked: boolean) => {
-        const key = `${roleId}-${permissionId}`;
+    const handleCheckboxChange = async (roleId: number, permissionCode: string, checked: boolean) => {
+        const key = `${roleId}-${permissionCode}`;
         setLoadingKeys(prev => [...prev, key]);
-        try { await onTogglePermission(roleId, permissionId, checked); } finally {
+        try { await onTogglePermission(roleId, permissionCode, checked); } finally {
             setLoadingKeys(prev => prev.filter(k => k !== key));
         }
     };
@@ -65,9 +73,12 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
             <CardHeader className="shrink-0">
                 <MatrixToolbar
                     roles={roles}
+                    groups={groups}
                     searchQuery={searchQuery}
                     onSearchChange={setSearchQuery}
                     selectedRoleIds={selectedRoleIds}
+                    group={group}
+                    onGroupChange={setGroup}
                     onToggleRole={handleToggleRole}
                     onClearFilters={() => setSelectedRoleIds([])}
                 />
@@ -85,7 +96,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                     </TableHead>
                                 ))
                                 : filteredRoles.map(role => (
-                                    <TableHead key={role.id} className="text-center min-w-[120px] max-w-[180px] truncate" title={role.description}>
+                                    <TableHead key={role.id} className="text-center min-w-[120px] max-w-[180px] truncate" title={role.description ?? undefined}>
                                         {role.name}
                                     </TableHead>
                                 ))}
@@ -102,25 +113,30 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                             </TableRow>
                         ) : (
                             filteredPermissions.map(perm => (
-                                    <TableRow key={perm.id} className="hover:bg-muted/30">
+                                    <TableRow key={perm.code} className="hover:bg-muted/30">
                                         <TableCell className="align-middle py-3">
                                             <div className="flex flex-col gap-1 min-w-0">
                                                 <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="font-mono text-xs font-semibold text-foreground truncate" title={perm.code}>{perm.code}</span>
-                                                    <span className="truncate text-xs">{perm.title}</span>
+                                                    <span className="text-[11px] text-muted-foreground">{perm.group}</span>
+                                                    <span className="truncate text-xs font-medium">{perm.title}</span>
                                                 </div>
                                                 {perm.description && <span className="text-[11px] text-muted-foreground truncate" title={perm.description}>{perm.description}</span>}
                                             </div>
                                         </TableCell>
                                         {filteredRoles.map(role => {
-                                            const key = `${role.id}-${perm.id}`;
+                                            const key = `${role.id}-${perm.code}`;
+                                            const locked = Boolean(role.isSystem);
                                             return (
                                                 <TableCell key={role.id} className="text-center align-middle py-3">
                                                     <div className="flex items-center justify-center">
                                                         <Checkbox
-                                                            checked={isChecked(role.id, perm.id)}
-                                                            disabled={!canWrite || loadingKeys.includes(key)}
-                                                            onCheckedChange={(checked) => handleCheckboxChange(role.id, perm.id, !!checked)}
+                                                            checked={isChecked(role, perm.code)}
+                                                            disabled={!canWrite || locked || loadingKeys.includes(key)}
+                                                            title={locked ? "Полный доступ администратора" : undefined}
+                                                            onCheckedChange={(checked) => {
+                                                                if (locked) return;
+                                                                void handleCheckboxChange(role.id, perm.code, !!checked);
+                                                            }}
                                                             className="h-4 w-4 transition-transform data-[state=checked]:scale-105"
                                                         />
                                                     </div>

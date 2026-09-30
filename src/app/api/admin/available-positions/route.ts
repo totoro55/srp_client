@@ -6,7 +6,7 @@ import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 
 export async function GET(): Promise<NextResponse<ApiResponse<string[]>>> {
     try {
-        await requirePermission("admin.roles:read");
+        await requirePermission("access.read");
         // Выполняем быстрый запрос к представлению в схеме public
         const positions = await db.query<{ position_name: string }>(
             'SELECT position_name FROM unique_positions WHERE position_name IS NOT NULL ORDER BY position_name ASC'
