@@ -1,15 +1,10 @@
-import {NextConfig} from "next";
+import type { NextConfig } from "next";
 
-const nextConfig:NextConfig= {
-    experimental: {
-        optimizePackageImports: ['lucide-react'],
-    },
-  /* config options here */
+const nextConfig: NextConfig = {
+  allowedDevOrigins: ["10.152.32.16"],
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
 };
-
-module.exports = {
-    allowedDevOrigins: ['10.152.32.16'],
-}
-
 
 export default nextConfig;
