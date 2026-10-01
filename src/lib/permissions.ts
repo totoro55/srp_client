@@ -29,6 +29,18 @@ export const PERMISSION_CATALOG = [
         title: "Изменение настроек",
         description: "Включение обслуживания, тексты и разрешение просмотра ролей",
     },
+    {
+        code: "baskets:read",
+        group: "Мотивация",
+        title: "Просмотр корзин",
+        description: "Каталог корзин, версии и описание расчёта",
+    },
+    {
+        code: "baskets:write",
+        group: "Мотивация",
+        title: "Изменение корзин",
+        description: "Новые корзины, черновики, публикация и перевод в архив",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];

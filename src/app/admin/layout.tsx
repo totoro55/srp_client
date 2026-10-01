@@ -7,7 +7,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     if (!access) {
         redirect("/login");
     }
-    if (!can(access, "access.read") && !can(access, "settings:read")) {
+    if (!can(access, "access.read") && !can(access, "settings:read") && !can(access, "baskets:read")) {
         redirect("/forbidden");
     }
 

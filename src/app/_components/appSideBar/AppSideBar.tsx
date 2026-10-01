@@ -4,7 +4,7 @@
 import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
-import { APP_NAVIGATION_MAP, NavigationGroup } from '@/lib/routes-config';
+import { APP_NAVIGATION_MAP, isRouteActive, NavigationGroup } from '@/lib/routes-config';
 import { SidebarUserMenu } from './SidebarUserMenu';
 import { SidebarNavItem } from './SidebarNavItem';
 import { useAccess } from "@/hooks/useAccess";
@@ -62,7 +62,7 @@ export function AppSideBar() {
                                     <SidebarNavItem
                                         key={item.href}
                                         item={item}
-                                        isActive={pathname === item.href}
+                                        isActive={isRouteActive(pathname, item.href)}
                                     />
                                 ))}
                             </SidebarMenu>

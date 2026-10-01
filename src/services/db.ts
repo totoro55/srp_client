@@ -89,6 +89,30 @@ class DbService {
         return res.rows;
     }
 
+    public async transaction<T>(
+        fn: (query: <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>) => Promise<T>
+    ): Promise<T> {
+        if (!this.isInitialized) {
+            await this.runMigrations();
+        }
+
+        const client = await this.pool.connect();
+        try {
+            await client.query("BEGIN");
+            const result = await fn(async <R extends QueryResultRow>(text: string, params?: unknown[]) => {
+                const res = await client.query<R>(text, params);
+                return res.rows;
+            });
+            await client.query("COMMIT");
+            return result;
+        } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
     public async getUserAuthContext(username: string, ldapPosition: string) {
         if (!this.isInitialized) {
             await this.runMigrations();

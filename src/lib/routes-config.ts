@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users } from "lucide-react";
+import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -65,6 +65,21 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         ],
     },
     {
+        id: "motivation",
+        label: "Мотивация",
+        icon: ShoppingBasket,
+        items: [
+            {
+                name: "Корзины",
+                href: "/admin/baskets",
+                icon: ShoppingBasket,
+                title: "Корзины",
+                description: "Каталог схем расчёта и их версии",
+                permission: "baskets:read",
+            },
+        ],
+    },
+    {
         id: "application",
         label: "Приложение",
         icon: Settings,
@@ -92,21 +107,37 @@ const EXTRA_PAGE_HEADINGS: Record<string, PageHeading> = {
     "/maintenance": { title: "Обслуживание" },
 };
 
+export function isRouteActive(pathname: string, href: string): boolean {
+    if (href === "/") {
+        return pathname === "/";
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function getPageHeading(pathname: string): PageHeading | null {
     const extra = EXTRA_PAGE_HEADINGS[pathname];
     if (extra) {
         return extra;
     }
 
+    let best: RouteItem | null = null;
     for (const group of APP_NAVIGATION_MAP) {
-        const item = group.items.find((route) => route.href === pathname);
-        if (item) {
-            return {
-                title: item.title ?? item.name,
-                description: item.description,
-            };
+        for (const item of group.items) {
+            if (!isRouteActive(pathname, item.href)) {
+                continue;
+            }
+            if (!best || item.href.length > best.href.length) {
+                best = item;
+            }
         }
     }
 
-    return null;
+    if (!best) {
+        return null;
+    }
+
+    return {
+        title: best.title ?? best.name,
+        description: best.description,
+    };
 }
