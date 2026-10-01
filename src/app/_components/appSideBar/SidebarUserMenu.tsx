@@ -10,6 +10,7 @@ import {
     Sun,
     Moon,
     Monitor,
+    Smartphone,
     Laptop,
     Eye,
     EyeOff,
@@ -27,6 +28,7 @@ import {
     DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
 import { useAccess } from "@/hooks/useAccess";
+import { useSidebar } from "@/components/ui/sidebar";
 
 interface SidebarUserMenuProps {
     isOpen: boolean;
@@ -35,6 +37,7 @@ interface SidebarUserMenuProps {
 export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
     const { data: session, status } = useSession();
     const { setTheme, theme } = useTheme();
+    const { isMobile } = useSidebar();
 
     const [mounted, setMounted] = useState(false);
     const [, startTransition] = useTransition();
@@ -60,6 +63,77 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
 
         window.location.reload();
     };
+
+    if (isMobile) {
+        const previewValue = access.previewChoices.find((role) => role.name === previewRoleName)?.id.toString() ?? "";
+
+        return (
+            <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-2">
+                <div className="flex items-center gap-2">
+                    <div className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-full border",
+                        !isAuthenticated ? "bg-muted text-muted-foreground" :
+                            isCurrentlyImpersonating ? "bg-amber-500/10 border-amber-500/30 text-amber-500" : "bg-secondary"
+                    )}>
+                        {isCurrentlyImpersonating ? <Eye className="size-3.5" /> : <User className="size-3.5 text-muted-foreground" />}
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-col text-left">
+                        <span className="truncate text-sm font-medium">
+                            {!isAuthenticated ? "Выход из системы..." : (session.user.displayName || session.user.name)}
+                        </span>
+                        <span className={cn(
+                            "truncate text-xs",
+                            isCurrentlyImpersonating ? "font-semibold text-amber-500" : "text-muted-foreground"
+                        )}>
+                            {!isAuthenticated ? "Завершение сессии" :
+                                isCurrentlyImpersonating ? `Просмотр: ${previewRoleName}` : (access.roleName ? `${access.roleName} · ${access.scopeLabel}` : session.user.department)}
+                        </span>
+                    </div>
+                    <button
+                        type="button"
+                        aria-label={mounted ? `Тема: ${theme === "dark" ? "тёмная" : theme === "light" ? "светлая" : "системная"}. Нажмите, чтобы сменить` : "Тема оформления"}
+                        onClick={() => {
+                            const order = ["light", "dark", "system"] as const;
+                            const current = order.find((value) => value === theme) ?? "system";
+                            const next = order[(order.indexOf(current) + 1) % order.length];
+                            setTheme(next);
+                        }}
+                        className="flex size-10 shrink-0 items-center justify-center rounded-md bg-background text-foreground shadow-sm"
+                    >
+                        {!mounted || theme === "system" ? <Smartphone className="size-4" /> : theme === "dark" ? <Moon className="size-4" /> : <Sun className="size-4" />}
+                    </button>
+                </div>
+
+                {isAuthenticated && isOriginalAdmin && (access.previewChoices.length > 0 || isCurrentlyImpersonating) && (
+                    <select
+                        aria-label="Режим тестирования"
+                        className="h-8 w-full rounded-md border bg-background px-2 text-xs text-foreground"
+                        value={previewValue}
+                        onChange={(event) => {
+                            const value = event.target.value;
+                            void handleMaskChange(value ? Number(value) : null);
+                        }}
+                    >
+                        <option value="">Своя роль</option>
+                        {access.previewChoices.map((role) => (
+                            <option key={role.id} value={role.id}>{role.name}</option>
+                        ))}
+                    </select>
+                )}
+
+                {isAuthenticated && (
+                    <button
+                        type="button"
+                        onClick={() => signOut({ callbackUrl: '/login' })}
+                        className="flex h-11 items-center justify-center gap-2 rounded-md border border-destructive/30 bg-background text-sm font-medium text-destructive"
+                    >
+                        <LogOut className="size-4" />
+                        Выйти из системы
+                    </button>
+                )}
+            </div>
+        );
+    }
 
     return (
         <DropdownMenu>

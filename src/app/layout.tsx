@@ -44,7 +44,7 @@ export default function RootLayout({
       <Providers>
         <SidebarProvider defaultOpen={false}>
           <AppSideBar />
-          <main className="w-full">
+          <main className="w-full pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
             <NoticeBanner />
             <AccessBanner />
             <Header />

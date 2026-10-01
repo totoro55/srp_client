@@ -1,7 +1,7 @@
 // src/components/AppSideBar.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
 import { APP_NAVIGATION_MAP, NavigationGroup } from '@/lib/routes-config';
@@ -19,8 +19,12 @@ import {
 
 export function AppSideBar() {
     const pathname = usePathname();
-    const { open } = useSidebar();
+    const { open, isMobile, setOpenMobile } = useSidebar();
     const access = useAccess();
+
+    useEffect(() => {
+        setOpenMobile(false);
+    }, [pathname, setOpenMobile]);
 
     const dynamicNavigation = useMemo((): NavigationGroup[] => {
         return APP_NAVIGATION_MAP.map((group) => {
@@ -36,6 +40,12 @@ export function AppSideBar() {
 
     return (
         <Sidebar variant="sidebar" collapsible="icon">
+            {isMobile && (
+                <div className="shrink-0 border-b px-4 pt-2 pb-3">
+                    <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/30" />
+                    <SidebarUserMenu isOpen />
+                </div>
+            )}
             <SidebarContent>
                 {dynamicNavigation.map((group) => {
                     const GroupIcon = group.icon;
@@ -61,13 +71,15 @@ export function AppSideBar() {
                 })}
             </SidebarContent>
 
-            <SidebarFooter className="border-t p-2 bg-muted/20">
-                <SidebarMenu>
-                    <SidebarMenuItem>
-                        <SidebarUserMenu isOpen={open} />
-                    </SidebarMenuItem>
-                </SidebarMenu>
-            </SidebarFooter>
+            {!isMobile && (
+                <SidebarFooter className="border-t bg-muted/20 p-2">
+                    <SidebarMenu>
+                        <SidebarMenuItem>
+                            <SidebarUserMenu isOpen={open} />
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                </SidebarFooter>
+            )}
         </Sidebar>
     );
 }
