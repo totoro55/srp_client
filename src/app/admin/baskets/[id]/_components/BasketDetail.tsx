@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccess } from "@/hooks/useAccess";
@@ -47,6 +48,7 @@ export function BasketDetail() {
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
+    const [mandatory, setMandatory] = useState(true);
     const [versionName, setVersionName] = useState("");
     const [versionComment, setVersionComment] = useState("");
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
@@ -102,6 +104,7 @@ export function BasketDetail() {
         setBasket(next);
         setName(next.name);
         setDescription(next.description);
+        setMandatory(next.mandatory);
         const preferred = preferId === null ? null : next.versions.find((item) => item.id === preferId) ?? null;
         const visible = next.versions.filter((item) => versionMatchesView(item.status, view));
         const version = preferred
@@ -205,7 +208,7 @@ export function BasketDetail() {
             setError(validationMessage);
             return;
         }
-        await mutate(`/api/admin/baskets/${basketId}`, "PATCH", { name, description }, undefined, undefined, "Изменения корзины сохранены");
+        await mutate(`/api/admin/baskets/${basketId}`, "PATCH", { name, description, mandatory }, undefined, undefined, "Изменения корзины сохранены");
     }
 
     async function onSaveVersion(event: FormEvent<HTMLFormElement>) {
@@ -313,8 +316,13 @@ export function BasketDetail() {
                 <Card size="sm">
                     <CardHeader>
                         <CardTitle>{basket.name}</CardTitle>
-                        <CardDescription>
-                            {basket.indicatorName} · код {basket.code}
+                        <CardDescription className="flex flex-wrap items-center gap-2">
+                            <span>{basket.indicatorName} · код {basket.code}</span>
+                            {basket.mandatory ? (
+                                <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">Обязательна для РРС</Badge>
+                            ) : (
+                                <span>По выбору РРС</span>
+                            )}
                         </CardDescription>
                         <CardAction className="flex items-center gap-2">
                             {profileOpen && canWrite ? (
@@ -340,6 +348,20 @@ export function BasketDetail() {
                             <div className="flex flex-col gap-1.5">
                                 <Label htmlFor="profile-name">Название</Label>
                                 <Input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} disabled={!canWrite || saving} required />
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="flex flex-col gap-1">
+                                    <Label htmlFor="profile-mandatory">Обязательна для РРС</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        При включении корзин на территории эту корзину нужно включить. Обязательность можно снять.
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="profile-mandatory"
+                                    checked={mandatory}
+                                    disabled={!canWrite || saving}
+                                    onCheckedChange={setMandatory}
+                                />
                             </div>
                             <div className="flex flex-col gap-1.5">
                                 <Label htmlFor="profile-description">Описание</Label>

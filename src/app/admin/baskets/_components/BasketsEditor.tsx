@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, BadgeCheck, FlaskConical, Pencil, Plus } from "lucide-react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +62,7 @@ export function BasketsEditor() {
     const [code, setCode] = useState("");
     const [description, setDescription] = useState("");
     const [indicatorId, setIndicatorId] = useState("");
+    const [mandatory, setMandatory] = useState(true);
     const [indicatorOpen, setIndicatorOpen] = useState(false);
     const [newIndicator, setNewIndicator] = useState("");
     const [indicatorError, setIndicatorError] = useState<string | null>(null);
@@ -117,6 +120,7 @@ export function BasketsEditor() {
         setName("");
         setCode("");
         setDescription("");
+        setMandatory(true);
         setNewIndicator("");
         setIndicatorError(null);
         setIndicatorOpen(false);
@@ -177,7 +181,7 @@ export function BasketsEditor() {
             const response = await fetch("/api/admin/baskets", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, code, description, indicatorId: Number(indicatorId) }),
+                body: JSON.stringify({ name, code, description, indicatorId: Number(indicatorId), mandatory }),
             });
             const json = (await response.json()) as ApiResponse<{ id: number }>;
             if (!json.success) {
@@ -199,7 +203,7 @@ export function BasketsEditor() {
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
             <p className="text-sm text-muted-foreground">
-                Корзина описывает расчёт одного показателя. Директор подключает тестовую или рабочую версию. Архивная версия для нового подключения недоступна.
+                Корзина описывает расчёт одного показателя. Директор подключает тестовую или рабочую версию. Обязательную корзину РРС включает на территории вместе с остальными.
             </p>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             {canWrite ? (
@@ -255,6 +259,20 @@ export function BasketsEditor() {
                                                 <Plus />
                                             </Button>
                                         </div>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div className="flex flex-col gap-1">
+                                            <Label htmlFor="basket-mandatory">Обязательна для РРС</Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                При включении корзин на территории эту корзину нужно включить. Обязательность можно снять.
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            id="basket-mandatory"
+                                            checked={mandatory}
+                                            disabled={saving}
+                                            onCheckedChange={setMandatory}
+                                        />
                                     </div>
                                     <p className="text-xs text-muted-foreground">
                                         Параметры, которые заполнит директор, задаются в версии корзины: число, текст или выбор из списка.
@@ -346,13 +364,14 @@ export function BasketsEditor() {
                     <TableRow>
                         <TableHead>Название</TableHead>
                         <TableHead>Показатель</TableHead>
+                        <TableHead>Включение</TableHead>
                         <TableHead>Версии</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {visible.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={3} className="py-8 text-center text-xs text-muted-foreground">
+                            <TableCell colSpan={4} className="py-8 text-center text-xs text-muted-foreground">
                                 {!loaded ? "Загрузка корзин..." : baskets.length === 0 ? "Корзин пока нет." : "Нет корзин по этому фильтру."}
                             </TableCell>
                         </TableRow>
@@ -366,6 +385,13 @@ export function BasketsEditor() {
                                 <p className="font-mono text-xs text-muted-foreground">{basket.code}</p>
                             </TableCell>
                             <TableCell>{basket.indicatorName}</TableCell>
+                            <TableCell>
+                                {basket.mandatory ? (
+                                    <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">Обязательна</Badge>
+                                ) : (
+                                    <span className="text-xs text-muted-foreground">По выбору</span>
+                                )}
+                            </TableCell>
                             <TableCell>
                                 <VersionList versions={basket.versions} view={versionView} />
                             </TableCell>

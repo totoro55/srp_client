@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
-import { parseBasketDescription, parseBasketName, type BasketDetails, type BasketProfileInput } from "@/lib/baskets";
+import { parseBasketDescription, parseBasketMandatory, parseBasketName, type BasketDetails, type BasketProfileInput } from "@/lib/baskets";
 import { requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
 import { getBasket, updateBasket } from "@/services/baskets";
@@ -18,10 +18,11 @@ function readProfile(body: unknown): BasketProfileInput | null {
     const record = body as Record<string, unknown>;
     const name = parseBasketName(record.name);
     const description = parseBasketDescription(record.description);
-    if (!name || description === null) {
+    const mandatory = parseBasketMandatory(record.mandatory);
+    if (!name || description === null || mandatory === null) {
         return null;
     }
-    return { name, description };
+    return { name, description, mandatory };
 }
 
 export async function GET(

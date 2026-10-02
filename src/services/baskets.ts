@@ -37,6 +37,7 @@ interface BasketListRow {
     indicatorName: string;
     settingsSchema: string;
     status: string;
+    mandatory: boolean;
     versions: unknown;
 }
 
@@ -49,6 +50,7 @@ interface BasketRow {
     indicatorName: string;
     settingsSchema: string;
     status: string;
+    mandatory: boolean;
 }
 
 interface VersionRow {
@@ -80,6 +82,7 @@ const BASKET_LIST_SQL = `
         i.name AS "indicatorName",
         b.settings_schema AS "settingsSchema",
         b.status,
+        b.mandatory,
         COALESCE((
             SELECT json_agg(
                 json_build_object('versionNo', v.version_no, 'name', v.name, 'status', v.status)
@@ -108,7 +111,8 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
             b.indicator_id AS "indicatorId",
             i.name AS "indicatorName",
             b.settings_schema AS "settingsSchema",
-            b.status
+            b.status,
+            b.mandatory
         FROM baskets b
         JOIN indicators i ON i.id = b.indicator_id
         WHERE b.id = $1
@@ -163,6 +167,7 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
         indicatorName: basket.indicatorName,
         settingsSchema: basket.settingsSchema,
         status: basket.status,
+        mandatory: basket.mandatory,
         versions: versions.map((version) => toVersion(version, changes.filter((change) => change.versionId === version.id))),
     };
 }
@@ -177,11 +182,11 @@ export async function createBasket(input: BasketDraftInput, author: string): Pro
         try {
             const rows = await query<{ id: number }>(
                 `
-                INSERT INTO baskets (code, name, description, indicator_id, settings_schema)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO baskets (code, name, description, indicator_id, settings_schema, mandatory)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING id
                 `,
-                [input.code, input.name, input.description, input.indicatorId, input.settingsSchema]
+                [input.code, input.name, input.description, input.indicatorId, input.settingsSchema, input.mandatory]
             );
             const basketId = rows[0]?.id;
             if (!basketId) {
@@ -223,11 +228,12 @@ export async function updateBasket(id: number, input: BasketProfileInput): Promi
         UPDATE baskets
         SET name = $2,
             description = $3,
+            mandatory = $4,
             updated_at = NOW()
         WHERE id = $1
         RETURNING id
         `,
-        [id, input.name, input.description]
+        [id, input.name, input.description, input.mandatory]
     );
     if (!rows[0]) {
         throw new BasketRuleError(404, "Корзина не найдена");
@@ -568,6 +574,7 @@ function toSummary(row: BasketListRow): BasketSummary {
         indicatorName: row.indicatorName,
         settingsSchema: row.settingsSchema,
         status: row.status,
+        mandatory: row.mandatory,
         versions: readVersionRefs(row.versions),
     };
 }

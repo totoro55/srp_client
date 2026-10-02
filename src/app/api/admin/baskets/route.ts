@@ -4,6 +4,7 @@ import {
     isBasketSettingsSchema,
     parseBasketCode,
     parseBasketDescription,
+    parseBasketMandatory,
     parseBasketName,
     type BasketDraftInput,
     type BasketSettingsSchema,
@@ -28,10 +29,11 @@ function readCreateBody(body: unknown): BasketDraftInput | null {
     const settingsSchema: BasketSettingsSchema | null = typeof requestedSchema === "string" && isBasketSettingsSchema(requestedSchema)
         ? requestedSchema
         : null;
-    if (!code || !name || description === null || !Number.isInteger(indicatorId) || indicatorId <= 0 || !settingsSchema) {
+    const mandatory = record.mandatory === undefined ? true : parseBasketMandatory(record.mandatory);
+    if (!code || !name || description === null || mandatory === null || !Number.isInteger(indicatorId) || indicatorId <= 0 || !settingsSchema) {
         return null;
     }
-    return { code, name, description, indicatorId, settingsSchema };
+    return { code, name, description, indicatorId, settingsSchema, mandatory };
 }
 
 export async function GET(): Promise<NextResponse<ApiResponse<BasketSummary[]>>> {

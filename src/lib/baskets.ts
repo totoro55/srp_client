@@ -91,6 +91,7 @@ export interface BasketSummary {
     indicatorName: string;
     settingsSchema: string;
     status: BasketStatus;
+    mandatory: boolean;
     versions: BasketVersionRef[];
 }
 
@@ -122,6 +123,7 @@ export interface BasketDetails {
     indicatorName: string;
     settingsSchema: string;
     status: BasketStatus;
+    mandatory: boolean;
     versions: BasketVersion[];
 }
 
@@ -131,11 +133,17 @@ export interface BasketDraftInput {
     description: string;
     indicatorId: number;
     settingsSchema: BasketSettingsSchema;
+    mandatory: boolean;
 }
 
 export interface BasketProfileInput {
     name: string;
     description: string;
+    mandatory: boolean;
+}
+
+export function parseBasketMandatory(value: unknown): boolean | null {
+    return typeof value === "boolean" ? value : null;
 }
 
 export interface BasketVersionDraftInput {
