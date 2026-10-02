@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket } from "lucide-react";
+import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket, Building2 } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -76,6 +76,14 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 title: "Корзины",
                 description: "Каталог схем расчёта и их версии",
                 permission: "baskets:read",
+            },
+            {
+                name: "Настройки РРС",
+                href: "/rrs",
+                icon: Building2,
+                title: "Настройки РРС",
+                description: "Карточки настроек территорий",
+                permission: "baskets:connect",
             },
         ],
     },

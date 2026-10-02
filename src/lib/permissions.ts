@@ -41,6 +41,12 @@ export const PERMISSION_CATALOG = [
         title: "Изменение корзин",
         description: "Новые корзины, черновики, публикация и перевод в архив",
     },
+    {
+        code: "baskets:connect",
+        group: "Мотивация",
+        title: "Настройки РРС",
+        description: "Подключение корзин к территории и параметры на месяц",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];
@@ -52,7 +58,7 @@ export function isPermissionCode(value: string): value is PermissionCode {
 }
 
 export function isWritePermission(code: PermissionCode): boolean {
-    return code.endsWith(":write");
+    return code.endsWith(":write") || code === "baskets:connect";
 }
 
 export const SCOPE_KINDS = ["division", "granted", "home_branch", "none"] as const;
