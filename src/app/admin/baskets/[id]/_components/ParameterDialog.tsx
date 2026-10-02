@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { FormAlert } from "@/components/form-alert";
+import { useRequiredFields } from "@/lib/required-fields";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -122,6 +124,7 @@ export function ParameterDialog({
     const [form, setForm] = useState<ParameterForm>(emptyForm);
     const [editing, setEditing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const validateRequired = useRequiredFields();
 
     useEffect(() => {
         if (!open) {
@@ -146,8 +149,13 @@ export function ParameterDialog({
         }));
     }
 
-    function onSave(event: FormEvent) {
+    function onSave(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const validationMessage = validateRequired(event.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
         const payload = payloadFromForm(form);
         if ("error" in payload) {
             setError(payload.error);
@@ -169,7 +177,7 @@ export function ParameterDialog({
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[85vh] overflow-y-auto">
-                <form className="flex flex-col gap-4" onSubmit={onSave}>
+                <form className="flex flex-col gap-4" noValidate onSubmit={onSave}>
                     <DialogHeader>
                         <DialogTitle>{editing ? "Параметр" : "Новый параметр"}</DialogTitle>
                     </DialogHeader>
@@ -310,7 +318,7 @@ export function ParameterDialog({
                             </Button>
                         </fieldset>
                     ) : null}
-                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                    <FormAlert message={error} />
                     <DialogFooter>
                         <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>Отмена</Button>
                         <Button type="submit" size="sm">Готово</Button>

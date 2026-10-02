@@ -11,6 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccess } from "@/hooks/useAccess";
+import { notifySuccess } from "@/lib/notify";
+import { useRequiredFields } from "@/lib/required-fields";
+import { FormAlert } from "@/components/form-alert";
 import {
     BASKET_DESCRIPTION_MAX,
     VERSION_COMMENT_MAX,
@@ -35,6 +38,8 @@ import { ApiResponse } from "@/types/api";
 export function BasketDetail() {
     const params = useParams<{ id: string }>();
     const access = useAccess();
+    const validateProfile = useRequiredFields();
+    const validateVersion = useRequiredFields();
     const canWrite = access.has("baskets:write");
     const basketId = params.id;
     const [basket, setBasket] = useState<BasketDetails | null>(null);
@@ -132,7 +137,14 @@ export function BasketDetail() {
         }
     }
 
-    async function mutate(url: string, method: string, body?: unknown, preferId?: number | null, view?: VersionView): Promise<boolean> {
+    async function mutate(
+        url: string,
+        method: string,
+        body?: unknown,
+        preferId?: number | null,
+        view?: VersionView,
+        successMessage?: string,
+    ): Promise<boolean> {
         setSaving(true);
         setError(null);
         try {
@@ -147,6 +159,9 @@ export function BasketDetail() {
                 return false;
             }
             applyBasket(json.data, preferId === undefined ? selectedId : preferId, view);
+            if (successMessage) {
+                notifySuccess(successMessage);
+            }
             return true;
         } catch {
             setError("Не удалось сохранить изменения");
@@ -156,19 +171,31 @@ export function BasketDetail() {
         }
     }
 
-    async function onSaveProfile(event: FormEvent) {
+    async function onSaveProfile(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        await mutate(`/api/admin/baskets/${basketId}`, "PATCH", { name, description });
+        const validationMessage = validateProfile(event.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
+        await mutate(`/api/admin/baskets/${basketId}`, "PATCH", { name, description }, undefined, undefined, "Изменения корзины сохранены");
     }
 
-    async function onSaveVersion(event: FormEvent) {
+    async function onSaveVersion(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!selected) return;
+        const validationMessage = validateVersion(event.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
             { name: versionName, comment: versionComment, settings: { parameters } },
-            selected.id
+            selected.id,
+            undefined,
+            "Версия сохранена",
         );
     }
 
@@ -193,7 +220,7 @@ export function BasketDetail() {
         <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="flex flex-col gap-4 pb-8">
             <BackToList />
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <FormAlert message={error} />
             <ParameterDialog
                 parameter={parameterEditor?.parameter ?? null}
                 open={parameterEditor !== null}
@@ -242,7 +269,10 @@ export function BasketDetail() {
                         "POST",
                         { status: availability },
                         selected.id,
-                        availability === "off" ? "off" : "active"
+                        availability === "off" ? "off" : "active",
+                        availability === "off"
+                            ? `Версия ${selected.versionNo} перенесена в архив`
+                            : `Версия ${selected.versionNo} опубликована`,
                     );
                     if (saved && availability) {
                         setVersionView(availability === "off" ? "off" : "active");
@@ -254,7 +284,7 @@ export function BasketDetail() {
                 }}
             />
 
-            <form onSubmit={onSaveProfile}>
+            <form onSubmit={onSaveProfile} noValidate>
                 <Card size="sm">
                     <CardHeader>
                         <CardTitle>{basket.name}</CardTitle>
@@ -322,7 +352,8 @@ export function BasketDetail() {
                                         "POST",
                                         { sourceVersionId: selectedId },
                                         null,
-                                        "draft"
+                                        "draft",
+                                        "Черновик создан",
                                     );
                                 }}
                             >
@@ -384,7 +415,7 @@ export function BasketDetail() {
             </Card>
 
             {selected ? (
-                <form onSubmit={onSaveVersion} className="grid items-start gap-4 lg:grid-cols-2">
+                <form onSubmit={onSaveVersion} noValidate className="grid items-start gap-4 lg:grid-cols-2">
                     <Card size="sm">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -539,7 +570,9 @@ export function BasketDetail() {
                                                 `/api/admin/baskets/${basketId}/versions/${draft.id}`,
                                                 "DELETE",
                                                 undefined,
-                                                null
+                                                null,
+                                                undefined,
+                                                "Черновик удалён",
                                             )}
                                         >
                                             <Trash2 />

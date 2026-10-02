@@ -9,6 +9,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAccess } from "@/hooks/useAccess";
+import { notifyError, notifySuccess } from "@/lib/notify";
+import { useRequiredFields } from "@/lib/required-fields";
+import { FormAlert } from "@/components/form-alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface RoleOption {
@@ -44,6 +47,7 @@ function toDateInput(value: string | null): string {
 
 export function RulesEditor() {
     const access = useAccess();
+    const validateRequired = useRequiredFields();
     const canWrite = access.has("access.write");
     const [roles, setRoles] = useState<RoleOption[]>([]);
     const [rules, setRules] = useState<RuleRow[]>([]);
@@ -67,7 +71,6 @@ export function RulesEditor() {
     const [roleFilter, setRoleFilter] = useState("");
     const [pendingRule, setPendingRule] = useState<RuleRow | null>(null);
     const [deleting, setDeleting] = useState(false);
-    const [actionError, setActionError] = useState<string | null>(null);
 
     const visibleRules = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -194,8 +197,17 @@ export function RulesEditor() {
         if (found) setSelectedLabel(found.name);
     }, [employees, matchType, matchValue]);
 
-    async function onSubmit(event: FormEvent) {
+    async function onSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const validationMessage = validateRequired(event.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
+        if (!matchValue.trim()) {
+            setError(matchType === "login" ? "Выберите сотрудника" : "Выберите должность");
+            return;
+        }
         setError(null);
         const response = await fetch("/api/admin/rules", {
             method: editingId ? "PATCH" : "POST",
@@ -214,25 +226,26 @@ export function RulesEditor() {
             setError(json.error?.message ?? "Не удалось сохранить правило");
             return;
         }
+        const wasEditing = editingId !== null;
         setEditingId(null);
         resetLookup();
         setExpiresAt("");
         setCreateOpen(false);
+        notifySuccess(wasEditing ? "Правило сохранено" : "Правило добавлено");
         await load();
     }
 
     async function confirmDelete() {
         if (!pendingRule) return;
         setDeleting(true);
-        setActionError(null);
         const response = await fetch(`/api/admin/rules?id=${pendingRule.id}`, { method: "DELETE" });
         const json = await response.json();
         setDeleting(false);
         if (!json.success) {
-            setActionError(json.error?.message ?? "Не удалось удалить правило");
-            setPendingRule(null);
+            notifyError(json.error?.message ?? "Не удалось удалить правило");
             return;
         }
+        notifySuccess("Правило удалено");
         setPendingRule(null);
         await load();
     }
@@ -247,7 +260,6 @@ export function RulesEditor() {
                     {`Приоритеты ${conflicts.join(", ")} заняты правилами разных типов. Один человек может попасть под оба.`}
                 </p>
             ) : null}
-            {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
             <ConfirmDialog
                 open={pendingRule !== null}
                 title="Удалить правило"
@@ -274,7 +286,7 @@ export function RulesEditor() {
                         }
                     }}>
                         <DialogContent className="sm:max-w-lg">
-                            <form className="flex flex-col gap-4" onSubmit={onSubmit}>
+                            <form className="flex flex-col gap-4" noValidate onSubmit={onSubmit}>
                                 <DialogHeader>
                                     <DialogTitle>{editingId ? "Изменить правило" : "Новое правило"}</DialogTitle>
                                 </DialogHeader>
@@ -381,7 +393,7 @@ export function RulesEditor() {
                                             <Input id="rule-expires" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} type="date" />
                                         </div>
                                     ) : null}
-                                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                                    <FormAlert message={error} />
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>

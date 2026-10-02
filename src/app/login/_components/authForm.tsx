@@ -22,25 +22,22 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover"
 import {useRouter} from "next/navigation";
+import {useRequiredFields} from "@/lib/required-fields";
 
 export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const validateRequired = useRequiredFields();
     const router = useRouter()
 
-    async function login(e: React.SubmitEvent) {
+    async function login(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
-        if (!username) {
-            setError("Не введен логин");
-            return
+        const validationMessage = validateRequired(e.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
         }
-
-        if (!password) {
-            setError("Не введен пароль");
-            return
-        }
-
 
         setError("")
         await signIn("credentials", {
@@ -83,7 +80,7 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <form className="flex flex-col" onSubmit={login}>
+                <form className="flex flex-col" noValidate onSubmit={login}>
                     <FieldSet>
                         <FieldGroup>
                             <Field>

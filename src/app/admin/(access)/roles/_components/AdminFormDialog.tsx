@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { FormAlert } from "@/components/form-alert";
+import { useRequiredFields } from "@/lib/required-fields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Role } from '@/types/admin';
@@ -82,6 +84,7 @@ export function AdminFormDialog({
     const [formData, setFormData] = useState<AdminFormValues>({});
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const validateRequired = useRequiredFields();
 
     useEffect(() => {
         if (!isOpen) {
@@ -91,8 +94,13 @@ export function AdminFormDialog({
         setError(null);
     }, [isOpen, initialData, fields]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const validationMessage = validateRequired(e.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
@@ -108,7 +116,7 @@ export function AdminFormDialog({
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="sm:max-w-[425px]">
-                <form onSubmit={handleSubmit}>
+                <form onSubmit={handleSubmit} noValidate>
                     <DialogHeader>
                         <DialogTitle className="text-base font-semibold">{title}</DialogTitle>
                     </DialogHeader>
@@ -152,7 +160,7 @@ export function AdminFormDialog({
                                 )}
                             </div>
                         ))}
-                        {error && <p className="text-xs text-destructive">{error}</p>}
+                        <FormAlert message={error} />
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>Отмена</Button>

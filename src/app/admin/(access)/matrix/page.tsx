@@ -5,6 +5,7 @@ import { MatrixGrid } from './_components/MatrixGrid';
 import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
 import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
 import { reloadAccess, useAccess } from '@/hooks/useAccess';
+import { notifyError } from '@/lib/notify';
 import type { ScopeKind } from '@/lib/permissions';
 
 interface Role {
@@ -104,13 +105,13 @@ export default function AdminMatrixPage() {
             const json = await res.json();
             if (!json.success) {
                 setRelations(previous);
-                setError(matrixErrorMessage(json.error, "Сервер отклонил изменение прав"));
+                notifyError(matrixErrorMessage(json.error, "Сервер отклонил изменение прав"));
                 return;
             }
             reloadAccess();
         } catch {
             setRelations(previous);
-            setError('Ошибка сети. Не удалось сохранить изменения матрицы.');
+            notifyError("Ошибка сети. Не удалось сохранить изменения матрицы.");
         }
     };
 

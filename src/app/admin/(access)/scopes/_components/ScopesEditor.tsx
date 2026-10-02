@@ -9,6 +9,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAccess } from "@/hooks/useAccess";
+import { notifyError, notifySuccess } from "@/lib/notify";
+import { useRequiredFields } from "@/lib/required-fields";
+import { FormAlert } from "@/components/form-alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface Territory {
@@ -26,6 +29,7 @@ interface Grant {
 
 export function ScopesEditor() {
     const access = useAccess();
+    const validateRequired = useRequiredFields();
     const canWrite = access.has("access.write");
     const [territories, setTerritories] = useState<Territory[]>([]);
     const [grants, setGrants] = useState<Grant[]>([]);
@@ -37,7 +41,6 @@ export function ScopesEditor() {
     const [territoryFilter, setTerritoryFilter] = useState("");
     const [pendingGrant, setPendingGrant] = useState<Grant | null>(null);
     const [deleting, setDeleting] = useState(false);
-    const [actionError, setActionError] = useState<string | null>(null);
 
     const visibleGrants = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -67,8 +70,13 @@ export function ScopesEditor() {
         return () => window.clearTimeout(timer);
     }, []);
 
-    async function addGrant(event: FormEvent) {
+    async function addGrant(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const validationMessage = validateRequired(event.currentTarget);
+        if (validationMessage) {
+            setError(validationMessage);
+            return;
+        }
         setError(null);
         const response = await fetch("/api/admin/scopes", {
             method: "POST",
@@ -80,23 +88,24 @@ export function ScopesEditor() {
             setError(json.error?.message ?? "Не удалось назначить территорию");
             return;
         }
+        const savedUsername = username.trim();
         setUsername("");
         setGrantOpen(false);
+        notifySuccess(`Территория назначена ${savedUsername}`);
         await load();
     }
 
     async function confirmRevoke() {
         if (!pendingGrant) return;
         setDeleting(true);
-        setActionError(null);
         const response = await fetch(`/api/admin/scopes?grantId=${pendingGrant.id}`, { method: "DELETE" });
         const json = await response.json();
         setDeleting(false);
         if (!json.success) {
-            setActionError(json.error?.message ?? "Не удалось снять назначение");
-            setPendingGrant(null);
+            notifyError(json.error?.message ?? "Не удалось снять назначение");
             return;
         }
+        notifySuccess(`Назначение для ${pendingGrant.username} снято`);
         setPendingGrant(null);
         await load();
     }
@@ -106,7 +115,6 @@ export function ScopesEditor() {
             <p className="text-sm text-muted-foreground">
                 Здесь назначаются территории директору. Справочники сотрудников и территорий наполняет загрузка данных, приложение их не меняет. Филиал линейного сотрудника берётся из карточки сотрудника.
             </p>
-            {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
             <ConfirmDialog
                 open={pendingGrant !== null}
                 title="Снять назначение"
@@ -131,7 +139,7 @@ export function ScopesEditor() {
                     </Button>
                     <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
                         <DialogContent>
-                            <form className="flex flex-col gap-4" onSubmit={addGrant}>
+                            <form className="flex flex-col gap-4" noValidate onSubmit={addGrant}>
                                 <DialogHeader>
                                     <DialogTitle>Назначение территории</DialogTitle>
                                 </DialogHeader>
@@ -154,7 +162,7 @@ export function ScopesEditor() {
                                             ))}
                                         </select>
                                     </div>
-                                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                                    <FormAlert message={error} />
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setGrantOpen(false)}>Отмена</Button>

@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAccess } from "@/hooks/useAccess";
+import { notifySuccess } from "@/lib/notify";
+import { useRequiredFields } from "@/lib/required-fields";
+import { FormAlert } from "@/components/form-alert";
 import {
     BASKET_DESCRIPTION_MAX,
     type BasketSummary,
@@ -43,6 +46,8 @@ function emptyVersionsText(view: VersionView): string {
 
 export function BasketsEditor() {
     const access = useAccess();
+    const validateCreate = useRequiredFields();
+    const validateIndicator = useRequiredFields();
     const router = useRouter();
     const canWrite = access.has("baskets:write");
     const [baskets, setBaskets] = useState<BasketSummary[]>([]);
@@ -125,8 +130,13 @@ export function BasketsEditor() {
         setIndicatorOpen(true);
     }
 
-    async function onAddIndicator(event: FormEvent) {
+    async function onAddIndicator(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const validationMessage = validateIndicator(event.currentTarget);
+        if (validationMessage) {
+            setIndicatorError(validationMessage);
+            return;
+        }
         setAddingIndicator(true);
         setIndicatorError(null);
         try {
@@ -146,6 +156,7 @@ export function BasketsEditor() {
             setIndicatorId(String(json.data.id));
             setNewIndicator("");
             setIndicatorOpen(false);
+            notifySuccess(`Показатель «${json.data.name}» добавлен`);
         } catch {
             setIndicatorError("Не удалось добавить показатель");
         } finally {
@@ -153,8 +164,13 @@ export function BasketsEditor() {
         }
     }
 
-    async function onCreate(event: FormEvent) {
+    async function onCreate(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        const validationMessage = validateCreate(event.currentTarget);
+        if (validationMessage) {
+            setFormError(validationMessage);
+            return;
+        }
         setSaving(true);
         setFormError(null);
         try {
@@ -168,8 +184,10 @@ export function BasketsEditor() {
                 setFormError(json.error.message);
                 return;
             }
+            const createdName = name.trim();
             setCreateOpen(false);
             resetForm();
+            notifySuccess(`Корзина «${createdName}» создана`);
             router.push(`/admin/baskets/${json.data.id}`);
         } catch {
             setFormError("Не удалось создать корзину");
@@ -194,7 +212,7 @@ export function BasketsEditor() {
                         if (!open) resetForm();
                     }}>
                         <DialogContent>
-                            <form className="flex flex-col gap-4" onSubmit={onCreate}>
+                            <form className="flex flex-col gap-4" noValidate onSubmit={onCreate}>
                                 <DialogHeader>
                                     <DialogTitle>Новая корзина</DialogTitle>
                                 </DialogHeader>
@@ -250,7 +268,7 @@ export function BasketsEditor() {
                                             onChange={(event) => setDescription(event.target.value)}
                                         />
                                     </div>
-                                    {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
+                                    <FormAlert message={formError} />
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>
@@ -270,7 +288,7 @@ export function BasketsEditor() {
                         }}
                     >
                         <DialogContent className="z-[60]">
-                            <form className="flex flex-col gap-4" onSubmit={onAddIndicator}>
+                            <form className="flex flex-col gap-4" noValidate onSubmit={onAddIndicator}>
                                 <DialogHeader>
                                     <DialogTitle>Новый показатель</DialogTitle>
                                 </DialogHeader>
@@ -283,7 +301,7 @@ export function BasketsEditor() {
                                         required
                                         autoFocus
                                     />
-                                    {indicatorError ? <p className="text-sm text-destructive">{indicatorError}</p> : null}
+                                    <FormAlert message={indicatorError} />
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setIndicatorOpen(false)}>Отмена</Button>

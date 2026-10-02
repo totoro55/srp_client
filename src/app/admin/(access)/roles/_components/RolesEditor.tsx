@@ -1,14 +1,17 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Loader2Icon, Pencil, Trash2 } from "lucide-react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { FormAlert } from "@/components/form-alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAccess } from "@/hooks/useAccess";
+import { notifyError, notifySuccess } from "@/lib/notify";
+import { useRequiredFields } from "@/lib/required-fields";
 import { SCOPE_KINDS, SCOPE_KIND_LABELS, type ScopeKind } from "@/lib/permissions";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -23,6 +26,7 @@ interface RoleRow {
 
 export function RolesEditor() {
     const access = useAccess();
+    const validateRequired = useRequiredFields();
     const canWrite = access.has("access.write");
     const [roles, setRoles] = useState<RoleRow[]>([]);
     const [name, setName] = useState("");
@@ -31,8 +35,8 @@ export function RolesEditor() {
     const [scopeKind, setScopeKind] = useState<ScopeKind>("division");
     const [createOpen, setCreateOpen] = useState(false);
     const [editingRole, setEditingRole] = useState<RoleRow | null>(null);
-    const [error, setError] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
     const [query, setQuery] = useState("");
     const [scopeFilter, setScopeFilter] = useState<ScopeKind | "">("");
     const [pendingRole, setPendingRole] = useState<RoleRow | null>(null);
@@ -88,47 +92,71 @@ export function RolesEditor() {
         setCreateOpen(true);
     }
 
-    async function onSubmit(event: FormEvent) {
+    async function onSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        setFormError(null);
-        const response = await fetch("/api/admin/roles", {
-            method: editingRole ? "PATCH" : "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                id: editingRole?.id,
-                name,
-                code,
-                description,
-                scopeKind,
-            }),
-        });
-        const json = await response.json();
-        if (!json.success) {
-            setFormError(json.error?.message ?? "Не удалось сохранить роль");
+        const validationMessage = validateRequired(event.currentTarget);
+        if (validationMessage) {
+            setFormError(validationMessage);
             return;
         }
-        resetForm();
-        setCreateOpen(false);
+        setFormError(null);
+        setSaving(true);
+        const wasEditing = editingRole !== null;
+        const savedName = name.trim();
+        try {
+            const response = await fetch("/api/admin/roles", {
+                method: wasEditing ? "PATCH" : "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: editingRole?.id,
+                    name,
+                    code,
+                    description,
+                    scopeKind,
+                }),
+            });
+            const json = await response.json() as { success?: boolean; error?: { message?: string } };
+            if (!json.success) {
+                setFormError(json.error?.message ?? "Не удалось сохранить роль");
+                return;
+            }
+            resetForm();
+            setCreateOpen(false);
+            notifySuccess(wasEditing ? `Роль «${savedName}» сохранена` : `Роль «${savedName}» добавлена`);
+        } catch {
+            setFormError("Не удалось сохранить роль");
+            return;
+        } finally {
+            setSaving(false);
+        }
         await load();
     }
 
     async function onDelete(role: RoleRow) {
-        setError(null);
-        const response = await fetch(`/api/admin/roles?id=${role.id}`, { method: "DELETE" });
-        const json = await response.json();
-        if (!json.success) {
-            setError(json.error?.message ?? "Не удалось удалить роль");
-            return;
+        try {
+            const response = await fetch(`/api/admin/roles?id=${role.id}`, { method: "DELETE" });
+            const json = await response.json() as { success?: boolean; error?: { message?: string } };
+            if (!json.success) {
+                notifyError(json.error?.message ?? "Не удалось удалить роль");
+                return false;
+            }
+            await load();
+            notifySuccess(`Роль «${role.name}» удалена`);
+            return true;
+        } catch {
+            notifyError("Не удалось удалить роль");
+            return false;
         }
-        await load();
     }
 
     async function confirmDelete() {
         if (!pendingRole) return;
         setDeleting(true);
-        await onDelete(pendingRole);
+        const deleted = await onDelete(pendingRole);
         setDeleting(false);
-        setPendingRole(null);
+        if (deleted) {
+            setPendingRole(null);
+        }
     }
 
     return (
@@ -136,7 +164,6 @@ export function RolesEditor() {
             <p className="text-sm text-muted-foreground">
                 Роль задаёт, что можно делать, и на каком уровне: дивизион, территория или филиал. Права отмечаются в матрице, логин и должность — в трансляции.
             </p>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <ConfirmDialog
                 open={pendingRole !== null}
                 title="Удалить роль"
@@ -156,11 +183,12 @@ export function RolesEditor() {
                         </Button>
                     </div>
                     <Dialog open={createOpen} onOpenChange={(open) => {
+                        if (saving) return;
                         setCreateOpen(open);
                         if (!open) resetForm();
                     }}>
                         <DialogContent>
-                            <form className="flex flex-col gap-4" onSubmit={onSubmit}>
+                            <form className="flex flex-col gap-4" noValidate onSubmit={onSubmit}>
                                 <DialogHeader>
                                     <DialogTitle>{editingRole ? "Изменить роль" : "Новая роль"}</DialogTitle>
                                 </DialogHeader>
@@ -201,11 +229,14 @@ export function RolesEditor() {
                                             <p className="text-xs text-muted-foreground">У администратора область всегда дивизион.</p>
                                         ) : null}
                                     </div>
-                                    {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
+                                    <FormAlert message={formError} />
                                 </div>
                                 <DialogFooter>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm">{editingRole ? "Сохранить" : "Добавить"}</Button>
+                                    <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => setCreateOpen(false)}>Отмена</Button>
+                                    <Button type="submit" size="sm" disabled={saving}>
+                                        {saving ? <Loader2Icon className="animate-spin" /> : null}
+                                        {saving ? "Сохранение..." : editingRole ? "Сохранить" : "Добавить"}
+                                    </Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>

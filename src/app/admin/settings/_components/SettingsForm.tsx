@@ -13,6 +13,7 @@ import {
     type AppSettings,
 } from "@/lib/app-settings";
 import { useAccess } from "@/hooks/useAccess";
+import { notifySuccess } from "@/lib/notify";
 import { ApiResponse } from "@/types/api";
 
 export function SettingsForm() {
@@ -72,6 +73,7 @@ export function SettingsForm() {
             }
             setSettings(json.data);
             setSaved(true);
+            notifySuccess("Настройки сохранены");
         } catch {
             setError("Не удалось сохранить настройки");
         } finally {
