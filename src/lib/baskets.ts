@@ -30,6 +30,15 @@ export type ParameterKind = (typeof PARAMETER_KINDS)[number]["code"];
 const BASKET_CODE_PATTERN = /^[a-z][a-z0-9_]{1,49}$/;
 const PARAMETER_KEY_PATTERN = /^[a-z][a-z0-9_]{0,49}$/;
 
+const RESERVED_PARAMETER_KEYS = new Set([
+    "territory_uuid",
+    "period",
+    "connected_at",
+    "connected_by",
+    "recorded_at",
+    "recorded_by",
+]);
+
 export type BasketSettingsSchema = (typeof BASKET_SETTINGS_SCHEMAS)[number]["code"];
 
 export interface Indicator {
@@ -457,7 +466,6 @@ export function parseVersionParameters(value: unknown): { parameters: BasketPara
     const usedKeys = new Set<string>();
     const usedTitles = new Set<string>();
     const parameters: BasketParameter[] = [];
-    let sequence = 1;
 
     for (const item of value) {
         const parsed = parseParameter(item, usedTitles);
@@ -465,20 +473,27 @@ export function parseVersionParameters(value: unknown): { parameters: BasketPara
             return parsed;
         }
         const rawKey = item && typeof item === "object" && typeof (item as { key?: unknown }).key === "string"
-            ? (item as { key: string }).key.trim()
+            ? (item as { key: string }).key.trim().toLowerCase()
             : "";
-        let key = PARAMETER_KEY_PATTERN.test(rawKey) && !usedKeys.has(rawKey) ? rawKey : "";
-        if (!key) {
-            do {
-                key = `p${sequence}`;
-                sequence += 1;
-            } while (usedKeys.has(key));
+        const title = parsed.parameter.title;
+        if (!PARAMETER_KEY_PATTERN.test(rawKey)) {
+            return { error: `Укажите код параметра «${title}»: латинские буквы, цифры и подчёркивание, с буквы` };
         }
-        usedKeys.add(key);
-        parameters.push({ ...parsed.parameter, key });
+        if (RESERVED_PARAMETER_KEYS.has(rawKey)) {
+            return { error: `Код «${rawKey}» зарезервирован для подключения к территории` };
+        }
+        if (usedKeys.has(rawKey)) {
+            return { error: `Код «${rawKey}» уже используется другим параметром` };
+        }
+        usedKeys.add(rawKey);
+        parameters.push({ ...parsed.parameter, key: rawKey });
     }
 
     return { parameters };
+}
+
+export function parametersEqual(left: BasketParameter[], right: BasketParameter[]): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export function readVersionSettings(value: unknown): VersionSettings {

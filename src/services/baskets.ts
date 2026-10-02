@@ -1,6 +1,7 @@
 import {
     isBasketStatus,
     isBasketVersionStatus,
+    parametersEqual,
     readVersionSettings,
     versionSettingsPayload,
     versionStatusComment,
@@ -13,6 +14,7 @@ import {
     type BasketVersionDraftInput,
     type VersionAvailability,
 } from "@/lib/baskets";
+import { buildVersionConnectionDdl } from "@/services/basket-data-tables";
 import { db } from "@/services/db";
 import type { QueryResultRow } from "pg";
 
@@ -301,28 +303,48 @@ export async function updateBasketVersion(
     author: string
 ): Promise<BasketDetails> {
     await db.transaction(async (query) => {
-        const rows = await query<{ id: number }>(
+        const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown }>(
             `
-            UPDATE basket_versions
-            SET name = $3,
-                settings = $4::jsonb
+            SELECT id, status, data_table AS "dataTable", settings
+            FROM basket_versions
             WHERE id = $2 AND basket_id = $1
-            RETURNING id
+            FOR UPDATE
             `,
-            [basketId, versionId, input.name, JSON.stringify(versionSettingsPayload(input.settings))]
+            [basketId, versionId]
         );
-        if (!rows[0]) {
+        const version = rows[0];
+        if (!version) {
             const baskets = await query<{ id: number }>("SELECT id FROM baskets WHERE id = $1", [basketId]);
             if (!baskets[0]) {
                 throw new BasketRuleError(404, "Корзина не найдена");
             }
             throw new BasketRuleError(404, "Версия не найдена");
         }
+        if (!isBasketVersionStatus(version.status)) {
+            throw new BasketRuleError(400, "У версии неизвестный статус");
+        }
+
+        const currentSettings = readVersionSettings(version.settings);
+        const settingsLocked = version.status !== "draft" || version.dataTable !== null;
+        if (settingsLocked && !parametersEqual(currentSettings.parameters, input.settings.parameters)) {
+            throw new BasketRuleError(400, "Параметры этой версии уже зафиксированы. Измените их в новом черновике.");
+        }
+        const settings = settingsLocked ? currentSettings : input.settings;
+
+        await query(
+            `
+            UPDATE basket_versions
+            SET name = $2,
+                settings = $3::jsonb
+            WHERE id = $1
+            `,
+            [versionId, input.name, JSON.stringify(versionSettingsPayload(settings))]
+        );
         await insertVersionChange(query, versionId, {
             comment: input.comment,
             author,
             name: input.name,
-            settings: input.settings,
+            settings,
         });
         await query("UPDATE baskets SET updated_at = NOW() WHERE id = $1", [basketId]);
     });
@@ -336,17 +358,18 @@ export async function setBasketVersionStatus(
     author: string
 ): Promise<BasketDetails> {
     await db.transaction(async (query) => {
-        const baskets = await query<{ id: number }>(
-            "SELECT id FROM baskets WHERE id = $1 FOR UPDATE",
+        const baskets = await query<{ id: number; code: string }>(
+            "SELECT id, code FROM baskets WHERE id = $1 FOR UPDATE",
             [basketId]
         );
-        if (!baskets[0]) {
+        const basket = baskets[0];
+        if (!basket) {
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const versions = await query<{ name: string; status: string; settings: unknown }>(
+        const versions = await query<{ name: string; versionNo: number; status: string; settings: unknown; dataTable: string | null }>(
             `
-            SELECT name, status, settings
+            SELECT name, version_no AS "versionNo", status, settings, data_table AS "dataTable"
             FROM basket_versions
             WHERE id = $2 AND basket_id = $1
             FOR UPDATE
@@ -364,17 +387,31 @@ export async function setBasketVersionStatus(
             throw new BasketRuleError(400, "Версия уже в этом состоянии");
         }
 
+        let dataTable = version.dataTable;
+        if ((status === "test" || status === "working") && !dataTable) {
+            const settings = readVersionSettings(version.settings);
+            const ddl = buildVersionConnectionDdl(versionId, basket.code, version.versionNo, settings.parameters);
+            if ("error" in ddl) {
+                throw new BasketRuleError(400, ddl.error);
+            }
+            for (const statement of ddl.statements) {
+                await query(statement);
+            }
+            dataTable = ddl.tableName;
+        }
+
         await query(
             `
             UPDATE basket_versions
             SET status = $2,
+                data_table = COALESCE($4::varchar, data_table),
                 published_at = CASE
                     WHEN $3::boolean AND published_at IS NULL THEN NOW()
                     ELSE published_at
                 END
             WHERE id = $1
             `,
-            [versionId, status, status === "test" || status === "working"]
+            [versionId, status, status === "test" || status === "working", dataTable]
         );
         await insertVersionChange(query, versionId, {
             comment: versionStatusComment(version.status, status),

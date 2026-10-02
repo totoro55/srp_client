@@ -3,8 +3,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, History, Layers, Pencil, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,9 +58,12 @@ export function BasketDetail() {
     const [versionView, setVersionView] = useState<VersionView>("active");
     const [profileOpen, setProfileOpen] = useState(false);
     const [parameterToRemove, setParameterToRemove] = useState<{ index: number; title: string } | null>(null);
+    const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const [overIndex, setOverIndex] = useState<number | null>(null);
 
     const selected = basket?.versions.find((version) => version.id === selectedId) ?? null;
     const draft = selected?.status === "draft" ? selected : null;
+    const parametersLocked = selected !== null && selected.status !== "draft";
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -75,6 +79,23 @@ export function BasketDetail() {
         setParameters(version?.settings.parameters ?? []);
         setParameterEditor(null);
         setParameterToRemove(null);
+        setDragIndex(null);
+        setOverIndex(null);
+    }
+
+    function moveParameter(from: number, to: number) {
+        if (from === to || from < 0 || to < 0) {
+            return;
+        }
+        setParameters((current) => {
+            if (from >= current.length || to >= current.length) {
+                return current;
+            }
+            const next = current.slice();
+            const [item] = next.splice(from, 1);
+            next.splice(to, 0, item);
+            return next;
+        });
     }
 
     function applyBasket(next: BasketDetails, preferId: number | null, view: VersionView = versionView) {
@@ -101,18 +122,24 @@ export function BasketDetail() {
 
     function applyParameter(parameter: BasketParameter): string | null {
         const index = parameterEditor?.index ?? null;
-        const duplicate = parameters.some((item, itemIndex) => (
+        const duplicateTitle = parameters.some((item, itemIndex) => (
             itemIndex !== index && item.title.toLowerCase() === parameter.title.toLowerCase()
         ));
-        if (duplicate) {
+        if (duplicateTitle) {
             return "Такой параметр уже есть в этой версии";
+        }
+        const duplicateKey = parameters.some((item, itemIndex) => (
+            itemIndex !== index && item.key === parameter.key
+        ));
+        if (duplicateKey) {
+            return "Параметр с таким кодом уже есть в этой версии";
         }
         setError(null);
         setParameters((current) => {
             if (index === null) {
                 return [...current, parameter];
             }
-            return current.map((item, itemIndex) => itemIndex === index ? { ...parameter, key: item.key } : item);
+            return current.map((item, itemIndex) => itemIndex === index ? parameter : item);
         });
         setParameterEditor(null);
         return null;
@@ -255,9 +282,7 @@ export function BasketDetail() {
                         ? "Тестовая версия"
                         : "Рабочая версия"}
                 description={selected && availability
-                    ? availability === "off"
-                        ? `Версия ${selected.versionNo} «${selected.name}» станет архивной и недоступной к новому подключению. Там, где она уже подключена, расчёт продолжится.`
-                        : `Версия ${selected.versionNo} «${selected.name}» будет доступна к подключению как ${availability === "test" ? "тестовая" : "рабочая"}.`
+                    ? availabilityDescription(selected.versionNo, selected.name, selected.status, availability)
                     : ""}
                 confirmLabel={availability === "off" ? "В архив" : "Подтвердить"}
                 confirmVariant={availability === "off" ? "destructive" : "default"}
@@ -423,7 +448,7 @@ export function BasketDetail() {
                                 Параметры
                             </CardTitle>
                             <CardDescription>{versionStateHint(selected.status)}</CardDescription>
-                            {canWrite ? (
+                            {canWrite && !parametersLocked ? (
                                 <CardAction>
                                     <Button
                                         type="button"
@@ -454,45 +479,100 @@ export function BasketDetail() {
                             {parameters.length === 0 ? (
                                 <p className="text-sm text-muted-foreground">Параметров пока нет. Директор включит корзину без дополнительных значений.</p>
                             ) : (
+                                <>
                                 <ul className="flex flex-col gap-2">
-                                    {parameters.map((parameter, index) => (
-                                        <li key={`${parameter.key}-${parameter.title}`} className="flex min-h-16 items-start justify-between gap-3 rounded-lg border px-3 py-2">
-                                            <div className="flex min-w-0 flex-col gap-1">
-                                                <span className="font-medium">{parameter.title}</span>
-                                                <span className="text-xs text-muted-foreground">
-                                                    {parameterKindTitle(parameter.kind)} · {parameterConstraintSummary(parameter)}
-                                                </span>
-                                                {parameter.description ? (
-                                                    <span className="text-sm text-muted-foreground">{parameter.description}</span>
+                                    {parameters.map((parameter, index) => {
+                                        const sortable = canWrite && !parametersLocked && !saving;
+                                        return (
+                                            <li
+                                                key={parameter.key}
+                                                className={cn(
+                                                    "flex min-h-16 items-start gap-2 rounded-lg border px-2 py-2",
+                                                    dragIndex === index && "opacity-50",
+                                                    overIndex === index && dragIndex !== null && dragIndex !== index && "border-primary bg-primary/5",
+                                                )}
+                                                onDragOver={(event) => {
+                                                    if (!sortable || dragIndex === null) {
+                                                        return;
+                                                    }
+                                                    event.preventDefault();
+                                                    if (overIndex !== index) {
+                                                        setOverIndex(index);
+                                                    }
+                                                }}
+                                                onDrop={(event) => {
+                                                    event.preventDefault();
+                                                    const from = Number(event.dataTransfer.getData("text/plain"));
+                                                    if (Number.isInteger(from)) {
+                                                        moveParameter(from, index);
+                                                    }
+                                                    setDragIndex(null);
+                                                    setOverIndex(null);
+                                                }}
+                                            >
+                                                {sortable ? (
+                                                    <button
+                                                        type="button"
+                                                        draggable
+                                                        aria-label={`Переместить «${parameter.title}»`}
+                                                        className="mt-1 inline-flex size-7 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing"
+                                                        onDragStart={(event) => {
+                                                            event.dataTransfer.effectAllowed = "move";
+                                                            event.dataTransfer.setData("text/plain", String(index));
+                                                            setDragIndex(index);
+                                                        }}
+                                                        onDragEnd={() => {
+                                                            setDragIndex(null);
+                                                            setOverIndex(null);
+                                                        }}
+                                                    >
+                                                        <GripVertical className="size-4" />
+                                                    </button>
                                                 ) : null}
-                                            </div>
-                                            {canWrite ? (
-                                                <div className="flex shrink-0 gap-1">
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        aria-label="Изменить параметр"
-                                                        disabled={saving}
-                                                        onClick={() => setParameterEditor({ index, parameter })}
-                                                    >
-                                                        <Pencil />
-                                                    </Button>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        aria-label="Убрать параметр"
-                                                        disabled={saving}
-                                                        onClick={() => setParameterToRemove({ index, title: parameter.title })}
-                                                    >
-                                                        <Trash2 />
-                                                    </Button>
+                                                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                        <span className="font-medium">{parameter.title}</span>
+                                                        <Badge variant="outline" className="border-primary/40 bg-primary/10 font-mono tracking-wide text-primary">{parameter.key}</Badge>
+                                                    </div>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {parameterKindTitle(parameter.kind)} · {parameterConstraintSummary(parameter)}
+                                                    </span>
+                                                    {parameter.description ? (
+                                                        <span className="text-sm text-muted-foreground">{parameter.description}</span>
+                                                    ) : null}
                                                 </div>
-                                            ) : null}
-                                        </li>
-                                    ))}
+                                                {sortable ? (
+                                                    <div className="flex shrink-0 gap-1">
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            aria-label="Изменить параметр"
+                                                            onClick={() => setParameterEditor({ index, parameter })}
+                                                        >
+                                                            <Pencil />
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            aria-label="Убрать параметр"
+                                                            onClick={() => setParameterToRemove({ index, title: parameter.title })}
+                                                        >
+                                                            <Trash2 />
+                                                        </Button>
+                                                    </div>
+                                                ) : null}
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
+                                {canWrite && !parametersLocked && parameters.length > 1 ? (
+                                    <p className="text-xs text-muted-foreground">
+                                        Директор заполняет параметры в этом порядке. Перетащите строку за значок слева, чтобы изменить его.
+                                    </p>
+                                ) : null}
+                                </>
                             )}
                             <div className="flex flex-col gap-1.5">
                                 <Label htmlFor="version-comment">Комментарий к изменению</Label>
@@ -669,9 +749,31 @@ function versionStateClass(status: BasketVersionStatus): string {
     return "text-muted-foreground";
 }
 
+function availabilityDescription(
+    versionNo: number,
+    name: string,
+    status: BasketVersionStatus,
+    availability: VersionAvailability,
+): string {
+    if (availability === "off") {
+        return `Версия ${versionNo} «${name}» станет архивной и недоступной к новому подключению. Там, где она уже подключена, расчёт продолжится.`;
+    }
+    const role = availability === "test" ? "тестовую" : "рабочую";
+    if (status === "draft") {
+        return `Версия ${versionNo} «${name}» будет доступна к подключению как ${role}. Для неё создастся таблица подключений: территория, месяц начала действия и колонки параметров.`;
+    }
+    return `Версия ${versionNo} «${name}» будет доступна к подключению как ${role}.`;
+}
+
 function versionStateHint(status: BasketVersionStatus): string {
-    if (status === "test") return "Можно подключить как тестовую.";
-    if (status === "working") return "Можно подключить как рабочую.";
-    if (status === "off") return "Архивная. Новое подключение недоступно, уже подключённые территории продолжают считать по ней.";
-    return "Черновик нельзя подключить, пока его не опубликуют.";
+    if (status === "test") {
+        return "Можно подключить как тестовую. Параметры зафиксированы: дальше их меняет только новый черновик.";
+    }
+    if (status === "working") {
+        return "Можно подключить как рабочую. Параметры зафиксированы: дальше их меняет только новый черновик.";
+    }
+    if (status === "off") {
+        return "Архивная. Новое подключение недоступно, уже подключённые территории продолжают считать по ней. Параметры этой версии не меняются.";
+    }
+    return "Черновик нельзя подключить, пока его не опубликуют. При публикации параметры станут колонками таблицы подключений.";
 }

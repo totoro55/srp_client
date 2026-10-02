@@ -90,7 +90,7 @@ function optionalLength(raw: string): number | null | "invalid" {
 function payloadFromForm(form: ParameterForm): { body: unknown } | { error: string } {
     const title = form.title.trim();
     const description = form.description.trim();
-    const base = { key: form.key, title, description, kind: form.kind };
+    const base = { key: form.key.trim().toLowerCase(), title, description, kind: form.kind };
     if (form.kind === "choice") {
         return { body: { ...base, options: form.options } };
     }
@@ -191,6 +191,21 @@ export function ParameterDialog({
                             autoFocus
                             onChange={(event) => update({ title: event.target.value })}
                         />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="parameter-key">Код</Label>
+                        <Input
+                            id="parameter-key"
+                            value={form.key}
+                            maxLength={50}
+                            required
+                            spellCheck={false}
+                            placeholder="tariff"
+                            onChange={(event) => update({ key: event.target.value.toLowerCase() })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            Имя колонки в таблице подключения. Латинские буквы, цифры и подчёркивание, с буквы.
+                        </p>
                     </div>
                     <div className="flex flex-col gap-1.5">
                         <Label htmlFor="parameter-kind">Вид</Label>
