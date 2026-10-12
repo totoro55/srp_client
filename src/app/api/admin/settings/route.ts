@@ -4,6 +4,7 @@ import {
     APP_SETTINGS_MESSAGE_MAX,
     type AppSettings,
 } from "@/lib/app-settings";
+import { RRS_EDIT_CUTOFF_MAX, RRS_EDIT_CUTOFF_MIN } from "@/lib/rrs-edit-window";
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { getAppSettings, updateAppSettings } from "@/services/app-settings";
 import { audit } from "@/server/authz/resolve-access";
@@ -28,10 +29,15 @@ function readSettings(body: unknown): AppSettings | null {
     const record = body as Record<string, unknown>;
     const maintenanceMessage = readMessage(record.maintenanceMessage);
     const noticeMessage = readMessage(record.noticeMessage);
+    const cutoffDay = record.rrsEditCutoffDay;
     if (
         typeof record.maintenanceEnabled !== "boolean" ||
         typeof record.noticeEnabled !== "boolean" ||
         typeof record.rolePreviewEnabled !== "boolean" ||
+        typeof cutoffDay !== "number" ||
+        !Number.isInteger(cutoffDay) ||
+        cutoffDay < RRS_EDIT_CUTOFF_MIN ||
+        cutoffDay > RRS_EDIT_CUTOFF_MAX ||
         maintenanceMessage === null ||
         noticeMessage === null
     ) {
@@ -48,6 +54,7 @@ function readSettings(body: unknown): AppSettings | null {
         noticeEnabled: record.noticeEnabled,
         noticeMessage,
         rolePreviewEnabled: record.rolePreviewEnabled,
+        rrsEditCutoffDay: cutoffDay,
     };
 }
 
@@ -70,7 +77,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Ap
         if (!settings) {
             return createErrorResponse(
                 "BAD_REQUEST",
-                "Проверьте переключатели и текст. Сообщение не длиннее 500 символов, у объявления он обязателен.",
+                "Проверьте переключатели, текст и день отсечки (от 1 до 28). Сообщение не длиннее 500 символов, у объявления он обязателен.",
                 400
             );
         }
@@ -79,7 +86,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Ap
         await audit(
             access.username,
             "settings.update",
-            `обслуживание=${saved.maintenanceEnabled}; объявление=${saved.noticeEnabled}; просмотр ролей=${saved.rolePreviewEnabled}`
+            `обслуживание=${saved.maintenanceEnabled}; объявление=${saved.noticeEnabled}; просмотр ролей=${saved.rolePreviewEnabled}; отсечка РРС=${saved.rrsEditCutoffDay}`
         );
         return NextResponse.json({ success: true, data: saved });
     } catch (error) {

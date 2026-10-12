@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +13,7 @@ import {
     DEFAULT_APP_SETTINGS,
     type AppSettings,
 } from "@/lib/app-settings";
+import { RRS_EDIT_CUTOFF_MAX, RRS_EDIT_CUTOFF_MIN } from "@/lib/rrs-edit-window";
 import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
 import { ApiResponse } from "@/types/api";
@@ -57,6 +59,12 @@ export function SettingsForm() {
 
     async function onSubmit(event: FormEvent) {
         event.preventDefault();
+        if (!Number.isInteger(settings.rrsEditCutoffDay)
+            || settings.rrsEditCutoffDay < RRS_EDIT_CUTOFF_MIN
+            || settings.rrsEditCutoffDay > RRS_EDIT_CUTOFF_MAX) {
+            setError("День отсечки — число от 1 до 28.");
+            return;
+        }
         setSaving(true);
         setError(null);
         setSaved(false);
@@ -83,7 +91,7 @@ export function SettingsForm() {
 
     return (
         <AdminPageShell>
-            <form onSubmit={onSubmit} className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto">
+            <form onSubmit={onSubmit} className="mx-auto min-h-0 w-full max-w-2xl flex-1 space-y-4 overflow-y-auto">
                 <Card>
                     <CardHeader>
                         <CardTitle>Обслуживание</CardTitle>
@@ -141,6 +149,35 @@ export function SettingsForm() {
                                 disabled={loading || saving || !canWrite || !settings.noticeEnabled}
                                 placeholder="Расчёт премии за сентябрь закрывается в пятницу."
                                 onChange={(event) => update({ noticeMessage: event.target.value })}
+                            />
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Карточки РРС</CardTitle>
+                        <CardDescription>
+                            До этого числа включительно в мастере можно выбрать предыдущий месяц. С 1 по 28, чтобы день был в каждом месяце.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex max-w-xs flex-col gap-2">
+                            <Label htmlFor="rrs-edit-cutoff">День отсечки</Label>
+                            <Input
+                                id="rrs-edit-cutoff"
+                                type="number"
+                                min={RRS_EDIT_CUTOFF_MIN}
+                                max={RRS_EDIT_CUTOFF_MAX}
+                                step={1}
+                                value={settings.rrsEditCutoffDay}
+                                disabled={loading || saving || !canWrite}
+                                onChange={(event) => {
+                                    const day = Number(event.target.value);
+                                    if (Number.isInteger(day)) {
+                                        update({ rrsEditCutoffDay: day });
+                                    }
+                                }}
                             />
                         </div>
                     </CardContent>

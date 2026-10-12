@@ -13,6 +13,7 @@ interface AppSettingsRow {
     notice_enabled: boolean;
     notice_message: string;
     role_preview_enabled: boolean;
+    rrs_edit_cutoff_day: number;
 }
 
 let cached: { settings: AppSettings; expiresAt: number } | null = null;
@@ -24,6 +25,7 @@ function fromRow(row: AppSettingsRow): AppSettings {
         noticeEnabled: row.notice_enabled,
         noticeMessage: row.notice_message,
         rolePreviewEnabled: row.role_preview_enabled,
+        rrsEditCutoffDay: row.rrs_edit_cutoff_day,
     };
 }
 
@@ -38,7 +40,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     }
 
     const rows = await db.query<AppSettingsRow>(`
-        SELECT maintenance_enabled, maintenance_message, notice_enabled, notice_message, role_preview_enabled
+        SELECT maintenance_enabled, maintenance_message, notice_enabled, notice_message,
+               role_preview_enabled, rrs_edit_cutoff_day
         FROM app_settings
         WHERE id = 1
     `);
@@ -55,10 +58,12 @@ export async function updateAppSettings(settings: AppSettings, updatedBy: string
             notice_enabled = $3,
             notice_message = $4,
             role_preview_enabled = $5,
+            rrs_edit_cutoff_day = $6,
             updated_at = NOW(),
-            updated_by = $6
+            updated_by = $7
         WHERE id = 1
-        RETURNING maintenance_enabled, maintenance_message, notice_enabled, notice_message, role_preview_enabled
+        RETURNING maintenance_enabled, maintenance_message, notice_enabled, notice_message,
+                  role_preview_enabled, rrs_edit_cutoff_day
         `,
         [
             settings.maintenanceEnabled,
@@ -66,6 +71,7 @@ export async function updateAppSettings(settings: AppSettings, updatedBy: string
             settings.noticeEnabled,
             settings.noticeMessage.slice(0, APP_SETTINGS_MESSAGE_MAX),
             settings.rolePreviewEnabled,
+            settings.rrsEditCutoffDay,
             updatedBy,
         ]
     );

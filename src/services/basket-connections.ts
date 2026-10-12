@@ -1,11 +1,21 @@
 import { readVersionSettings, type BasketParameter } from "@/lib/baskets";
 import {
+    buildRrsEditPolicy,
+    closedPeriodMessage,
+    monthIsOpen,
+    versionChangeOpen,
+    versionLockedMessage,
+} from "@/lib/rrs-edit-window";
+import { getAppSettings } from "@/services/app-settings";
+import {
     parseConnectionValue,
     type RrsBasketOffer,
     type RrsConnectionInput,
     type RrsConnectionSlice,
     type RrsCard,
     type RrsCardSummary,
+    type RrsHistoryEvent,
+    type RrsSavedPeriod,
     type RrsConnectedBasket,
     type RrsMonthState,
     type RrsTerritory,
@@ -96,22 +106,37 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
         basketName: string;
         mandatory: boolean;
         versionId: number | null;
-        period: string;
+        cardPeriod: string;
     }>(
         `
+        WITH scoped AS (
+            SELECT territory_uuid, basket_id, period, version_id
+            FROM basket_connections
+            WHERE territory_uuid = ANY($1::uuid[])
+        ),
+        bounds AS (
+            SELECT territory_uuid,
+                   COALESCE(
+                       MAX(period) FILTER (WHERE period <= $2::date),
+                       MIN(period)
+                   ) AS period
+            FROM scoped
+            GROUP BY territory_uuid
+        )
         SELECT DISTINCT ON (c.territory_uuid, c.basket_id)
             c.territory_uuid AS "territoryUuid",
             c.basket_id AS "basketId",
             b.name AS "basketName",
             b.mandatory,
             c.version_id AS "versionId",
-            to_char(c.period, 'YYYY-MM-DD') AS period
-        FROM basket_connections c
+            to_char(bounds.period, 'YYYY-MM-DD') AS "cardPeriod"
+        FROM scoped c
+        JOIN bounds ON bounds.territory_uuid = c.territory_uuid
         JOIN baskets b ON b.id = c.basket_id
-        WHERE c.territory_uuid = ANY($1::uuid[])
+        WHERE c.period <= bounds.period
         ORDER BY c.territory_uuid, c.basket_id, c.period DESC
         `,
-        [territories.map((territory) => territory.uuid)],
+        [territories.map((territory) => territory.uuid), calendarMonthStart()],
     );
     const byTerritory = new Map<string, RrsCardSummary>();
     for (const row of rows) {
@@ -121,11 +146,8 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
         }
         let card = byTerritory.get(row.territoryUuid);
         if (!card) {
-            card = { territory, period: row.period, baskets: [] };
+            card = { territory, period: row.cardPeriod, baskets: [] };
             byTerritory.set(row.territoryUuid, card);
-        }
-        if (row.period > card.period) {
-            card.period = row.period;
         }
         if (row.versionId !== null) {
             const basket: RrsConnectedBasket = { id: row.basketId, name: row.basketName, mandatory: row.mandatory };
@@ -138,22 +160,93 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
     return [...byTerritory.values()].sort((left, right) => left.territory.name.localeCompare(right.territory.name, "ru"));
 }
 
-export async function getRrsCard(access: AccessView, territoryUuid: string): Promise<RrsCard> {
+export async function getRrsCard(access: AccessView, territoryUuid: string, requestedPeriod: string | null = null): Promise<RrsCard> {
     await assertTerritory(access, territoryUuid);
-    const rows = await db.query<{ period: string | null }>(
-        `SELECT to_char(MAX(period), 'YYYY-MM-DD') AS period FROM basket_connections WHERE territory_uuid = $1`,
-        [territoryUuid],
-    );
-    const period = rows[0]?.period;
-    if (!period) {
+    const savedPeriods = await listSavedPeriods(territoryUuid);
+    if (savedPeriods.length === 0) {
         throw new RrsRuleError(404, "Карточка РРС ещё не создана");
     }
+    const today = calendarMonthStart();
+    const appliedPeriod = [...savedPeriods].map((item) => item.period).filter((period) => period <= today).sort().at(-1) ?? null;
+    if (requestedPeriod && !savedPeriods.some((item) => item.period === requestedPeriod)) {
+        throw new RrsRuleError(400, "Такого сохранения нет");
+    }
+    const period = requestedPeriod ?? appliedPeriod ?? [...savedPeriods].map((item) => item.period).sort()[0];
     const month = await getRrsMonth(access, territoryUuid, period);
     const territory = (await listRrsTerritories(access)).find((item) => item.uuid.toLowerCase() === territoryUuid.toLowerCase());
     if (!territory) {
         throw new RrsRuleError(403, "Эта РРС вам не назначена");
     }
-    return { territory, period, baskets: month.baskets, connections: month.connections };
+    const settings = await getAppSettings();
+    return {
+        territory,
+        period,
+        appliedPeriod,
+        savedPeriods,
+        baskets: month.baskets,
+        connections: month.connections,
+        editPolicy: buildRrsEditPolicy(settings.rrsEditCutoffDay),
+    };
+}
+
+export async function listRrsHistory(access: AccessView, territoryUuid: string): Promise<RrsHistoryEvent[]> {
+    await assertTerritory(access, territoryUuid);
+    const rows = await db.query<HistoryRow>(
+        `
+        SELECT FALSE AS replaced,
+               to_char(c.period, 'YYYY-MM-DD') AS period,
+               c.connected_at AS "savedAt",
+               c.connected_by AS "savedBy",
+               c.basket_id AS "basketId",
+               b.name AS "basketName",
+               c.version_id AS "versionId"
+        FROM basket_connections c
+        JOIN baskets b ON b.id = c.basket_id
+        WHERE c.territory_uuid = $1
+        UNION ALL
+        SELECT TRUE,
+               to_char(l.period, 'YYYY-MM-DD'),
+               l.recorded_at,
+               l.recorded_by,
+               l.basket_id,
+               b.name,
+               l.version_id
+        FROM basket_connections_log l
+        JOIN baskets b ON b.id = l.basket_id
+        WHERE l.territory_uuid = $1
+        `,
+        [territoryUuid],
+    );
+    const versionIds = [...new Set(rows.flatMap((row) => row.versionId === null ? [] : [row.versionId]))];
+    const versions = await loadHistoryVersions(versionIds);
+    const byVersion = new Map(versions.map((version) => [version.id, version]));
+    const groups = new Map<string, RrsHistoryEvent>();
+    for (const row of rows) {
+        const at = toIso(row.savedAt);
+        const key = `${row.replaced}|${row.period}|${at}|${row.savedBy}`;
+        let event = groups.get(key);
+        if (!event) {
+            event = { at, by: row.savedBy, period: row.period, replaced: row.replaced, changes: [] };
+            groups.set(key, event);
+        }
+        const version = row.versionId === null ? undefined : byVersion.get(row.versionId);
+        const values = version
+            ? await readHistoryValues(db.query.bind(db), version, territoryUuid, row.period, row.replaced ? row.savedAt : null)
+            : [];
+        event.changes.push({
+            basketId: row.basketId,
+            basketName: row.basketName,
+            versionId: row.versionId,
+            versionLabel: version ? `№ ${version.versionNo} ${version.name}` : null,
+            values,
+        });
+    }
+    return [...groups.values()]
+        .map((event) => ({
+            ...event,
+            changes: [...event.changes].sort((left, right) => left.basketName.localeCompare(right.basketName, "ru")),
+        }))
+        .sort((left, right) => right.at.localeCompare(left.at) || Number(left.replaced) - Number(right.replaced));
 }
 
 export async function getRrsMonth(access: AccessView, territoryUuid: string, period: string): Promise<RrsMonthState> {
@@ -170,6 +263,12 @@ export async function saveRrsMonth(
     items: RrsConnectionInput[],
 ): Promise<void> {
     await assertTerritory(access, territoryUuid);
+    const settings = await getAppSettings();
+    const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    const targetMonth = period.slice(0, 7);
+    if (!monthIsOpen(targetMonth, policy)) {
+        throw new RrsRuleError(400, closedPeriodMessage(policy));
+    }
     await db.transaction(async (query) => {
         const baskets = await loadOffers(query);
         const byId = new Map(baskets.map((basket) => [basket.id, basket]));
@@ -180,6 +279,8 @@ export async function saveRrsMonth(
         const versions = await loadVersions(query, baskets.map((basket) => basket.id));
         const latest = await loadLatest(query, territoryUuid, period);
         const latestByBasket = new Map(latest.map((row) => [row.basketId, row]));
+        const head = await loadHead(query, territoryUuid);
+        const headByBasket = new Map(head.map((row) => [row.basketId, row]));
         const sliceValues = await loadSliceValues(query, territoryUuid, latest, versions);
 
         for (const item of items) {
@@ -189,6 +290,12 @@ export async function saveRrsMonth(
             }
             const current = latestByBasket.get(basket.id) ?? null;
             const storedValues = current ? sliceValues.get(basket.id) ?? null : null;
+            if (item.connected && !versionChangeOpen(targetMonth, policy)) {
+                const requiredVersionId = lockedVersionId(targetMonth, current, headByBasket.get(basket.id) ?? null);
+                if (requiredVersionId !== null && item.versionId !== requiredVersionId) {
+                    throw new RrsRuleError(400, versionLockedMessage(basket.name));
+                }
+            }
             if (item.connected) {
                 await writeConnected(query, access.username, territoryUuid, period, basket, item, versions, current, storedValues);
             } else {
@@ -262,6 +369,116 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
     return [...baskets.values()];
 }
 
+interface HistoryRow {
+    replaced: boolean;
+    period: string;
+    savedAt: Date | string;
+    savedBy: string;
+    basketId: number;
+    basketName: string;
+    versionId: number | null;
+}
+
+interface HistoryVersion {
+    id: number;
+    versionNo: number;
+    name: string;
+    dataTable: string | null;
+    settings: unknown;
+}
+
+async function listSavedPeriods(territoryUuid: string): Promise<RrsSavedPeriod[]> {
+    const rows = await db.query<{ period: string; savedAt: Date | string; savedBy: string }>(
+        `
+        SELECT to_char(period, 'YYYY-MM-DD') AS period,
+               MAX(connected_at) AS "savedAt",
+               (ARRAY_AGG(connected_by ORDER BY connected_at DESC))[1] AS "savedBy"
+        FROM basket_connections
+        WHERE territory_uuid = $1
+        GROUP BY period
+        ORDER BY period DESC
+        `,
+        [territoryUuid],
+    );
+    return rows.map((row) => ({
+        period: row.period,
+        savedAt: toIso(row.savedAt),
+        savedBy: row.savedBy,
+    }));
+}
+
+async function loadHistoryVersions(versionIds: number[]): Promise<HistoryVersion[]> {
+    if (versionIds.length === 0) {
+        return [];
+    }
+    return db.query<HistoryVersion>(
+        `
+        SELECT id,
+               version_no AS "versionNo",
+               name,
+               data_table AS "dataTable",
+               settings
+        FROM basket_versions
+        WHERE id = ANY($1::int[])
+        `,
+        [versionIds],
+    );
+}
+
+async function readHistoryValues(
+    query: Sql,
+    version: HistoryVersion,
+    territoryUuid: string,
+    period: string,
+    recordedAt: Date | string | null,
+): Promise<{ title: string; value: string }[]> {
+    if (!version.dataTable || !DATA_TABLE_PATTERN.test(version.dataTable)) {
+        return [];
+    }
+    const parameters = readVersionSettings(version.settings).parameters;
+    const raw = recordedAt === null
+        ? await readParameterValues(query, version.dataTable, parameters, territoryUuid, period)
+        : await readLoggedParameterValues(query, version.dataTable, parameters, territoryUuid, period, recordedAt);
+    return parameters.map((parameter) => ({
+        title: parameter.title,
+        value: (raw[parameter.key] ?? "").trim() || "—",
+    }));
+}
+
+async function readLoggedParameterValues(
+    query: Sql,
+    dataTable: string,
+    parameters: BasketParameter[],
+    territoryUuid: string,
+    period: string,
+    recordedAt: Date | string,
+): Promise<Record<string, string>> {
+    if (parameters.length === 0) {
+        return {};
+    }
+    const columns = parameters.map((parameter) => `${quoteIdent(parameter.key)} AS ${quoteIdent(parameter.key)}`).join(", ");
+    const found = await query<Record<string, unknown>>(
+        `
+        SELECT ${columns}
+        FROM basket_data.${quoteIdent(`${dataTable}_log`)}
+        WHERE territory_uuid = $1 AND period = $2::date AND recorded_at = $3
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        [territoryUuid, period, recordedAt],
+    );
+    return stringifyValues(parameters, found[0]);
+}
+
+function calendarMonthStart(now = new Date()): string {
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-01`;
+}
+
+function toIso(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 async function loadVersions(query: Sql, basketIds: number[]): Promise<VersionRow[]> {
     if (basketIds.length === 0) {
         return [];
@@ -273,6 +490,28 @@ async function loadVersions(query: Sql, basketIds: number[]): Promise<VersionRow
         WHERE basket_id = ANY($1::int[])
         `,
         [basketIds],
+    );
+}
+
+function lockedVersionId(targetMonth: string, asOf: LatestRow | null, head: LatestRow | null): number | null {
+    if (asOf?.versionId != null && asOf.period.slice(0, 7) === targetMonth) {
+        return asOf.versionId;
+    }
+    return head?.versionId ?? null;
+}
+
+async function loadHead(query: Sql, territoryUuid: string): Promise<LatestRow[]> {
+    return query<LatestRow>(
+        `
+        SELECT DISTINCT ON (basket_id)
+            basket_id AS "basketId",
+            version_id AS "versionId",
+            to_char(period, 'YYYY-MM-DD') AS period
+        FROM basket_connections
+        WHERE territory_uuid = $1
+        ORDER BY basket_id, period DESC
+        `,
+        [territoryUuid],
     );
 }
 

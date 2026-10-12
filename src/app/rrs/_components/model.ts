@@ -1,5 +1,5 @@
 import type { BasketParameter } from "@/lib/baskets";
-import type { RrsBasketOffer, RrsConnectionSlice, RrsVersionOffer } from "@/lib/rrs";
+import type { RrsBasketOffer, RrsCard, RrsConnectionSlice, RrsHistoryChange, RrsHistoryEvent, RrsVersionOffer } from "@/lib/rrs";
 
 export interface BasketForm {
     basketId: number;
@@ -7,6 +7,11 @@ export interface BasketForm {
     versionId: number | null;
     values: Record<string, string>;
 }
+
+const MONTHS_NOMINATIVE = [
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
 
 const MONTHS_GENITIVE = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -20,7 +25,161 @@ export function currentMonth(): string {
 
 export function formatMonth(period: string): string {
     const [year, month] = period.split("-");
+    return `${MONTHS_NOMINATIVE[Number(month) - 1]} ${year}`;
+}
+
+export function formatMonthFrom(period: string): string {
+    const [year, month] = period.split("-");
     return `${MONTHS_GENITIVE[Number(month) - 1]} ${year}`;
+}
+
+export function formatCalendarDate(iso: string): string {
+    const [year, month, day] = iso.split("-");
+    return `${Number(day)} ${MONTHS_GENITIVE[Number(month) - 1]} ${year}`;
+}
+
+export interface HistoryDiffRow {
+    title: string;
+    before: string;
+    after: string;
+    changed: boolean;
+}
+
+export interface HistoryDiffBasket {
+    basketId: number;
+    basketName: string;
+    beforeVersion: string;
+    afterVersion: string;
+    versionChanged: boolean;
+    rows: HistoryDiffRow[];
+}
+
+export interface HistoryStep {
+    id: string;
+    at: string;
+    by: string;
+    period: string;
+    baskets: HistoryDiffBasket[];
+}
+
+const EMPTY_VALUE = "—";
+
+export function buildHistorySteps(events: RrsHistoryEvent[]): HistoryStep[] {
+    const saves = events
+        .filter((event) => !event.replaced)
+        .sort((left, right) => left.at.localeCompare(right.at) || left.period.localeCompare(right.period));
+    const priorBySave = new Map<RrsHistoryEvent, RrsHistoryEvent>();
+    const used = new Set<RrsHistoryEvent>();
+    for (const save of saves) {
+        const prior = events.find((event) => event.replaced && !used.has(event) && event.period === save.period && event.at === save.at);
+        if (prior) {
+            used.add(prior);
+            priorBySave.set(save, prior);
+        }
+    }
+
+    const carried = new Map<number, { version: string; values: Map<string, string> }>();
+    const steps: HistoryStep[] = [];
+    for (const save of saves) {
+        const priorChanges = new Map((priorBySave.get(save)?.changes ?? []).map((change) => [change.basketId, change]));
+        steps.push({
+            id: `${save.at}|${save.period}|${save.by}`,
+            at: save.at,
+            by: save.by,
+            period: save.period,
+            baskets: save.changes.map((change) => diffBasket(change, priorChanges.get(change.basketId), carried.get(change.basketId))),
+        });
+        for (const change of save.changes) {
+            carried.set(change.basketId, {
+                version: change.versionLabel ?? "Отключена",
+                values: new Map(change.values.map((item) => [item.title, item.value])),
+            });
+        }
+    }
+    return steps.reverse();
+}
+
+function diffBasket(
+    change: RrsHistoryChange,
+    logged: RrsHistoryChange | undefined,
+    carried: { version: string; values: Map<string, string> } | undefined,
+): HistoryDiffBasket {
+    const beforeValues = new Map(logged
+        ? logged.values.map((item) => [item.title, item.value])
+        : carried ? [...carried.values] : []);
+    const afterValues = new Map(change.values.map((item) => [item.title, item.value]));
+    const titles = [...new Set([...beforeValues.keys(), ...afterValues.keys()])];
+    const beforeVersion = logged
+        ? logged.versionLabel ?? "Отключена"
+        : carried?.version ?? EMPTY_VALUE;
+    const afterVersion = change.versionLabel ?? "Отключена";
+    return {
+        basketId: change.basketId,
+        basketName: change.basketName,
+        beforeVersion,
+        afterVersion,
+        versionChanged: (logged || carried ? beforeVersion : EMPTY_VALUE) !== afterVersion,
+        rows: titles.map((title) => {
+            const before = beforeValues.get(title) ?? EMPTY_VALUE;
+            const after = afterValues.get(title) ?? EMPTY_VALUE;
+            return { title, before, after, changed: before !== after };
+        }).filter((row) => row.before !== EMPTY_VALUE || row.after !== EMPTY_VALUE),
+    };
+}
+
+export type PeriodEffectKind = "current" | "past" | "future";
+
+export function describePeriodEffect(card: Pick<RrsCard, "period" | "appliedPeriod" | "savedPeriods">): {
+    kind: PeriodEffectKind;
+    title: string;
+    detail: string;
+} {
+    const next = card.savedPeriods
+        .map((item) => item.period)
+        .filter((period) => period > card.period)
+        .sort()[0];
+    if (!card.appliedPeriod || card.period > card.appliedPeriod) {
+        return { kind: "future", title: "Будущие", detail: `с ${formatCalendarDate(card.period)}` };
+    }
+    const end = next ? previousDay(next) : null;
+    const detail = end
+        ? `с ${formatSpanStart(card.period, end)} по ${formatCalendarDate(end)}`
+        : `с ${formatCalendarDate(card.period)} по настоящее время`;
+    const current = card.period === card.appliedPeriod;
+    return {
+        kind: current ? "current" : "past",
+        title: current ? "Текущие" : "Прошлые",
+        detail,
+    };
+}
+
+function formatSpanStart(fromIso: string, toIso: string): string {
+    const [fromYear, fromMonth, fromDay] = fromIso.split("-");
+    const [toYear] = toIso.split("-");
+    if (fromYear === toYear) {
+        return `${Number(fromDay)} ${MONTHS_GENITIVE[Number(fromMonth) - 1]}`;
+    }
+    return formatCalendarDate(fromIso);
+}
+
+function previousDay(iso: string): string {
+    const [year, month, day] = iso.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() - 1);
+    const nextYear = date.getFullYear();
+    const nextMonth = String(date.getMonth() + 1).padStart(2, "0");
+    const nextDay = String(date.getDate()).padStart(2, "0");
+    return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+export function formatSavedAt(value: string): string {
+    return new Intl.DateTimeFormat("ru-RU", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    }).format(new Date(value));
 }
 
 export function preferredVersion(basket: RrsBasketOffer, versionId: number | null): RrsVersionOffer | undefined {

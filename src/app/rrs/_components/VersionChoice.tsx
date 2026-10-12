@@ -10,18 +10,20 @@ export function VersionChoice({
     versions,
     value,
     disabled,
+    hint = "Сравните описания и выберите одну версию.",
     onChange,
 }: {
     basketId: number;
     versions: RrsVersionOffer[];
     value: number | null;
     disabled: boolean;
+    hint?: string;
     onChange: (versionId: number) => void;
 }) {
     return (
         <fieldset className="flex flex-col gap-2" disabled={disabled}>
             <legend className="mb-1 text-sm font-medium">Версия</legend>
-            <p className="text-sm text-muted-foreground">Сравните описания и выберите одну версию.</p>
+            <p className="text-sm text-muted-foreground">{hint}</p>
             {versions.map((version) => {
                 const selected = version.id === value;
                 return (

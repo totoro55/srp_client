@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FormAlert } from "@/components/form-alert";
 import type { RrsCardSummary } from "@/lib/rrs";
 import { ApiResponse } from "@/types/api";
@@ -39,23 +40,31 @@ export function RrsList() {
     }, []);
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+        <div className="flex flex-col gap-4">
             <div className="flex items-start justify-between gap-4">
                 <p className="text-sm text-muted-foreground">
                     Карточка хранит, какие корзины включены на территории. Обязательные подключаются при создании.
                 </p>
                 <Link href="/rrs/new" className={buttonVariants({ className: "shrink-0" })}>
                     <Plus />
-                    Новая карточка
+                    Добавить
                 </Link>
             </div>
             <FormAlert message={error} />
-            <Table>
+            <div className="rounded-md border">
+            <Table containerClassName="overflow-x-auto">
                 <TableHeader>
                     <TableRow>
                         <TableHead>Территория</TableHead>
                         <TableHead>Подключённые корзины</TableHead>
-                        <TableHead>С месяца</TableHead>
+                        <TableHead>
+                            <Tooltip>
+                                <TooltipTrigger render={<span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4" />}>
+                                    Период
+                                </TooltipTrigger>
+                                <TooltipContent>Месяц, настройки которого действуют сейчас</TooltipContent>
+                            </Tooltip>
+                        </TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -93,6 +102,7 @@ export function RrsList() {
                     ))}
                 </TableBody>
             </Table>
+            </div>
         </div>
     );
 }

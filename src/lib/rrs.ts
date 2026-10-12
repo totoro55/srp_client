@@ -1,4 +1,5 @@
 import type { BasketParameter } from "@/lib/baskets";
+import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
 
 const TERRITORY_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -51,14 +52,45 @@ export interface RrsCardSummary {
     baskets: RrsConnectedBasket[];
 }
 
+export interface RrsSavedPeriod {
+    period: string;
+    savedAt: string;
+    savedBy: string;
+}
+
+export interface RrsHistoryValue {
+    title: string;
+    value: string;
+}
+
+export interface RrsHistoryChange {
+    basketId: number;
+    basketName: string;
+    versionId: number | null;
+    versionLabel: string | null;
+    values: RrsHistoryValue[];
+}
+
+export interface RrsHistoryEvent {
+    at: string;
+    by: string;
+    period: string;
+    replaced: boolean;
+    changes: RrsHistoryChange[];
+}
+
 export interface RrsCard extends RrsMonthState {
     territory: RrsTerritory;
     period: string;
+    appliedPeriod: string | null;
+    savedPeriods: RrsSavedPeriod[];
+    editPolicy: RrsEditPolicy;
 }
 
 export interface RrsSetup {
     territories: RrsTerritory[];
     baskets: RrsBasketOffer[];
+    editPolicy: RrsEditPolicy;
 }
 
 export interface RrsConnectionInput {
