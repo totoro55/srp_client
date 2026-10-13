@@ -1,4 +1,5 @@
 import type { BasketParameter } from "@/lib/baskets";
+import { compareCondition, conditionLabel, evaluateFormula, formatCalculated } from "@/lib/parameter-rules";
 import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
 
 const TERRITORY_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,6 +17,7 @@ export interface RrsVersionOffer {
     description: string;
     status: "test" | "working";
     parameters: BasketParameter[];
+    testTerritoryUuids: string[];
 }
 
 export interface RrsBasketOffer {
@@ -26,6 +28,22 @@ export interface RrsBasketOffer {
     indicatorName: string;
     mandatory: boolean;
     versions: RrsVersionOffer[];
+}
+
+export function connectableVersions(
+    basket: RrsBasketOffer,
+    territoryUuid: string,
+    keepVersionId: number | null,
+): RrsVersionOffer[] {
+    return basket.versions.filter((version) => {
+        if (version.status === "working") {
+            return true;
+        }
+        if (keepVersionId !== null && version.id === keepVersionId) {
+            return true;
+        }
+        return version.status === "test" && version.testTerritoryUuids.some((uuid) => uuid.toLowerCase() === territoryUuid.toLowerCase());
+    });
 }
 
 export interface RrsConnectionSlice {
@@ -44,6 +62,7 @@ export interface RrsConnectedBasket {
     id: number;
     name: string;
     mandatory: boolean;
+    sortOrder: number;
 }
 
 export interface RrsCardSummary {
@@ -178,6 +197,117 @@ export function parseConnectionValue(
         return { error: `«${parameter.title}» длиннее допустимого` };
     }
     return { value };
+}
+
+export interface ConnectionIssue {
+    key: string;
+    message: string;
+}
+
+export function resolveConnectionValues(
+    parameters: BasketParameter[],
+    raw: Record<string, string | number | undefined>,
+): { values: Record<string, string | number>; issues: ConnectionIssue[] } {
+    const values: Record<string, string | number> = {};
+    const numbers = new Map<string, number>();
+    const issues: ConnectionIssue[] = [];
+
+    for (const parameter of parameters) {
+        if (parameter.kind === "number" && parameter.formula) {
+            const calculated = evaluateFormula(parameter.formula, numbers);
+            if ("pending" in calculated) {
+                if (issues.length === 0) {
+                    issues.push({ key: parameter.key, message: `«${parameter.title}» не удалось посчитать` });
+                }
+                continue;
+            }
+            if ("error" in calculated) {
+                issues.push({ key: parameter.key, message: `«${parameter.title}» не удалось посчитать: ${calculated.error}` });
+                continue;
+            }
+            const parsed = parseConnectionValue(parameter, calculated.value);
+            if ("error" in parsed) {
+                issues.push({ key: parameter.key, message: parsed.error });
+                continue;
+            }
+            values[parameter.key] = parsed.value;
+            if (typeof parsed.value === "number") {
+                numbers.set(parameter.key, parsed.value);
+            }
+            continue;
+        }
+
+        const parsed = parseConnectionValue(parameter, raw[parameter.key] ?? "");
+        if ("error" in parsed) {
+            issues.push({ key: parameter.key, message: parsed.error });
+            continue;
+        }
+        values[parameter.key] = parsed.value;
+        if (parameter.kind === "number" && typeof parsed.value === "number") {
+            numbers.set(parameter.key, parsed.value);
+        }
+    }
+
+    for (const parameter of parameters) {
+        if (parameter.kind !== "number" || issues.some((issue) => issue.key === parameter.key)) {
+            continue;
+        }
+        for (const condition of parameter.conditions) {
+            const left = numbers.get(parameter.key);
+            const right = numbers.get(condition.sourceKey);
+            if (left === undefined || right === undefined || compareCondition(left, condition.operator, right)) {
+                continue;
+            }
+            const source = parameters.find((item) => item.key === condition.sourceKey);
+            issues.push({
+                key: parameter.key,
+                message: `«${parameter.title}» должно быть ${conditionLabel(condition.operator)} «${source?.title ?? condition.sourceKey}»`,
+            });
+            break;
+        }
+    }
+
+    return { values, issues };
+}
+
+function looseNumber(raw: string): number | null {
+    const normalized = raw.trim().replace(",", ".");
+    if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+        return null;
+    }
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+}
+
+export function withCalculatedValues(
+    parameters: BasketParameter[],
+    raw: Record<string, string>,
+): Record<string, string> {
+    const next = { ...raw };
+    const numbers = new Map<string, number>();
+    for (const parameter of parameters) {
+        if (parameter.kind === "number" && parameter.formula) {
+            const calculated = evaluateFormula(parameter.formula, numbers);
+            if (!("value" in calculated)) {
+                next[parameter.key] = "";
+                continue;
+            }
+            next[parameter.key] = formatCalculated(calculated.value);
+            numbers.set(parameter.key, calculated.value);
+            continue;
+        }
+        if (parameter.kind === "number") {
+            const value = looseNumber(raw[parameter.key] ?? "");
+            if (value !== null) {
+                numbers.set(parameter.key, value);
+            }
+        }
+    }
+    return next;
+}
+
+export function formulaPreview(formula: string, parameters: BasketParameter[]): string {
+    return formula.replace(/[a-z][a-z0-9_]*/g, (key) => parameters.find((item) => item.key === key)?.title ?? key);
 }
 
 export function parseRrsSaveInput(body: unknown): RrsSaveInput | null {

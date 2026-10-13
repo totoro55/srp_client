@@ -8,7 +8,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS indicators_name_lower_uidx ON indicators (lowe
 
 INSERT INTO indicators (name)
 SELECT candidate.name
-FROM (VALUES ('Продажа'), ('Выдача товара')) AS candidate (name)
+FROM (VALUES ('Продажа товара'), ('Выдача товара')) AS candidate (name)
 WHERE NOT EXISTS (
     SELECT 1 FROM indicators existing WHERE lower(existing.name) = lower(candidate.name)
 );
@@ -20,7 +20,7 @@ SET indicator_id = indicators.id
 FROM indicators
 WHERE baskets.indicator_id IS NULL
   AND baskets.indicator_code = 'sales'
-  AND indicators.name = 'Продажа';
+  AND indicators.name = 'Продажа товара';
 
 UPDATE baskets
 SET indicator_id = indicators.id

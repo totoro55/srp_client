@@ -1,3 +1,15 @@
+import {
+    FORMULA_MAX,
+    PARAMETER_CONDITION_MAX,
+    conditionLabel,
+    isConditionOperator,
+    parseFormula,
+    type ParameterCondition,
+} from "@/lib/parameter-rules";
+
+export type { ParameterCondition } from "@/lib/parameter-rules";
+export { FORMULA_MAX, PARAMETER_CONDITION_MAX } from "@/lib/parameter-rules";
+
 export const BASKET_SETTINGS_SCHEMAS = [
     {
         code: "tariff",
@@ -11,6 +23,7 @@ export const INDICATOR_NAME_MAX = 255;
 export const BASKET_NAME_MAX = 255;
 export const BASKET_DESCRIPTION_MAX = 2000;
 export const VERSION_NAME_MAX = 255;
+export const VERSION_DESCRIPTION_MAX = 2000;
 export const VERSION_COMMENT_MAX = 2000;
 export const PARAMETER_TITLE_MAX = 100;
 export const PARAMETER_DESCRIPTION_MAX = 500;
@@ -45,6 +58,17 @@ export interface Indicator {
     id: number;
     name: string;
 }
+
+export interface BasketTestTerritory {
+    uuid: string;
+    code: string;
+    name: string;
+}
+
+export interface BasketTestTerritorySettings {
+    territories: BasketTestTerritory[];
+    selected: string[];
+}
 export type BasketStatus = "active" | "retired";
 export type BasketVersionStatus = "draft" | "test" | "working" | "off";
 export type VersionAvailability = Exclude<BasketVersionStatus, "draft">;
@@ -53,6 +77,7 @@ export type VersionView = "active" | "draft" | "off" | "all";
 export interface BasketVersionRef {
     versionNo: number;
     name: string;
+    description: string;
     status: BasketVersionStatus;
 }
 
@@ -74,7 +99,12 @@ interface BasketParameterBase {
 }
 
 export type BasketParameter =
-    | (BasketParameterBase & { kind: "number"; constraints: NumberConstraints })
+    | (BasketParameterBase & {
+        kind: "number";
+        constraints: NumberConstraints;
+        formula: string;
+        conditions: ParameterCondition[];
+    })
     | (BasketParameterBase & { kind: "text"; constraints: TextConstraints })
     | (BasketParameterBase & { kind: "choice"; options: string[] });
 
@@ -108,6 +138,7 @@ export interface BasketVersion {
     id: number;
     versionNo: number;
     name: string;
+    description: string;
     status: BasketVersionStatus;
     settings: VersionSettings;
     publishedAt: string | null;
@@ -148,6 +179,7 @@ export function parseBasketMandatory(value: unknown): boolean | null {
 
 export interface BasketVersionDraftInput {
     name: string;
+    description: string;
     comment: string;
     settings: VersionSettings;
 }
@@ -275,6 +307,20 @@ export function parseVersionName(value: unknown): string | null {
     return name;
 }
 
+export function parseVersionDescription(value: unknown): string | null {
+    if (value === undefined || value === null) {
+        return "";
+    }
+    if (typeof value !== "string") {
+        return null;
+    }
+    const description = value.trim();
+    if (description.length > VERSION_DESCRIPTION_MAX) {
+        return null;
+    }
+    return description;
+}
+
 export function parseVersionComment(value: unknown): string | null {
     if (typeof value !== "string") {
         return null;
@@ -304,7 +350,7 @@ export function parameterKindTitle(kind: ParameterKind): string {
     return PARAMETER_KINDS.find((item) => item.code === kind)?.title ?? kind;
 }
 
-export function parameterConstraintSummary(parameter: BasketParameter): string {
+export function parameterConstraintSummary(parameter: BasketParameter, parameters: BasketParameter[] = []): string {
     if (parameter.kind === "choice") {
         return parameter.options.join(", ");
     }
@@ -325,6 +371,13 @@ export function parameterConstraintSummary(parameter: BasketParameter): string {
     if (parameter.constraints.max !== null) {
         parts.push(`до ${parameter.constraints.max}`);
     }
+    if (parameter.formula) {
+        parts.push(`формула ${parameter.formula}`);
+    }
+    for (const condition of parameter.conditions) {
+        const source = parameters.find((item) => item.key === condition.sourceKey);
+        parts.push(`${conditionLabel(condition.operator)} «${source?.title ?? condition.sourceKey}»`);
+    }
     if (parameter.constraints.integer) {
         parts.push("только целое");
     }
@@ -332,6 +385,83 @@ export function parameterConstraintSummary(parameter: BasketParameter): string {
 }
 
 type ParameterParse = { parameter: BasketParameter } | { error: string };
+
+function readFormula(value: unknown, title: string): { value: string } | { error: string } {
+    if (value === undefined || value === null || value === "") {
+        return { value: "" };
+    }
+    if (typeof value !== "string") {
+        return { error: `Формула параметра «${title}» задана неверно` };
+    }
+    const formula = value.trim().toLowerCase();
+    if (!formula) {
+        return { value: "" };
+    }
+    if (formula.length > FORMULA_MAX) {
+        return { error: `Формула параметра «${title}» длиннее ${FORMULA_MAX} символов` };
+    }
+    const parsed = parseFormula(formula);
+    if ("error" in parsed) {
+        return { error: `Формула параметра «${title}»: ${parsed.error}` };
+    }
+    return { value: formula };
+}
+
+function readConditions(value: unknown, title: string): { value: ParameterCondition[] } | { error: string } {
+    if (value === undefined || value === null) {
+        return { value: [] };
+    }
+    if (!Array.isArray(value)) {
+        return { error: `Условия параметра «${title}» заданы неверно` };
+    }
+    if (value.length > PARAMETER_CONDITION_MAX) {
+        return { error: `У параметра «${title}» не больше ${PARAMETER_CONDITION_MAX} условий` };
+    }
+    const conditions: ParameterCondition[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return { error: `Условие параметра «${title}» задано неверно` };
+        }
+        const record = item as Record<string, unknown>;
+        if (!isConditionOperator(record.operator)) {
+            return { error: `Условие параметра «${title}»: неизвестное сравнение` };
+        }
+        const sourceKey = typeof record.sourceKey === "string" ? record.sourceKey.trim().toLowerCase() : "";
+        if (!PARAMETER_KEY_PATTERN.test(sourceKey)) {
+            return { error: `Условие параметра «${title}»: выберите параметр` };
+        }
+        conditions.push({ operator: record.operator, sourceKey });
+    }
+    return { value: conditions };
+}
+
+export function checkParameterRules(parameters: BasketParameter[]): string | null {
+    const byKey = new Map(parameters.map((item) => [item.key, item]));
+    for (const [index, parameter] of parameters.entries()) {
+        if (parameter.kind !== "number") {
+            continue;
+        }
+        if (parameter.formula) {
+            const parsed = parseFormula(parameter.formula);
+            if ("error" in parsed) {
+                return `Формула параметра «${parameter.title}»: ${parsed.error}`;
+            }
+            const earlier = new Set(
+                parameters.slice(0, index).filter((item) => item.kind === "number").map((item) => item.key),
+            );
+            if (parsed.refs.some((ref) => !earlier.has(ref))) {
+                return `Формула параметра «${parameter.title}» может использовать только числовые параметры, которые стоят выше`;
+            }
+        }
+        for (const condition of parameter.conditions) {
+            const source = byKey.get(condition.sourceKey);
+            if (!source || source.kind !== "number" || source.key === parameter.key) {
+                return `Условие параметра «${parameter.title}»: выберите другой числовой параметр`;
+            }
+        }
+    }
+    return null;
+}
 
 function readBoundNumber(value: unknown, label: string): { value: number | null } | { error: string } {
     if (value === undefined || value === null || value === "") {
@@ -452,6 +582,14 @@ function parseParameter(item: unknown, usedTitles: Set<string>): ParameterParse 
     if (typeof integer !== "boolean") {
         return { error: `Ограничение «только целое» у «${title}» задано неверно` };
     }
+    const formula = readFormula(record.formula, title);
+    if ("error" in formula) {
+        return formula;
+    }
+    const conditions = readConditions(record.conditions, title);
+    if ("error" in conditions) {
+        return conditions;
+    }
     return {
         parameter: {
             key: "",
@@ -459,11 +597,16 @@ function parseParameter(item: unknown, usedTitles: Set<string>): ParameterParse 
             description,
             kind: "number",
             constraints: { min: min.value, max: max.value, integer },
+            formula: formula.value,
+            conditions: conditions.value,
         },
     };
 }
 
-export function parseVersionParameters(value: unknown): { parameters: BasketParameter[] } | { error: string } {
+export function parseVersionParameters(
+    value: unknown,
+    options?: { rules?: boolean },
+): { parameters: BasketParameter[] } | { error: string } {
     if (!Array.isArray(value)) {
         return { error: "Список параметров задан неверно" };
     }
@@ -497,6 +640,13 @@ export function parseVersionParameters(value: unknown): { parameters: BasketPara
         parameters.push({ ...parsed.parameter, key: rawKey });
     }
 
+    if (options?.rules !== false) {
+        const rules = checkParameterRules(parameters);
+        if (rules) {
+            return { error: rules };
+        }
+    }
+
     return { parameters };
 }
 
@@ -526,6 +676,8 @@ export function readVersionSettings(value: unknown): VersionSettings {
                 description: "",
                 kind: "number",
                 constraints: { min: null, max: null, integer: false },
+                formula: "",
+                conditions: [],
             }],
         };
     }

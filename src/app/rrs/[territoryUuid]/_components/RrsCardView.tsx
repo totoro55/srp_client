@@ -63,7 +63,6 @@ export function RrsCardView() {
                 return basket ? { form, basket, version } : null;
             })
             .filter((column): column is { form: BasketForm; basket: RrsBasketOffer; version: RrsVersionOffer | undefined } => column !== null)
-            .sort((left, right) => Number(right.basket.mandatory) - Number(left.basket.mandatory) || left.basket.name.localeCompare(right.basket.name, "ru"))
         : [];
 
     return (

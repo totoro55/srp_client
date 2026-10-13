@@ -1,5 +1,5 @@
 import type { BasketParameter } from "@/lib/baskets";
-import type { RrsBasketOffer, RrsCard, RrsConnectionSlice, RrsHistoryChange, RrsHistoryEvent, RrsVersionOffer } from "@/lib/rrs";
+import { connectableVersions, resolveConnectionValues, withCalculatedValues, type RrsBasketOffer, type RrsCard, type RrsConnectionSlice, type RrsHistoryChange, type RrsHistoryEvent, type RrsVersionOffer } from "@/lib/rrs";
 
 export interface BasketForm {
     basketId: number;
@@ -197,7 +197,41 @@ export function valuesFor(version: RrsVersionOffer | undefined, connection: RrsC
         const stored = connection?.versionId === version.id ? connection.values?.[parameter.key] : undefined;
         values[parameter.key] = stored ?? "";
     }
-    return values;
+    return withCalculatedValues(version.parameters, values);
+}
+
+export function basketsForTerritory(
+    baskets: RrsBasketOffer[],
+    territoryUuid: string,
+    connections: RrsConnectionSlice[],
+): RrsBasketOffer[] {
+    return baskets.flatMap((basket) => {
+        const connection = connections.find((item) => item.basketId === basket.id);
+        const versions = connectableVersions(basket, territoryUuid, connection?.versionId ?? null);
+        if (versions.length === 0) {
+            return [];
+        }
+        return [{ ...basket, versions }];
+    });
+}
+
+export function formsForTerritory(
+    baskets: RrsBasketOffer[],
+    connections: RrsConnectionSlice[],
+    territoryUuid: string,
+    previous: BasketForm[],
+): BasketForm[] {
+    return basketsForTerritory(baskets, territoryUuid, connections).map((basket) => {
+        const [built] = buildForms([basket], connections);
+        const prior = previous.find((form) => form.basketId === basket.id);
+        if (!built || !prior || !basket.versions.some((version) => version.id === prior.versionId)) {
+            return built;
+        }
+        return {
+            ...prior,
+            connected: basket.mandatory || prior.connected,
+        };
+    }).filter((form): form is BasketForm => form !== undefined);
 }
 
 export function buildForms(baskets: RrsBasketOffer[], connections: RrsConnectionSlice[]): BasketForm[] {
@@ -215,8 +249,15 @@ export function buildForms(baskets: RrsBasketOffer[], connections: RrsConnection
     });
 }
 
-export function fieldMissing(_parameter: BasketParameter, value: string | undefined): boolean {
+export function fieldMissing(parameter: BasketParameter, value: string | undefined): boolean {
+    if (parameter.kind === "number" && parameter.formula) {
+        return false;
+    }
     return (value ?? "").trim().length === 0;
+}
+
+export function connectionIssues(parameters: BasketParameter[], values: Record<string, string>) {
+    return resolveConnectionValues(parameters, withCalculatedValues(parameters, values)).issues;
 }
 
 export function formBlocked(baskets: RrsBasketOffer[], forms: BasketForm[]): boolean {
@@ -229,7 +270,7 @@ export function formBlocked(baskets: RrsBasketOffer[], forms: BasketForm[]): boo
         if (!version) {
             return true;
         }
-        return version.parameters.some((parameter) => fieldMissing(parameter, form.values[parameter.key]));
+        return connectionIssues(version.parameters, form.values).length > 0;
     });
 }
 

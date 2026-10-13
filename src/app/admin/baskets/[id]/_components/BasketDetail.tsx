@@ -7,10 +7,11 @@ import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
@@ -19,6 +20,7 @@ import { FormAlert } from "@/components/form-alert";
 import {
     BASKET_DESCRIPTION_MAX,
     VERSION_COMMENT_MAX,
+    VERSION_DESCRIPTION_MAX,
     VERSION_NAME_MAX,
     compareVersions,
     versionMatchesView,
@@ -28,6 +30,7 @@ import {
     type VersionAvailability,
     type VersionView,
     parameterConstraintSummary,
+    parametersEqual,
     parameterKindTitle,
     type BasketDetails,
     type BasketParameter,
@@ -35,6 +38,7 @@ import {
 } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
 import { ParameterDialog } from "./ParameterDialog";
+import { VersionTestTerritories } from "./VersionTestTerritories";
 import { ApiResponse } from "@/types/api";
 
 export function BasketDetail() {
@@ -50,6 +54,7 @@ export function BasketDetail() {
     const [description, setDescription] = useState("");
     const [mandatory, setMandatory] = useState(true);
     const [versionName, setVersionName] = useState("");
+    const [versionDescription, setVersionDescription] = useState("");
     const [versionComment, setVersionComment] = useState("");
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
     const [parameterEditor, setParameterEditor] = useState<{ index: number | null; parameter: BasketParameter | null } | null>(null);
@@ -60,12 +65,29 @@ export function BasketDetail() {
     const [versionView, setVersionView] = useState<VersionView>("active");
     const [profileOpen, setProfileOpen] = useState(false);
     const [parameterToRemove, setParameterToRemove] = useState<{ index: number; title: string } | null>(null);
+    const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [overIndex, setOverIndex] = useState<number | null>(null);
 
     const selected = basket?.versions.find((version) => version.id === selectedId) ?? null;
     const draft = selected?.status === "draft" ? selected : null;
     const parametersLocked = selected !== null && selected.status !== "draft";
+    const versionDirty = selected !== null && canWrite && (
+        versionName.trim() !== selected.name
+        || versionDescription.trim() !== selected.description.trim()
+        || versionComment.trim() !== ""
+        || !parametersEqual(parameters, selected.settings.parameters)
+    );
+
+    function requestVersion(version: BasketVersion | null) {
+        if ((version?.id ?? null) === selectedId) {
+            return;
+        }
+        if (versionDirty && !window.confirm("Есть несохранённые изменения этой версии. Перейти без сохранения?")) {
+            return;
+        }
+        fillVersion(version);
+    }
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -77,10 +99,12 @@ export function BasketDetail() {
     function fillVersion(version: BasketVersion | null) {
         setSelectedId(version?.id ?? null);
         setVersionName(version?.name ?? "");
+        setVersionDescription(version?.description ?? "");
         setVersionComment("");
         setParameters(version?.settings.parameters ?? []);
         setParameterEditor(null);
         setParameterToRemove(null);
+        setConfirmDeleteDraft(false);
         setDragIndex(null);
         setOverIndex(null);
     }
@@ -120,7 +144,7 @@ export function BasketDetail() {
         if (!basket) return;
         if (selected && versionMatchesView(selected.status, view)) return;
         const visible = basket.versions.filter((item) => versionMatchesView(item.status, view)).sort(compareVersions);
-        fillVersion(visible[0] ?? null);
+        requestVersion(visible[0] ?? null);
     }
 
     function applyParameter(parameter: BasketParameter): string | null {
@@ -222,7 +246,7 @@ export function BasketDetail() {
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
-            { name: versionName, comment: versionComment, settings: { parameters } },
+            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters } },
             selected.id,
             undefined,
             "Версия сохранена",
@@ -253,6 +277,8 @@ export function BasketDetail() {
             <FormAlert message={error} />
             <ParameterDialog
                 parameter={parameterEditor?.parameter ?? null}
+                parameters={parameters}
+                editIndex={parameterEditor?.index ?? null}
                 open={parameterEditor !== null}
                 onOpenChange={(open) => {
                     if (!open) setParameterEditor(null);
@@ -309,6 +335,31 @@ export function BasketDetail() {
                 }}
                 onOpenChange={(open) => {
                     if (!open) setAvailability(null);
+                }}
+            />
+            <ConfirmDialog
+                open={confirmDeleteDraft && draft !== null}
+                title="Удалить черновик"
+                description={draft
+                    ? `Черновик № ${draft.versionNo} «${draft.name}» будет удалён. Вернуть его нельзя.`
+                    : ""}
+                confirmLabel="Удалить"
+                confirmVariant="destructive"
+                isPending={saving}
+                onConfirm={async () => {
+                    if (!draft) return;
+                    const deleted = await mutate(
+                        `/api/admin/baskets/${basketId}/versions/${draft.id}`,
+                        "DELETE",
+                        undefined,
+                        null,
+                        undefined,
+                        "Черновик удалён",
+                    );
+                    if (deleted) setConfirmDeleteDraft(false);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setConfirmDeleteDraft(false);
                 }}
             />
 
@@ -444,7 +495,7 @@ export function BasketDetail() {
                                     <button
                                         key={version.id}
                                         type="button"
-                                        onClick={() => fillVersion(version)}
+                                        onClick={() => requestVersion(version)}
                                         className={cn(
                                             "flex w-44 shrink-0 flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left transition-colors",
                                             active ? "border-primary bg-primary/5" : "bg-card hover:bg-muted/60"
@@ -452,6 +503,9 @@ export function BasketDetail() {
                                     >
                                         <span className="text-xs text-muted-foreground">№ {version.versionNo}</span>
                                         <span className="w-full truncate text-sm font-medium">{version.name}</span>
+                                        {version.description.trim() ? (
+                                            <span className="w-full truncate text-xs text-muted-foreground">{version.description}</span>
+                                        ) : null}
                                         <VersionState status={version.status} />
                                     </button>
                                 );
@@ -462,42 +516,60 @@ export function BasketDetail() {
             </Card>
 
             {selected ? (
-                <form onSubmit={onSaveVersion} noValidate className="grid items-start gap-4 lg:grid-cols-2">
-                    <Card size="sm">
+                <Tabs defaultValue="version">
+                    <TabsList>
+                        <TabsTrigger value="version">Версия</TabsTrigger>
+                        <TabsTrigger value="history">
+                            <History />
+                            История
+                            {selected.changes.length > 0 ? (
+                                <span className="text-xs tabular-nums text-muted-foreground">{selected.changes.length}</span>
+                            ) : null}
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="version">
+                <form onSubmit={onSaveVersion} noValidate>
+                    <Card
+                        size="sm"
+                        className={cn(
+                            "overflow-visible",
+                            versionDirty && "ring-2 ring-amber-500/70 dark:ring-amber-400/70",
+                        )}
+                    >
                         <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <SlidersHorizontal className="size-4" />
-                                Параметры
+                            <CardTitle className="flex flex-wrap items-center gap-2">
+                                Версия № {selected.versionNo}
+                                {versionDirty ? (
+                                    <span className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200">
+                                        Не сохранено
+                                    </span>
+                                ) : null}
                             </CardTitle>
                             <CardDescription>{versionStateHint(selected.status)}</CardDescription>
-                            {canWrite && !parametersLocked ? (
-                                <CardAction>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={saving}
-                                        onClick={() => setParameterEditor({ index: null, parameter: null })}
-                                    >
-                                        <Plus />
-                                        Параметр
-                                    </Button>
-                                </CardAction>
-                            ) : null}
                         </CardHeader>
-                        <CardContent className="flex flex-col gap-4">
-                            <div className="flex flex-col gap-1.5">
-                                <Label htmlFor="version-name">Название версии</Label>
-                                <Input
-                                    id="version-name"
-                                    value={versionName}
-                                    maxLength={VERSION_NAME_MAX}
-                                    disabled={!canWrite || saving}
-                                    required
-                                    onChange={(event) => setVersionName(event.target.value)}
-                                />
-                                <p className="text-xs text-muted-foreground">Номер {selected.versionNo} не меняется.</p>
-                            </div>
+                        <CardContent>
+                            <div className="grid items-start gap-6 lg:grid-cols-2">
+                                <div className="flex min-w-0 flex-col gap-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex flex-col gap-1">
+                                            <h3 className="flex items-center gap-2 text-sm font-medium">
+                                                <SlidersHorizontal className="size-4" />
+                                                Параметры
+                                            </h3>
+                                        </div>
+                                        {canWrite && !parametersLocked ? (
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={saving}
+                                                onClick={() => setParameterEditor({ index: null, parameter: null })}
+                                            >
+                                                <Plus />
+                                                Параметр
+                                            </Button>
+                                        ) : null}
+                                    </div>
                             {parameters.length === 0 ? (
                                 <p className="text-sm text-muted-foreground">Параметров пока нет. Директор включит корзину без дополнительных значений.</p>
                             ) : (
@@ -557,7 +629,7 @@ export function BasketDetail() {
                                                         <Badge variant="outline" className="border-primary/40 bg-primary/10 font-mono tracking-wide text-primary">{parameter.key}</Badge>
                                                     </div>
                                                     <span className="text-xs text-muted-foreground">
-                                                        {parameterKindTitle(parameter.kind)} · {parameterConstraintSummary(parameter)}
+                                                        {parameterKindTitle(parameter.kind)} · {parameterConstraintSummary(parameter, parameters)}
                                                     </span>
                                                     {parameter.description ? (
                                                         <span className="text-sm text-muted-foreground">{parameter.description}</span>
@@ -596,31 +668,76 @@ export function BasketDetail() {
                                 ) : null}
                                 </>
                             )}
+                                </div>
+                                <div className="flex min-w-0 flex-col gap-4 border-t pt-4 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+                                    <h3 className="text-sm font-medium">Сведения</h3>
                             <div className="flex flex-col gap-1.5">
-                                <Label htmlFor="version-comment">Комментарий к изменению</Label>
-                                <Textarea
-                                    id="version-comment"
-                                    value={versionComment}
-                                    maxLength={VERSION_COMMENT_MAX}
+                                <Label htmlFor="version-name">Название версии</Label>
+                                <Input
+                                    id="version-name"
+                                    value={versionName}
+                                    maxLength={VERSION_NAME_MAX}
                                     disabled={!canWrite || saving}
                                     required
-                                    placeholder="Что изменилось и зачем"
-                                    onChange={(event) => setVersionComment(event.target.value)}
+                                    onChange={(event) => setVersionName(event.target.value)}
                                 />
+                                <p className="text-xs text-muted-foreground">Номер {selected.versionNo} не меняется.</p>
                             </div>
-                            {canWrite ? (
+                            <div className="flex flex-col gap-1.5">
+                                <Label htmlFor="version-description">Описание версии</Label>
+                                <Textarea
+                                    id="version-description"
+                                    value={versionDescription}
+                                    maxLength={VERSION_DESCRIPTION_MAX}
+                                    disabled={!canWrite || saving}
+                                    placeholder="Чем эта версия отличается от других"
+                                    onChange={(event) => setVersionDescription(event.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">Руководитель видит этот текст, когда выбирает версию.</p>
+                            </div>
+                            <VersionTestTerritories key={selected.id} basketId={basketId} versionId={selected.id} canWrite={canWrite} />
+                                </div>
+                            </div>
+                        </CardContent>
+                        {canWrite ? (
+                            <CardFooter
+                                className={cn(
+                                    "sticky bottom-0 z-10 flex-col items-stretch gap-3 border-t bg-card/95 backdrop-blur-sm",
+                                    versionDirty && "border-amber-500/50 bg-amber-50/95 dark:border-amber-400/40 dark:bg-amber-950/80",
+                                )}
+                            >
+                                {versionDirty ? (
+                                    <>
+                                        <p className="text-sm text-amber-800 dark:text-amber-200">
+                                            Есть несохранённые изменения. Напишите комментарий и сохраните версию: публикация берёт только записанный вариант.
+                                        </p>
+                                        <div className="flex flex-col gap-1.5">
+                                            <Label htmlFor="version-comment">Комментарий к изменению</Label>
+                                            <Textarea
+                                                id="version-comment"
+                                                value={versionComment}
+                                                maxLength={VERSION_COMMENT_MAX}
+                                                disabled={saving}
+                                                required
+                                                rows={2}
+                                                placeholder="Что изменилось и зачем"
+                                                onChange={(event) => setVersionComment(event.target.value)}
+                                            />
+                                        </div>
+                                    </>
+                                ) : null}
                                 <div className="flex flex-wrap gap-2">
-                                    <Button type="submit" size="sm" disabled={saving || versionComment.trim() === ""}>
+                                    <Button type="submit" size="sm" disabled={saving || !versionDirty || versionComment.trim() === ""}>
                                         <Save />
                                         Сохранить
                                     </Button>
                                     {selected.status === "draft" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Тестовая
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Рабочая
                                             </Button>
@@ -628,11 +745,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "test" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Сделать рабочей
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("off")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("off")}>
                                                 <Archive />
                                                 В архив
                                             </Button>
@@ -640,11 +757,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "working" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Сделать тестовой
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("off")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("off")}>
                                                 <Archive />
                                                 В архив
                                             </Button>
@@ -652,11 +769,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "off" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Сделать тестовой
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Сделать рабочей
                                             </Button>
@@ -668,62 +785,59 @@ export function BasketDetail() {
                                             size="sm"
                                             variant="ghost"
                                             disabled={saving}
-                                            onClick={() => void mutate(
-                                                `/api/admin/baskets/${basketId}/versions/${draft.id}`,
-                                                "DELETE",
-                                                undefined,
-                                                null,
-                                                undefined,
-                                                "Черновик удалён",
-                                            )}
+                                            onClick={() => setConfirmDeleteDraft(true)}
                                         >
                                             <Trash2 />
                                             Удалить черновик
                                         </Button>
                                     ) : null}
                                 </div>
-                            ) : null}
-                            {selected.publishedAt ? (
-                                <p className="text-xs text-muted-foreground">
-                                    Опубликована {new Date(selected.publishedAt).toLocaleString("ru-RU")}
-                                </p>
-                            ) : null}
-                        </CardContent>
-                    </Card>
-                    <Card size="sm">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <History className="size-4" />
-                                История
-                            </CardTitle>
-                            <CardDescription>Что менялось в этой версии и зачем.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            {selected.changes.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">Изменений пока нет.</p>
-                            ) : (
-                                <ul className="flex flex-col gap-2">
-                                    {selected.changes.map((change) => (
-                                        <li key={change.id} className="flex min-h-16 flex-col gap-1 rounded-lg border px-3 py-2">
-                                            <span className="text-xs text-muted-foreground">
-                                                {new Date(change.createdAt).toLocaleString("ru-RU")}
-                                                {change.author ? ` · ${change.author}` : ""}
-                                            </span>
-                                            <span className="text-sm">{change.comment}</span>
-                                            <span className="text-xs text-muted-foreground">
-                                                {change.name}
-                                                {" · "}
-                                                {change.settings.parameters.length === 0
-                                                    ? "без параметров"
-                                                    : change.settings.parameters.map((parameter) => parameter.title).join(", ")}
-                                            </span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </CardContent>
+                                {selected.publishedAt ? (
+                                    <p className="text-xs text-muted-foreground">
+                                        Опубликована {new Date(selected.publishedAt).toLocaleString("ru-RU")}
+                                    </p>
+                                ) : null}
+                            </CardFooter>
+                        ) : null}
                     </Card>
                 </form>
+                    </TabsContent>
+                    <TabsContent value="history">
+                        <Card size="sm">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <History className="size-4" />
+                                    История
+                                </CardTitle>
+                                <CardDescription>Что менялось в этой версии и зачем.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {selected.changes.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">Изменений пока нет.</p>
+                                ) : (
+                                    <ul className="flex flex-col gap-2">
+                                        {selected.changes.map((change) => (
+                                            <li key={change.id} className="flex min-h-16 flex-col gap-1 rounded-lg border px-3 py-2">
+                                                <span className="text-xs text-muted-foreground">
+                                                    {new Date(change.createdAt).toLocaleString("ru-RU")}
+                                                    {change.author ? ` · ${change.author}` : ""}
+                                                </span>
+                                                <span className="text-sm">{change.comment}</span>
+                                                <span className="text-xs text-muted-foreground">
+                                                    {change.name}
+                                                    {" · "}
+                                                    {change.settings.parameters.length === 0
+                                                        ? "без параметров"
+                                                        : change.settings.parameters.map((parameter) => parameter.title).join(", ")}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+                </Tabs>
             ) : null}
             </div>
         </div>

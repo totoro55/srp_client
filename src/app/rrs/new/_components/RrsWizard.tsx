@@ -1,16 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useState, type ReactNode } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Asterisk, Check, Info } from "lucide-react";
+import { ArrowLeft, Asterisk, Check, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { FormAlert } from "@/components/form-alert";
-import type { RrsBasketOffer, RrsCard, RrsConnectionSlice, RrsSetup, RrsTerritory } from "@/lib/rrs";
+import { withCalculatedValues, type RrsBasketOffer, type RrsCard, type RrsConnectionSlice, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
     closedPeriodMessage,
     monthIsOpen,
@@ -22,9 +22,10 @@ import { cn } from "@/lib/utils";
 import { ParameterField } from "../../_components/ParameterField";
 import { VersionChoice } from "../../_components/VersionChoice";
 import {
-    buildForms,
+    basketsForTerritory,
     currentMonth,
-    fieldMissing,
+    formsForTerritory,
+    connectionIssues,
     formatMonth,
     formatMonthFrom,
     selectClassName,
@@ -78,11 +79,11 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 setPolicy(editPolicy);
                 setMonth(cardMonth < editPolicy.earliestMonth ? editPolicy.earliestMonth : cardMonth);
                 setPeriodNote(cardMonth < editPolicy.earliestMonth
-                    ? `Сохранённый период ${formatMonth(cardMonth)} уже закрыт. Выбран ближайший доступный месяц.`
+                    ? `Сохранённый период «${formatMonth(cardMonth)}» закрыт для изменения. Выбран ближайший доступный месяц.`
                     : null);
                 setBaskets(json.data.baskets);
                 setConnections(json.data.connections);
-                setForms(buildForms(json.data.baskets, json.data.connections));
+                setForms(formsForTerritory(json.data.baskets, json.data.connections, json.data.territory.uuid, []));
                 setLoading(false);
                 return;
             }
@@ -96,12 +97,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 setLoading(false);
                 return;
             }
+            const territory = json.data.territories[0]?.uuid ?? "";
             setTerritories(json.data.territories);
             setBaskets(json.data.baskets);
             setPolicy(json.data.editPolicy);
             setMonth(json.data.editPolicy.currentMonth);
-            setTerritoryUuid(json.data.territories[0]?.uuid ?? "");
-            setForms(buildForms(json.data.baskets, []));
+            setTerritoryUuid(territory);
+            setForms(formsForTerritory(json.data.baskets, [], territory, []));
             setLoading(false);
         }
         void load();
@@ -110,21 +112,26 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         };
     }, [editing, lockedTerritoryUuid, requestedPeriod]);
 
+    const visibleBaskets = useMemo(
+        () => basketsForTerritory(baskets, territoryUuid, connections),
+        [baskets, territoryUuid, connections],
+    );
     const included = forms.filter((form) => form.connected);
     const steps = [
         { key: "place", label: editing ? "Период" : "РРС" },
         { key: "set", label: "Состав" },
         ...included.map((form) => {
-            const basket = baskets.find((item) => item.id === form.basketId);
+            const basket = visibleBaskets.find((item) => item.id === form.basketId);
             return { key: `basket-${form.basketId}`, label: basket?.name ?? "Корзина" };
         }),
     ];
     const safeStep = Math.min(step, Math.max(steps.length - 1, 0));
-    const currentBasket = safeStep >= 2 ? baskets.find((basket) => basket.id === included[safeStep - 2]?.basketId) : undefined;
+    const currentBasket = safeStep >= 2 ? visibleBaskets.find((basket) => basket.id === included[safeStep - 2]?.basketId) : undefined;
     const currentForm = currentBasket ? forms.find((form) => form.basketId === currentBasket.id) : undefined;
     const currentVersion = currentBasket?.versions.find((version) => version.id === currentForm?.versionId);
-    const mandatory = baskets.filter((basket) => basket.mandatory);
-    const optional = baskets.filter((basket) => !basket.mandatory);
+    const parameterIssues = currentVersion && currentForm
+        ? connectionIssues(currentVersion.parameters, currentForm.values)
+        : [];
 
     function updateForm(basketId: number, patch: Partial<BasketForm>) {
         setForms((current) => current.map((form) => (form.basketId === basketId ? { ...form, ...patch } : form)));
@@ -144,7 +151,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         }
         setForms((current) => current.map((form) => {
             const connection = connections.find((item) => item.basketId === form.basketId);
-            const basket = baskets.find((item) => item.id === form.basketId);
+            const basket = visibleBaskets.find((item) => item.id === form.basketId);
             if (!connection?.versionId || !basket) {
                 return form;
             }
@@ -166,16 +173,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             updateForm(basket.id, { versionId, values: valuesFor(version, connection) });
             return;
         }
-        const values: Record<string, string> = {};
-        for (const parameter of version?.parameters ?? []) {
-            values[parameter.key] = "";
-        }
+        const values = withCalculatedValues(version?.parameters ?? [], {});
         updateForm(basket.id, { versionId, values });
     }
 
     function selectionBlocked(): boolean {
         return included.length === 0 || included.some((form) => {
-            const basket = baskets.find((item) => item.id === form.basketId);
+            const basket = visibleBaskets.find((item) => item.id === form.basketId);
             return !basket || basket.versions.length === 0 || form.versionId === null;
         });
     }
@@ -184,7 +188,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         if (!currentBasket || !currentForm || !currentVersion) {
             return true;
         }
-        return currentVersion.parameters.some((parameter) => fieldMissing(parameter, currentForm.values[parameter.key]));
+        return parameterIssues.length > 0;
     }
 
     function goNext() {
@@ -253,13 +257,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const stepTitle = safeStep === 0 ? (editing ? "Период" : "Территория и месяц") : safeStep === 1 ? "Состав корзин" : currentBasket?.name ?? "Корзина";
     const stepHint = safeStep === 0
         ? editing
-            ? "РРС изменить нельзя. Выберите месяц, с которого эти настройки начнут действовать."
-            : "Выберите РРС и месяц, с которого эти настройки начнут действовать."
-        : safeStep === 1
-            ? ""
-            : versionFrozen
-                ? "Версия для этого месяца зафиксирована. Заполните параметры текущей версии."
-                : "Выберите версию по описанию и заполните все параметры. Пустые поля сохранить нельзя.";
+            ? "Изменение РРС недоступно. Укажите месяц начала действия настроек."
+            : "Укажите РРС и месяц начала действия настроек."
+        : "";
+    const versionHint = versionFrozen
+        ? "Версия для выбранного месяца зафиксирована. Выбор другой версии недоступен. Допускается изменение значений параметров."
+        : versionChangeAllowed
+            ? "С выбранного месяца допускается смена версии. Сравните описания и выберите одну версию."
+            : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
 
     return (
         <form className="mx-auto flex w-full max-w-3xl flex-col gap-6" onSubmit={onSubmit}>
@@ -321,7 +326,11 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                             <select
                                 id="rrs-territory"
                                 value={territoryUuid}
-                                onChange={(event) => setTerritoryUuid(event.target.value)}
+                                onChange={(event) => {
+                                    const next = event.target.value;
+                                    setTerritoryUuid(next);
+                                    setForms((current) => formsForTerritory(baskets, connections, next, current));
+                                }}
                                 className={selectClassName}
                                 disabled={territories.length === 0 || saving}
                                 required
@@ -352,31 +361,32 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                             required
                             disabled={saving}
                         />
-                        <p className="text-sm text-muted-foreground">Доступно с {formatMonthFrom(policy.earliestMonth)}</p>
+                        <p className="text-sm text-muted-foreground">Доступно начиная с {formatMonthFrom(policy.earliestMonth)}</p>
                     </div>
                     </div>
                 </div>
             ) : null}
             {!loading && safeStep === 1 ? (
-                <div className="flex flex-col gap-6">
-                    <BasketGroup title="Обязательные">
-                        {mandatory.map((basket) => (
-                            <BasketPick key={basket.id} basket={basket} form={forms.find((item) => item.basketId === basket.id)} saving={saving} onToggle={updateForm} />
-                        ))}
-                    </BasketGroup>
-                    <BasketGroup title="По выбору">
-                        {optional.length === 0 ? <p className="text-sm text-muted-foreground">Дополнительных корзин нет.</p> : null}
-                        {optional.map((basket) => (
-                            <BasketPick key={basket.id} basket={basket} form={forms.find((item) => item.basketId === basket.id)} saving={saving} onToggle={updateForm} />
-                        ))}
-                    </BasketGroup>
+                <div className="flex flex-col gap-2">
+                    {visibleBaskets.length === 0 ? <p className="text-sm text-muted-foreground">Нет корзин, которые можно подключить на эту РРС.</p> : null}
+                    {visibleBaskets.map((basket) => (
+                        <BasketPick key={basket.id} basket={basket} form={forms.find((item) => item.basketId === basket.id)} saving={saving} onToggle={updateForm} />
+                    ))}
                     <p className="text-sm text-muted-foreground">В карточку войдёт корзин: {included.length}</p>
                 </div>
             ) : null}
             {!loading && currentBasket && currentForm ? (
                 <div className="flex flex-col gap-6">
-                    <VersionDisclaimer frozen={versionFrozen} changeOpen={versionChangeAllowed} />
-                    {currentBasket.description ? <p className="text-sm text-muted-foreground">{currentBasket.description}</p> : null}
+                    <section className="rounded-lg border bg-muted/30 p-3">
+                        <h3 className="flex items-center gap-2 text-sm font-medium">
+                            <ShoppingBasket className="size-4" />
+                            Описание корзины
+                        </h3>
+                        <p className="mt-2 text-sm">
+                            {currentBasket.description.trim() || "Для этой корзины описание не заполнено."}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">Показатель: {currentBasket.indicatorName}</p>
+                    </section>
                     {currentBasket.versions.length === 0 ? (
                         <p className="text-sm text-destructive">Нет версии, которую можно подключить.</p>
                     ) : (
@@ -385,7 +395,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                             versions={currentBasket.versions}
                             value={currentForm.versionId}
                             disabled={saving || versionFrozen}
-                            hint={versionFrozen ? "Версия для этого месяца зафиксирована." : "Сравните описания и выберите одну версию."}
+                            hint={versionHint}
                             onChange={(versionId) => onVersionChange(currentBasket, versionId)}
                         />
                     )}
@@ -393,17 +403,31 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                         <p className="text-sm text-muted-foreground">У этой версии нет параметров.</p>
                     ) : null}
                     {currentVersion && currentVersion.parameters.length > 0 ? (
-                        <div className="flex flex-col gap-4">
-                            <h3 className="text-sm font-medium">Параметры</h3>
-                            {currentVersion.parameters.map((parameter) => (
+                        <div className="flex flex-col gap-3">
+                            <div>
+                                <h3 className="flex items-center gap-2 text-sm font-medium">
+                                    <SlidersHorizontal className="size-4" />
+                                    Параметры
+                                </h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Необходимо заполнить все параметры. Сохранение с незаполненными полями невозможно. Зелёная рамка означает, что значение соответствует установленным ограничениям.
+                                </p>
+                            </div>
+                            {currentVersion.parameters.map((parameter, index) => (
                                 <ParameterField
                                     key={parameter.key}
+                                    index={index}
                                     basketId={currentBasket.id}
                                     parameter={parameter}
+                                    parameters={currentVersion.parameters}
                                     value={currentForm.values[parameter.key] ?? ""}
+                                    error={parameterIssues.find((issue) => issue.key === parameter.key)?.message}
                                     disabled={saving}
                                     onChange={(value) => updateForm(currentBasket.id, {
-                                        values: { ...currentForm.values, [parameter.key]: value },
+                                        values: withCalculatedValues(currentVersion.parameters, {
+                                            ...currentForm.values,
+                                            [parameter.key]: value,
+                                        }),
                                     })}
                                 />
                             ))}
@@ -437,59 +461,18 @@ function PeriodDisclaimer({ policy, periodNote }: { policy: RrsEditPolicy; perio
     return (
         <Alert>
             <Info />
-            <AlertTitle>Срок правки</AlertTitle>
+            <AlertTitle>Доступные периоды для изменения</AlertTitle>
             <AlertDescription>
-                <ul className="list-disc space-y-1 pl-4">
-                    <li>Предыдущий месяц можно выбрать до {policy.cutoffDay}-го числа текущего месяца включительно. Более ранние месяцы закрыты.</li>
-                    <li>
-                        {previousOpen
-                            ? `Сейчас предыдущий месяц ещё открыт: до ${policy.cutoffDay}-го числа включительно.`
-                            : "Срок правки предыдущего месяца уже истёк."}
-                    </li>
-                    <li>В текущем и предыдущем месяце версия уже подключённой корзины остаётся прежней. Смена версии доступна со следующего месяца.</li>
-                    {periodNote ? <li>{periodNote}</li> : null}
-                </ul>
+                <p>Для изменения доступны {formatMonth(policy.earliestMonth)} и последующие месяцы. Более ранние периоды закрыты.</p>
+                <p className="mt-1">
+                    {previousOpen
+                        ? `Предыдущий месяц доступен для выбора до ${policy.cutoffDay}-го числа включительно.`
+                        : `Предыдущий месяц закрыт для изменения. Его выбор был доступен до ${policy.cutoffDay}-го числа включительно.`}
+                </p>
+                <p className="mt-1">Для уже подключённой корзины смена версии в текущем и предыдущем месяце недоступна. Смена версии допускается начиная со следующего месяца. Значения параметров могут быть изменены в любом открытом месяце.</p>
+                {periodNote ? <p className="mt-1">{periodNote}</p> : null}
             </AlertDescription>
         </Alert>
-    );
-}
-
-function VersionDisclaimer({ frozen, changeOpen }: { frozen: boolean; changeOpen: boolean }) {
-    if (frozen) {
-        return (
-            <Alert>
-                <Info />
-                <AlertTitle>Версия зафиксирована</AlertTitle>
-                <AlertDescription>
-                    В текущем и предыдущем месяце версия уже подключённой корзины остаётся прежней. Параметры можно изменить. Смена версии доступна со следующего месяца.
-                </AlertDescription>
-            </Alert>
-        );
-    }
-    if (changeOpen) {
-        return (
-            <Alert>
-                <Info />
-                <AlertTitle>Смена версии</AlertTitle>
-                <AlertDescription>С выбранного месяца версию корзины можно сменить.</AlertDescription>
-            </Alert>
-        );
-    }
-    return (
-        <Alert>
-            <Info />
-            <AlertTitle>Первая версия</AlertTitle>
-            <AlertDescription>Для этого месяца версия задаётся сейчас. Сменить её можно будет со следующего месяца.</AlertDescription>
-        </Alert>
-    );
-}
-
-function BasketGroup({ title, children }: { title: string; children: ReactNode }) {
-    return (
-        <section className="flex flex-col gap-2">
-            <h3 className="text-sm font-medium">{title}</h3>
-            <div className="flex flex-col gap-2">{children}</div>
-        </section>
     );
 }
 
@@ -517,7 +500,8 @@ function BasketPick({
                         <Asterisk className="size-3.5 text-primary" aria-label="Обязательная" />
                     ) : null}
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">{basket.description.trim() || basket.indicatorName}</p>
+                <p className="mt-1 text-sm">{basket.description.trim() || "Описание не заполнено"}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Показатель: {basket.indicatorName}</p>
                 {selected && basket.versions.length === 0 ? (
                     <p className="mt-2 text-sm text-destructive">Нет версии, которую можно подключить.</p>
                 ) : null}

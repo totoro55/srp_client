@@ -8,6 +8,8 @@ import {
     type BasketDetails,
     type BasketDraftInput,
     type BasketProfileInput,
+    type BasketTestTerritory,
+    type BasketTestTerritorySettings,
     type BasketSummary,
     type BasketVersion,
     type BasketVersionRef,
@@ -57,6 +59,7 @@ interface VersionRow {
     id: number;
     versionNo: number;
     name: string;
+    description: string;
     status: string;
     settings: unknown;
     publishedAt: Date | string | null;
@@ -85,7 +88,7 @@ const BASKET_LIST_SQL = `
         b.mandatory,
         COALESCE((
             SELECT json_agg(
-                json_build_object('versionNo', v.version_no, 'name', v.name, 'status', v.status)
+                json_build_object('versionNo', v.version_no, 'name', v.name, 'description', v.description, 'status', v.status)
                 ORDER BY v.version_no DESC
             )
             FROM basket_versions v
@@ -96,8 +99,22 @@ const BASKET_LIST_SQL = `
 `;
 
 export async function listBaskets(): Promise<BasketSummary[]> {
-    const rows = await db.query<BasketListRow>(`${BASKET_LIST_SQL} ORDER BY b.name, b.code`);
+    const rows = await db.query<BasketListRow>(`${BASKET_LIST_SQL} ORDER BY b.sort_order, b.id`);
     return rows.map(toSummary);
+}
+
+export async function reorderBaskets(ids: number[]): Promise<void> {
+    await db.transaction(async (query) => {
+        await query("SELECT pg_advisory_xact_lock(81420020)");
+        const rows = await query<{ id: number }>("SELECT id FROM baskets");
+        const existing = new Set(rows.map((row) => row.id));
+        if (ids.length !== existing.size || new Set(ids).size !== ids.length || ids.some((id) => !existing.has(id))) {
+            throw new BasketRuleError(400, "Передайте полный порядок корзин");
+        }
+        for (const [index, id] of ids.entries()) {
+            await query("UPDATE baskets SET sort_order = $2 WHERE id = $1", [id, index + 1]);
+        }
+    });
 }
 
 export async function getBasket(id: number): Promise<BasketDetails | null> {
@@ -130,6 +147,7 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
             id,
             version_no AS "versionNo",
             name,
+            description,
             status,
             settings,
             published_at AS "publishedAt"
@@ -174,19 +192,35 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
 
 export async function createBasket(input: BasketDraftInput, author: string): Promise<BasketDetails> {
     const id = await db.transaction(async (query) => {
-        const indicators = await query<{ id: number }>("SELECT id FROM indicators WHERE id = $1", [input.indicatorId]);
+        const indicators = await query<{ id: number }>("SELECT id FROM indicators WHERE id = $1 FOR UPDATE", [input.indicatorId]);
         if (!indicators[0]) {
             throw new BasketRuleError(400, "Выберите показатель из списка или добавьте новый");
         }
+        const taken = await query<{ id: number }>("SELECT id FROM baskets WHERE indicator_id = $1", [input.indicatorId]);
+        if (taken[0]) {
+            throw new BasketRuleError(400, "На этот показатель уже есть корзина");
+        }
 
         try {
+            await query("SELECT pg_advisory_xact_lock(81420020)");
+            const orderRows = await query<{ sortOrder: number }>(
+                `SELECT COALESCE(MAX(sort_order), 0) + 1 AS "sortOrder" FROM baskets`,
+            );
             const rows = await query<{ id: number }>(
                 `
-                INSERT INTO baskets (code, name, description, indicator_id, settings_schema, mandatory)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO baskets (code, name, description, indicator_id, settings_schema, mandatory, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id
                 `,
-                [input.code, input.name, input.description, input.indicatorId, input.settingsSchema, input.mandatory]
+                [
+                    input.code,
+                    input.name,
+                    input.description,
+                    input.indicatorId,
+                    input.settingsSchema,
+                    input.mandatory,
+                    orderRows[0]?.sortOrder ?? 1,
+                ]
             );
             const basketId = rows[0]?.id;
             if (!basketId) {
@@ -239,6 +273,65 @@ export async function updateBasket(id: number, input: BasketProfileInput): Promi
         throw new BasketRuleError(404, "Корзина не найдена");
     }
     return requireBasket(id);
+}
+
+export async function getVersionTestTerritories(basketId: number, versionId: number): Promise<BasketTestTerritorySettings> {
+    await requireVersion(basketId, versionId);
+    const territories = await db.query<BasketTestTerritory>(
+        "SELECT uuid::text AS uuid, code, name FROM territories ORDER BY name",
+    );
+    const selected = await db.query<{ territoryUuid: string }>(
+        `SELECT territory_uuid::text AS "territoryUuid" FROM basket_version_test_territories WHERE version_id = $1`,
+        [versionId],
+    );
+    return {
+        territories: territories.map((territory) => ({ ...territory, uuid: territory.uuid.toLowerCase() })),
+        selected: selected.map((row) => row.territoryUuid.toLowerCase()),
+    };
+}
+
+export async function replaceVersionTestTerritories(
+    basketId: number,
+    versionId: number,
+    territoryUuids: string[],
+): Promise<BasketTestTerritorySettings> {
+    const unique = [...new Set(territoryUuids.map((uuid) => uuid.toLowerCase()))];
+    await db.transaction(async (query) => {
+        const versions = await query<{ id: number }>(
+            "SELECT id FROM basket_versions WHERE id = $2 AND basket_id = $1 FOR UPDATE",
+            [basketId, versionId],
+        );
+        if (!versions[0]) {
+            throw new BasketRuleError(404, "Версия не найдена");
+        }
+        if (unique.length > 0) {
+            const known = await query<{ uuid: string }>(
+                "SELECT uuid::text AS uuid FROM territories WHERE uuid = ANY($1::uuid[])",
+                [unique],
+            );
+            if (known.length !== unique.length) {
+                throw new BasketRuleError(400, "Выберите территории из списка");
+            }
+        }
+        await query("DELETE FROM basket_version_test_territories WHERE version_id = $1", [versionId]);
+        for (const uuid of unique) {
+            await query(
+                "INSERT INTO basket_version_test_territories (version_id, territory_uuid) VALUES ($1, $2::uuid)",
+                [versionId, uuid],
+            );
+        }
+    });
+    return getVersionTestTerritories(basketId, versionId);
+}
+
+async function requireVersion(basketId: number, versionId: number): Promise<void> {
+    const versions = await db.query<{ id: number }>(
+        "SELECT id FROM basket_versions WHERE id = $2 AND basket_id = $1",
+        [basketId, versionId],
+    );
+    if (!versions[0]) {
+        throw new BasketRuleError(404, "Версия не найдена");
+    }
 }
 
 export async function updateBasketSettingsSchema(id: number, settingsSchema: string): Promise<BasketDetails> {
@@ -341,10 +434,11 @@ export async function updateBasketVersion(
             `
             UPDATE basket_versions
             SET name = $2,
-                settings = $3::jsonb
+                description = $3,
+                settings = $4::jsonb
             WHERE id = $1
             `,
-            [versionId, input.name, JSON.stringify(versionSettingsPayload(settings))]
+            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings))]
         );
         await insertVersionChange(query, versionId, {
             comment: input.comment,
@@ -552,11 +646,16 @@ function readVersionRefs(value: unknown): BasketVersionRef[] {
     const versions: BasketVersionRef[] = [];
     for (const item of value) {
         if (!item || typeof item !== "object") continue;
-        const row = item as { versionNo?: unknown; name?: unknown; status?: unknown };
+        const row = item as { versionNo?: unknown; name?: unknown; description?: unknown; status?: unknown };
         if (typeof row.versionNo !== "number" || typeof row.name !== "string" || typeof row.status !== "string" || !isBasketVersionStatus(row.status)) {
             continue;
         }
-        versions.push({ versionNo: row.versionNo, name: row.name, status: row.status });
+        versions.push({
+            versionNo: row.versionNo,
+            name: row.name,
+            description: typeof row.description === "string" ? row.description : "",
+            status: row.status,
+        });
     }
     return versions;
 }
@@ -587,6 +686,7 @@ function toVersion(row: VersionRow, changes: VersionChangeRow[]): BasketVersion 
         id: row.id,
         versionNo: row.versionNo,
         name: row.name,
+        description: row.description ?? "",
         status: row.status,
         settings: readVersionSettings(row.settings),
         publishedAt: toIso(row.publishedAt),

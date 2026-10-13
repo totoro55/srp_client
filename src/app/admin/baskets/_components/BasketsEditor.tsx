@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, BadgeCheck, FlaskConical, Pencil, Plus } from "lucide-react";
+import { Archive, BadgeCheck, FlaskConical, GripVertical, Lock, LockOpen, Pencil, Plus } from "lucide-react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAccess } from "@/hooks/useAccess";
+import { cn } from "@/lib/utils";
 import { notifySuccess } from "@/lib/notify";
 import { useRequiredFields } from "@/lib/required-fields";
 import { FormAlert } from "@/components/form-alert";
@@ -28,10 +29,15 @@ import {
     versionStatusTitle,
     versionViewTitle,
 } from "@/lib/baskets";
-import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
 
 const VERSION_VIEWS: VersionView[] = ["active", "draft", "off", "all"];
+
+function freeIndicatorId(indicators: Indicator[], baskets: BasketSummary[]): string {
+    const used = new Set(baskets.map((basket) => basket.indicatorId));
+    const free = indicators.find((item) => !used.has(item.id));
+    return free ? String(free.id) : "";
+}
 
 function emptyVersionsText(view: VersionView): string {
     switch (view) {
@@ -71,6 +77,11 @@ export function BasketsEditor() {
     const [error, setError] = useState<string | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [sortUnlocked, setSortUnlocked] = useState(false);
+    const [dragId, setDragId] = useState<number | null>(null);
+    const [overId, setOverId] = useState<number | null>(null);
+    const [ordering, setOrdering] = useState(false);
+    const sorting = canWrite && sortUnlocked;
     const visible = useMemo(() => {
         const needle = query.trim().toLowerCase();
         return baskets.filter((basket) => {
@@ -81,6 +92,46 @@ export function BasketsEditor() {
                 || basket.description.toLowerCase().includes(needle);
         });
     }, [baskets, query, indicatorFilter]);
+    const rows = sorting ? baskets : visible;
+
+    async function moveBasket(fromId: number, toId: number) {
+        if (!sorting || ordering || fromId === toId) {
+            return;
+        }
+        const from = baskets.findIndex((item) => item.id === fromId);
+        const to = baskets.findIndex((item) => item.id === toId);
+        if (from < 0 || to < 0) {
+            return;
+        }
+        const next = baskets.slice();
+        const [item] = next.splice(from, 1);
+        if (!item) {
+            return;
+        }
+        next.splice(to, 0, item);
+        const previous = baskets;
+        setBaskets(next);
+        setOrdering(true);
+        try {
+            const response = await fetch("/api/admin/baskets/order", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: next.map((basket) => basket.id) }),
+            });
+            const json = (await response.json()) as ApiResponse<{ ids: number[] }>;
+            if (!json.success) {
+                setBaskets(previous);
+                setError(json.error.message);
+                return;
+            }
+            setError(null);
+        } catch {
+            setBaskets(previous);
+            setError("Не удалось сохранить порядок корзин");
+        } finally {
+            setOrdering(false);
+        }
+    }
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -107,7 +158,13 @@ export function BasketsEditor() {
             }
             setBaskets(basketsJson.data);
             setIndicators(indicatorsJson.data);
-            setIndicatorId((current) => current || (indicatorsJson.data[0] ? String(indicatorsJson.data[0].id) : ""));
+            setIndicatorId((current) => {
+                const used = new Set(basketsJson.data.map((basket) => basket.indicatorId));
+                if (current && !used.has(Number(current))) {
+                    return current;
+                }
+                return freeIndicatorId(indicatorsJson.data, basketsJson.data);
+            });
             setError(null);
         } catch {
             setError("Не удалось загрузить корзины");
@@ -124,7 +181,7 @@ export function BasketsEditor() {
         setNewIndicator("");
         setIndicatorError(null);
         setIndicatorOpen(false);
-        setIndicatorId(nextIndicators[0] ? String(nextIndicators[0].id) : "");
+        setIndicatorId(freeIndicatorId(nextIndicators, baskets));
         setFormError(null);
     }
 
@@ -207,9 +264,23 @@ export function BasketsEditor() {
             </p>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             {canWrite ? (
-                <div>
+                <div className="flex flex-wrap items-center gap-2">
                     <Button type="button" size="sm" onClick={() => { resetForm(); setCreateOpen(true); }}>
                         Добавить корзину
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-pressed={sorting}
+                        onClick={() => {
+                            setSortUnlocked((current) => !current);
+                            setDragId(null);
+                            setOverId(null);
+                        }}
+                    >
+                        {sorting ? <LockOpen /> : <Lock />}
+                        {sorting ? "Заблокировать сортировку" : "Разблокировать сортировку"}
                     </Button>
                     <Dialog open={createOpen} onOpenChange={(open) => {
                         setCreateOpen(open);
@@ -245,9 +316,15 @@ export function BasketsEditor() {
                                                 className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
                                             >
                                                 {indicators.length === 0 ? <option value="">Показателей пока нет</option> : null}
-                                                {indicators.map((item) => (
-                                                    <option key={item.id} value={item.id}>{item.name}</option>
-                                                ))}
+                                                {indicators.length > 0 && freeIndicatorId(indicators, baskets) === "" ? <option value="">Нет свободного показателя</option> : null}
+                                                {indicators.map((item) => {
+                                                    const used = baskets.some((basket) => basket.indicatorId === item.id);
+                                                    return (
+                                                        <option key={item.id} value={item.id} disabled={used}>
+                                                            {used ? `${item.name} — уже есть корзина` : item.name}
+                                                        </option>
+                                                    );
+                                                })}
                                             </select>
                                             <Button
                                                 type="button"
@@ -275,7 +352,7 @@ export function BasketsEditor() {
                                         />
                                     </div>
                                     <p className="text-xs text-muted-foreground">
-                                        Параметры, которые заполнит директор, задаются в версии корзины: число, текст или выбор из списка.
+                                        На один показатель можно завести только одну корзину. Параметры, которые заполнит директор, задаются в версии корзины.
                                     </p>
                                     <div className="flex flex-col gap-1.5">
                                         <Label htmlFor="basket-description">Описание</Label>
@@ -336,6 +413,11 @@ export function BasketsEditor() {
                     {access.previewRoleName ? "Просмотр от имени роли. Изменения недоступны." : "Нет права менять корзины."}
                 </p>
             ) : null}
+            {sorting ? (
+                <p className="text-sm text-muted-foreground">
+                    Перетащите корзины за маркер. Этот порядок используется при включении корзин на РРС.
+                </p>
+            ) : (
             <AdminToolbar search={query} onSearchChange={setQuery} searchPlaceholder="Название, код или описание">
                 <select
                     value={indicatorFilter}
@@ -359,9 +441,11 @@ export function BasketsEditor() {
                     ))}
                 </select>
             </AdminToolbar>
+            )}
             <Table>
                 <TableHeader>
                     <TableRow>
+                        {sorting ? <TableHead className="w-10"><span className="sr-only">Порядок</span></TableHead> : null}
                         <TableHead>Название</TableHead>
                         <TableHead>Показатель</TableHead>
                         <TableHead>Включение</TableHead>
@@ -369,15 +453,61 @@ export function BasketsEditor() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {visible.length === 0 ? (
+                    {rows.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={4} className="py-8 text-center text-xs text-muted-foreground">
+                            <TableCell colSpan={sorting ? 5 : 4} className="py-8 text-center text-xs text-muted-foreground">
                                 {!loaded ? "Загрузка корзин..." : baskets.length === 0 ? "Корзин пока нет." : "Нет корзин по этому фильтру."}
                             </TableCell>
                         </TableRow>
                     ) : null}
-                    {visible.map((basket) => (
-                        <TableRow key={basket.id}>
+                    {rows.map((basket) => (
+                        <TableRow
+                            key={basket.id}
+                            className={cn(
+                                dragId === basket.id && "opacity-50",
+                                overId === basket.id && dragId !== null && dragId !== basket.id && "bg-primary/5",
+                            )}
+                            onDragOver={(event) => {
+                                if (!sorting || dragId === null) {
+                                    return;
+                                }
+                                event.preventDefault();
+                                if (overId !== basket.id) {
+                                    setOverId(basket.id);
+                                }
+                            }}
+                            onDrop={(event) => {
+                                event.preventDefault();
+                                const from = Number(event.dataTransfer.getData("text/plain"));
+                                if (Number.isInteger(from)) {
+                                    void moveBasket(from, basket.id);
+                                }
+                                setDragId(null);
+                                setOverId(null);
+                            }}
+                        >
+                            {sorting ? (
+                                <TableCell className="w-10">
+                                    <button
+                                        type="button"
+                                        draggable={!ordering}
+                                        aria-label={`Переместить «${basket.name}»`}
+                                        className="inline-flex size-7 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing disabled:cursor-not-allowed"
+                                        disabled={ordering}
+                                        onDragStart={(event) => {
+                                            event.dataTransfer.effectAllowed = "move";
+                                            event.dataTransfer.setData("text/plain", String(basket.id));
+                                            setDragId(basket.id);
+                                        }}
+                                        onDragEnd={() => {
+                                            setDragId(null);
+                                            setOverId(null);
+                                        }}
+                                    >
+                                        <GripVertical className="size-4" />
+                                    </button>
+                                </TableCell>
+                            ) : null}
                             <TableCell>
                                 <Link href={`/admin/baskets/${basket.id}`} className="font-medium hover:underline">
                                     {basket.name}
@@ -411,13 +541,18 @@ function VersionList({ versions, view }: { versions: BasketVersionRef[]; view: V
     return (
         <ul className="flex flex-col gap-1.5">
             {visible.map((version) => (
-                <li key={`${version.status}-${version.versionNo}`} className="grid grid-cols-[7.25rem_2.75rem_minmax(0,1fr)] items-center gap-2 text-sm">
+                <li key={`${version.status}-${version.versionNo}`} className="grid grid-cols-[7.25rem_2.75rem_minmax(0,1fr)] items-start gap-2 text-sm">
                     <span className={cn("inline-flex items-center gap-1 text-xs", versionTone(version.status))}>
                         <VersionMark status={version.status} />
                         {versionStatusTitle(version.status)}
                     </span>
                     <span className="text-xs text-muted-foreground tabular-nums">№ {version.versionNo}</span>
-                    <span className="truncate font-medium">{version.name}</span>
+                    <span className="min-w-0">
+                        <span className="block truncate font-medium">{version.name}</span>
+                        {version.description.trim() ? (
+                            <span className="block truncate text-xs font-normal text-muted-foreground">{version.description}</span>
+                        ) : null}
+                    </span>
                 </li>
             ))}
         </ul>

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import {
     parseVersionComment,
+    parseVersionDescription,
     parseVersionName,
     parseVersionParameters,
     type BasketDetails,
@@ -26,6 +27,10 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
     if (!name) {
         return { error: "Укажите название версии, не длиннее 255 символов" };
     }
+    const description = parseVersionDescription(record.description);
+    if (description === null) {
+        return { error: "Описание версии не длиннее 2000 символов" };
+    }
     const comment = parseVersionComment(record.comment);
     if (!comment) {
         return { error: "Напишите комментарий: что изменилось и зачем. Не длиннее 2000 символов" };
@@ -38,7 +43,7 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
     if ("error" in parsed) {
         return parsed;
     }
-    return { name, comment, settings: { parameters: parsed.parameters } };
+    return { name, description, comment, settings: { parameters: parsed.parameters } };
 }
 
 export async function PATCH(

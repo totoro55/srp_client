@@ -8,7 +8,7 @@ import {
 } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
 import {
-    parseConnectionValue,
+    resolveConnectionValues,
     type RrsBasketOffer,
     type RrsConnectionInput,
     type RrsConnectionSlice,
@@ -20,6 +20,7 @@ import {
     type RrsMonthState,
     type RrsTerritory,
     type RrsVersionOffer,
+    connectableVersions,
 } from "@/lib/rrs";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
@@ -105,6 +106,7 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
         basketId: number;
         basketName: string;
         mandatory: boolean;
+        sortOrder: number;
         versionId: number | null;
         cardPeriod: string;
     }>(
@@ -128,6 +130,7 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
             c.basket_id AS "basketId",
             b.name AS "basketName",
             b.mandatory,
+            b.sort_order AS "sortOrder",
             c.version_id AS "versionId",
             to_char(bounds.period, 'YYYY-MM-DD') AS "cardPeriod"
         FROM scoped c
@@ -150,12 +153,17 @@ export async function listRrsCards(access: AccessView): Promise<RrsCardSummary[]
             byTerritory.set(row.territoryUuid, card);
         }
         if (row.versionId !== null) {
-            const basket: RrsConnectedBasket = { id: row.basketId, name: row.basketName, mandatory: row.mandatory };
+            const basket: RrsConnectedBasket = {
+                id: row.basketId,
+                name: row.basketName,
+                mandatory: row.mandatory,
+                sortOrder: row.sortOrder,
+            };
             card.baskets.push(basket);
         }
     }
     for (const card of byTerritory.values()) {
-        card.baskets.sort((left, right) => Number(right.mandatory) - Number(left.mandatory) || left.name.localeCompare(right.name, "ru"));
+        card.baskets.sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ru"));
     }
     return [...byTerritory.values()].sort((left, right) => left.territory.name.localeCompare(right.territory.name, "ru"));
 }
@@ -271,14 +279,20 @@ export async function saveRrsMonth(
     }
     await db.transaction(async (query) => {
         const baskets = await loadOffers(query);
-        const byId = new Map(baskets.map((basket) => [basket.id, basket]));
-        if (items.length !== byId.size || new Set(items.map((item) => item.basketId)).size !== items.length) {
-            throw new RrsRuleError(400, "Сохраните весь набор действующих корзин");
-        }
-
         const versions = await loadVersions(query, baskets.map((basket) => basket.id));
         const latest = await loadLatest(query, territoryUuid, period);
         const latestByBasket = new Map(latest.map((row) => [row.basketId, row]));
+        const applicable = baskets.filter((basket) => connectableVersions(
+            basket,
+            territoryUuid,
+            latestByBasket.get(basket.id)?.versionId ?? null,
+        ).length > 0);
+        const applicableIds = new Set(applicable.map((basket) => basket.id));
+        const itemIds = items.map((item) => item.basketId);
+        if (itemIds.length !== applicable.length || new Set(itemIds).size !== itemIds.length || itemIds.some((id) => !applicableIds.has(id))) {
+            throw new RrsRuleError(400, "Сохраните весь набор действующих корзин");
+        }
+        const byId = new Map(applicable.map((basket) => [basket.id, basket]));
         const head = await loadHead(query, territoryUuid);
         const headByBasket = new Map(head.map((row) => [row.basketId, row]));
         const sliceValues = await loadSliceValues(query, territoryUuid, latest, versions);
@@ -297,6 +311,11 @@ export async function saveRrsMonth(
                 }
             }
             if (item.connected) {
+                const allowed = connectableVersions(basket, territoryUuid, current?.versionId ?? null);
+                const chosen = basket.versions.find((version) => version.id === item.versionId);
+                if (chosen && !allowed.some((version) => version.id === chosen.id)) {
+                    throw new RrsRuleError(400, `Тестовую версию корзины «${basket.name}» можно подключить только на выбранных территориях`);
+                }
                 await writeConnected(query, access.username, territoryUuid, period, basket, item, versions, current, storedValues);
             } else {
                 await writeDisconnected(query, access.username, territoryUuid, period, basket, current, versions);
@@ -336,7 +355,7 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
            AND v.status IN ('test', 'working')
            AND v.data_table IS NOT NULL
         WHERE b.status = 'active'
-        ORDER BY b.mandatory DESC, b.name, v.version_no
+        ORDER BY b.sort_order, b.id, v.version_no
         `,
     );
     const baskets = new Map<number, RrsBasketOffer>();
@@ -362,11 +381,40 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
                 description: row.versionDescription ?? "",
                 status: row.versionStatus,
                 parameters: readVersionSettings(row.settings).parameters,
+                testTerritoryUuids: [],
             };
             basket.versions.push(version);
         }
     }
-    return [...baskets.values()];
+    const offers = [...baskets.values()];
+    await attachTestTerritories(query, offers);
+    return offers;
+}
+
+async function attachTestTerritories(query: Sql, baskets: RrsBasketOffer[]): Promise<void> {
+    const versionIds = baskets.flatMap((basket) => basket.versions.map((version) => version.id));
+    if (versionIds.length === 0) {
+        return;
+    }
+    const rows = await query<{ versionId: number; territoryUuid: string }>(
+        `
+        SELECT version_id AS "versionId", territory_uuid::text AS "territoryUuid"
+        FROM basket_version_test_territories
+        WHERE version_id = ANY($1::int[])
+        `,
+        [versionIds],
+    );
+    const byVersion = new Map<number, string[]>();
+    for (const row of rows) {
+        const list = byVersion.get(row.versionId) ?? [];
+        list.push(row.territoryUuid.toLowerCase());
+        byVersion.set(row.versionId, list);
+    }
+    for (const basket of baskets) {
+        for (const version of basket.versions) {
+            version.testTerritoryUuids = byVersion.get(version.id) ?? [];
+        }
+    }
 }
 
 interface HistoryRow {
@@ -586,14 +634,12 @@ async function writeConnected(
     if (!storedVersion?.dataTable || !DATA_TABLE_PATTERN.test(storedVersion.dataTable)) {
         throw new RrsRuleError(400, `У корзины «${basket.name}» нет таблицы подключения`);
     }
-    const parsed: Record<string, string | number> = {};
-    for (const parameter of version.parameters) {
-        const value = parseConnectionValue(parameter, item.values[parameter.key] ?? "");
-        if ("error" in value) {
-            throw new RrsRuleError(400, `${basket.name}: ${value.error}`);
-        }
-        parsed[parameter.key] = value.value;
+    const resolved = resolveConnectionValues(version.parameters, item.values);
+    const issue = resolved.issues[0];
+    if (issue) {
+        throw new RrsRuleError(400, `${basket.name}: ${issue.message}`);
     }
+    const parsed = resolved.values;
     if (current?.versionId === version.id && sameValues(version.parameters, storedValues, parsed)) {
         return;
     }
