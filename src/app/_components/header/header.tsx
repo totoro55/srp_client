@@ -7,6 +7,7 @@ import { getPageHeading } from "@/lib/routes-config";
 import { useAccess } from "@/hooks/useAccess";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PageHeadingTrail, usePageHeadingTrail } from "@/app/_components/header/page-heading";
 
 function MobileMenuButton() {
     const { toggleSidebar, openMobile } = useSidebar();
@@ -31,6 +32,7 @@ function MobileMenuButton() {
 export default function Header() {
     const pathname = usePathname();
     const heading = getPageHeading(pathname);
+    const trail = usePageHeadingTrail();
     const access = useAccess();
     const identity = access.roleName ? `${access.roleName} · ${access.scopeLabel}` : access.scopeLabel;
 
@@ -38,16 +40,22 @@ export default function Header() {
         <>
         <header className="flex w-full shrink-0 flex-row items-center justify-start border-b px-3 py-2 md:p-1.5 xl:p-3">
             <SidebarTrigger aria-label="Открыть меню" className="hidden md:inline-flex" />
-            {heading && (
+            {(heading || trail) && (
                 <>
                     <Separator orientation="vertical" className="mx-1.5 hidden h-6 md:block xl:mx-3" />
                     <div className="min-w-0">
-                        <h1 className="truncate text-base font-bold xl:text-lg">{heading.title}</h1>
-                        {heading.description && (
-                            <p className="hidden truncate text-xs text-muted-foreground sm:block">
-                                {heading.description}
-                            </p>
-                        )}
+                        {trail ? (
+                            <PageHeadingTrail trail={trail} />
+                        ) : heading ? (
+                            <>
+                                <h1 className="truncate text-base font-bold xl:text-lg">{heading.title}</h1>
+                                {heading.description && (
+                                    <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                                        {heading.description}
+                                    </p>
+                                )}
+                            </>
+                        ) : null}
                     </div>
                 </>
             )}

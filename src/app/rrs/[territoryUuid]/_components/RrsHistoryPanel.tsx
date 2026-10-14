@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, History, X } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -81,13 +81,38 @@ export function RrsHistoryPanel({ territoryUuid }: { territoryUuid: string }) {
     const visibleBaskets = (step?.baskets ?? []).filter((basket) => basketChanged(basket));
 
     return (
-        <>
-            <header className="flex flex-col gap-2 @min-[36rem]:col-start-2 @min-[36rem]:row-start-1">
-                <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                <h3 className="flex items-center gap-2 text-base font-semibold">
-                    <History className="size-5" />
-                    История изменений
-                </h3>
+        <div className="flex flex-col gap-3">
+            {steps.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <div className="flex min-w-0 items-center gap-2 text-sm">
+                        <span className="shrink-0 text-muted-foreground">Дата</span>
+                        <HistoryRangePicker
+                            from={changedFrom}
+                            to={changedTo}
+                            onChange={(from, to) => {
+                                setChangedFrom(from);
+                                setChangedTo(to);
+                                setIndex(0);
+                            }}
+                        />
+                    </div>
+                    <label className="flex min-w-64 items-center gap-2 text-sm">
+                        <span className="shrink-0 text-muted-foreground">Автор</span>
+                        <select
+                            value={authorFilter}
+                            aria-label="Автор изменения"
+                            className={cn(selectClassName, "h-8 min-w-0 flex-1")}
+                            onChange={(event) => {
+                                setAuthorFilter(event.target.value);
+                                setIndex(0);
+                            }}
+                        >
+                            <option value="">Все</option>
+                            {authorOptions.map((author) => (
+                                <option key={author} value={author}>{author}</option>
+                            ))}
+                        </select>
+                    </label>
                 {filtered.length > 0 ? (
                     <div className="ml-auto flex items-center gap-1">
                         <Button
@@ -116,41 +141,8 @@ export function RrsHistoryPanel({ territoryUuid }: { territoryUuid: string }) {
                     </div>
                 ) : null}
                 </div>
-                {steps.length > 0 ? (
-                    <div className="flex flex-col gap-2">
-                        <div className="flex min-w-0 items-center gap-2 text-sm">
-                            <span className="w-16 shrink-0 text-muted-foreground">Дата</span>
-                            <HistoryRangePicker
-                                from={changedFrom}
-                                to={changedTo}
-                                onChange={(from, to) => {
-                                    setChangedFrom(from);
-                                    setChangedTo(to);
-                                    setIndex(0);
-                                }}
-                            />
-                        </div>
-                        <label className="flex min-w-0 items-center gap-2 text-sm">
-                            <span className="w-16 shrink-0 text-muted-foreground">Автор</span>
-                            <select
-                                value={authorFilter}
-                                aria-label="Автор изменения"
-                                className={cn(selectClassName, "h-8 min-w-0 flex-1")}
-                                onChange={(event) => {
-                                    setAuthorFilter(event.target.value);
-                                    setIndex(0);
-                                }}
-                            >
-                                <option value="">Все</option>
-                                {authorOptions.map((author) => (
-                                    <option key={author} value={author}>{author}</option>
-                                ))}
-                            </select>
-                        </label>
-                    </div>
-                ) : null}
-            </header>
-            <div className="flex flex-col gap-3 rounded-lg border p-3 @min-[36rem]:col-start-2 @min-[36rem]:row-start-2">
+            ) : null}
+            <div className="flex flex-col gap-3 rounded-lg border p-3">
             <FormAlert message={error} />
             {loading ? <p className="text-sm text-muted-foreground">Загрузка истории...</p> : null}
             {!loading && steps.length === 0 && !error ? (
@@ -184,7 +176,7 @@ export function RrsHistoryPanel({ territoryUuid }: { territoryUuid: string }) {
                 </div>
             ) : null}
             </div>
-        </>
+        </div>
     );
 }
 

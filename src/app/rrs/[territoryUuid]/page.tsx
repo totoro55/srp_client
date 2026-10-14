@@ -1,5 +1,5 @@
-import { RrsCardView } from "./_components/RrsCardView";
+import { RrsReservedPage } from "./_components/RrsReservedPage";
 
-export default function RrsCardPage() {
-    return <RrsCardView />;
+export default function RrsOverviewPage() {
+    return <RrsReservedPage section="overview" message="Сводка по территории появится здесь." />;
 }

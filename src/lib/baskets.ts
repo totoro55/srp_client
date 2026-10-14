@@ -108,8 +108,18 @@ export type BasketParameter =
     | (BasketParameterBase & { kind: "text"; constraints: TextConstraints })
     | (BasketParameterBase & { kind: "choice"; options: string[] });
 
+export interface BasketCoefficient {
+    key: string;
+    title: string;
+    description: string;
+    min: number | null;
+    max: number | null;
+    integer: boolean;
+}
+
 export interface VersionSettings {
     parameters: BasketParameter[];
+    coefficients: BasketCoefficient[];
 }
 
 export interface BasketSummary {
@@ -654,37 +664,111 @@ export function parametersEqual(left: BasketParameter[], right: BasketParameter[
     return JSON.stringify(left) === JSON.stringify(right);
 }
 
+export function coefficientsEqual(left: BasketCoefficient[], right: BasketCoefficient[]): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export { coefficientRangeLabel, coefficientValueIssue } from "@/lib/coefficient-value";
+
+export function parseVersionCoefficients(value: unknown): { coefficients: BasketCoefficient[] } | { error: string } {
+    if (value === undefined || value === null) {
+        return { coefficients: [] };
+    }
+    if (!Array.isArray(value)) {
+        return { error: "Список коэффициентов задан неверно" };
+    }
+    if (value.length > PARAMETER_LIST_MAX) {
+        return { error: `Коэффициентов не больше ${PARAMETER_LIST_MAX}` };
+    }
+    const usedKeys = new Set<string>();
+    const usedTitles = new Set<string>();
+    const coefficients: BasketCoefficient[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return { error: "Некорректный коэффициент" };
+        }
+        const record = item as Record<string, unknown>;
+        const title = typeof record.title === "string" ? record.title.trim() : "";
+        if (title.length === 0 || title.length > PARAMETER_TITLE_MAX) {
+            return { error: "Укажите название коэффициента, не длиннее 100 символов" };
+        }
+        const titleKey = title.toLowerCase();
+        if (usedTitles.has(titleKey)) {
+            return { error: `Коэффициент «${title}» уже есть в этой версии` };
+        }
+        usedTitles.add(titleKey);
+        let description = "";
+        if (record.description !== undefined && record.description !== null) {
+            if (typeof record.description !== "string") {
+                return { error: `Описание коэффициента «${title}» задано неверно` };
+            }
+            description = record.description.trim();
+            if (description.length > PARAMETER_DESCRIPTION_MAX) {
+                return { error: `Описание коэффициента «${title}» длиннее ${PARAMETER_DESCRIPTION_MAX} символов` };
+            }
+        }
+        const rawKey = typeof record.key === "string" ? record.key.trim().toLowerCase() : "";
+        if (!PARAMETER_KEY_PATTERN.test(rawKey)) {
+            return { error: `Укажите код коэффициента «${title}»: латинские буквы, цифры и подчёркивание, с буквы` };
+        }
+        if (RESERVED_PARAMETER_KEYS.has(rawKey)) {
+            return { error: `Код «${rawKey}» зарезервирован` };
+        }
+        if (usedKeys.has(rawKey)) {
+            return { error: `Код «${rawKey}» уже используется другим коэффициентом` };
+        }
+        usedKeys.add(rawKey);
+        const min = readBoundNumber(record.min, `Минимум коэффициента «${title}»`);
+        if ("error" in min) {
+            return min;
+        }
+        const max = readBoundNumber(record.max, `Максимум коэффициента «${title}»`);
+        if ("error" in max) {
+            return max;
+        }
+        if (min.value !== null && max.value !== null && min.value > max.value) {
+            return { error: `У коэффициента «${title}» минимум больше максимума` };
+        }
+        const integer = record.integer === undefined ? false : record.integer;
+        if (typeof integer !== "boolean") {
+            return { error: `Ограничение «только целое» у коэффициента «${title}» задано неверно` };
+        }
+        coefficients.push({ key: rawKey, title, description, min: min.value, max: max.value, integer });
+    }
+    return { coefficients };
+}
+
 export function readVersionSettings(value: unknown): VersionSettings {
+    const empty = { parameters: [] as BasketParameter[], coefficients: [] as BasketCoefficient[] };
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return { parameters: [] };
+        return empty;
     }
 
-    const record = value as { parameters?: unknown; tariff?: unknown };
+    const record = value as { parameters?: unknown; coefficients?: unknown; tariff?: unknown };
+    let parameters: BasketParameter[] = [];
     if (Array.isArray(record.parameters)) {
         const parsed = parseVersionParameters(record.parameters);
         if ("parameters" in parsed) {
-            return { parameters: parsed.parameters };
+            parameters = parsed.parameters;
         }
-        return { parameters: [] };
+    } else if (record.tariff !== undefined && record.tariff !== null && record.tariff !== "") {
+        parameters = [{
+            key: "tariff",
+            title: "Тариф",
+            description: "",
+            kind: "number",
+            constraints: { min: null, max: null, integer: false },
+            formula: "",
+            conditions: [],
+        }];
     }
-
-    if (record.tariff !== undefined && record.tariff !== null && record.tariff !== "") {
-        return {
-            parameters: [{
-                key: "tariff",
-                title: "Тариф",
-                description: "",
-                kind: "number",
-                constraints: { min: null, max: null, integer: false },
-                formula: "",
-                conditions: [],
-            }],
-        };
-    }
-
-    return { parameters: [] };
+    const parsedCoefficients = parseVersionCoefficients(record.coefficients);
+    return {
+        parameters,
+        coefficients: "coefficients" in parsedCoefficients ? parsedCoefficients.coefficients : [],
+    };
 }
 
-export function versionSettingsPayload(settings: VersionSettings): { parameters: BasketParameter[] } {
-    return { parameters: settings.parameters };
+export function versionSettingsPayload(settings: VersionSettings): { parameters: BasketParameter[]; coefficients: BasketCoefficient[] } {
+    return { parameters: settings.parameters, coefficients: settings.coefficients };
 }

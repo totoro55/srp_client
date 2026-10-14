@@ -1,4 +1,4 @@
-import type { BasketParameter } from "@/lib/baskets";
+import type { BasketCoefficient, BasketParameter } from "@/lib/baskets";
 import { compareCondition, conditionLabel, evaluateFormula, formatCalculated } from "@/lib/parameter-rules";
 import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
 
@@ -104,6 +104,69 @@ export interface RrsCard extends RrsMonthState {
     appliedPeriod: string | null;
     savedPeriods: RrsSavedPeriod[];
     editPolicy: RrsEditPolicy;
+}
+
+export interface RrsBranch {
+    uuid: string;
+    code: string;
+    name: string;
+}
+
+export interface RrsCoefficientBasket {
+    id: number;
+    name: string;
+    indicatorName: string;
+    versionId: number;
+    versionNo: number;
+    versionName: string;
+    coefficients: BasketCoefficient[];
+}
+
+export interface RrsCoefficientValue {
+    branchUuid: string;
+    basketId: number;
+    key: string;
+    value: string;
+}
+
+export interface RrsCoefficientPage {
+    territory: RrsTerritory;
+    period: string;
+    editable: boolean;
+    branches: RrsBranch[];
+    baskets: RrsCoefficientBasket[];
+    values: RrsCoefficientValue[];
+    savedPeriods: string[];
+    appliedPeriod: string | null;
+    editPolicy: RrsEditPolicy;
+}
+
+export interface RrsMotivationItem {
+    branchUuid: string;
+    enabled: boolean;
+}
+
+export interface RrsMotivationPage {
+    territory: RrsTerritory;
+    period: string;
+    editable: boolean;
+    branches: RrsBranch[];
+    items: RrsMotivationItem[];
+    savedPeriods: string[];
+    appliedPeriod: string | null;
+    editPolicy: RrsEditPolicy;
+}
+
+export interface RrsFieldChange {
+    title: string;
+    before: string;
+    after: string;
+}
+
+export interface RrsFieldChangeEvent {
+    at: string;
+    by: string;
+    changes: RrsFieldChange[];
 }
 
 export interface RrsSetup {

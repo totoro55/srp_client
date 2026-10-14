@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import {
+    parseVersionCoefficients,
     parseVersionComment,
     parseVersionDescription,
     parseVersionName,
@@ -43,7 +44,11 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
     if ("error" in parsed) {
         return parsed;
     }
-    return { name, description, comment, settings: { parameters: parsed.parameters } };
+    const coefficients = parseVersionCoefficients((settings as { coefficients?: unknown }).coefficients);
+    if ("error" in coefficients) {
+        return coefficients;
+    }
+    return { name, description, comment, settings: { parameters: parsed.parameters, coefficients: coefficients.coefficients } };
 }
 
 export async function PATCH(

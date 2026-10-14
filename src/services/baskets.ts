@@ -1,6 +1,7 @@
 import {
     isBasketStatus,
     isBasketVersionStatus,
+    coefficientsEqual,
     parametersEqual,
     readVersionSettings,
     versionSettingsPayload,
@@ -242,7 +243,7 @@ export async function createBasket(input: BasketDraftInput, author: string): Pro
                 comment: "Инициализации версии",
                 author,
                 name: "Версия 1",
-                settings: { parameters: [] },
+                settings: { parameters: [], coefficients: [] },
             });
             return basketId;
         } catch (error) {
@@ -427,6 +428,9 @@ export async function updateBasketVersion(
         const settingsLocked = version.status !== "draft" || version.dataTable !== null;
         if (settingsLocked && !parametersEqual(currentSettings.parameters, input.settings.parameters)) {
             throw new BasketRuleError(400, "Параметры этой версии уже зафиксированы. Измените их в новом черновике.");
+        }
+        if (settingsLocked && !coefficientsEqual(currentSettings.coefficients, input.settings.coefficients)) {
+            throw new BasketRuleError(400, "Коэффициенты этой версии уже зафиксированы. Измените их в новом черновике.");
         }
         const settings = settingsLocked ? currentSettings : input.settings;
 

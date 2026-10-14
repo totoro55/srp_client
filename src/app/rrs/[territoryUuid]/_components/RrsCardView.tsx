@@ -2,21 +2,27 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, Asterisk, BadgeCheck, ChevronDown, FlaskConical, Pencil, ShoppingBasket } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Asterisk, BadgeCheck, ChevronDown, FlaskConical, History, Pencil } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { versionStatusTitle, type BasketVersionStatus } from "@/lib/baskets";
 import type { RrsBasketOffer, RrsCard, RrsVersionOffer } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
-import { buildForms, describePeriodEffect, formatMonth, selectClassName, type BasketForm, type PeriodEffectKind } from "../../_components/model";
+import { RrsPeriodControls } from "../../_components/RrsPeriodControls";
+import { connectionCardPeriod, RrsSectionNav } from "../../_components/RrsSectionNav";
+import { buildForms, describePeriodEffect, formatMonth, type BasketForm } from "../../_components/model";
 import { RrsHistoryPanel } from "./RrsHistoryPanel";
 
 export function RrsCardView() {
     const params = useParams<{ territoryUuid: string }>();
+    const router = useRouter();
+    const searchParams = useSearchParams();
     const territoryUuid = params.territoryUuid;
+    const requestedPeriod = searchParams.get("period");
     const [card, setCard] = useState<RrsCard | null>(null);
     const [forms, setForms] = useState<BasketForm[]>([]);
     const [openBasketIds, setOpenBasketIds] = useState<number[]>([]);
@@ -45,8 +51,8 @@ export function RrsCardView() {
     }, [territoryUuid]);
 
     useEffect(() => {
-        void load();
-    }, [load]);
+        void load(requestedPeriod ?? undefined);
+    }, [load, requestedPeriod]);
 
     function toggleBasketDetails(basketId: number) {
         setOpenBasketIds((current) => (
@@ -66,51 +72,57 @@ export function RrsCardView() {
         : [];
 
     return (
-        <div className="@container flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-                <Link href="/rrs" className={buttonVariants({ variant: "outline", size: "sm" })}>
-                    <ArrowLeft />
-                    К списку
-                </Link>
-                {card ? <h2 className="text-base font-semibold">{card.territory.name}</h2> : null}
-            </div>
-            <FormAlert message={error} />
-            {loading ? <p className="text-sm text-muted-foreground">Загрузка карточки...</p> : null}
-            {card ? (
-                <div className="grid items-start gap-x-4 gap-y-2 @min-[36rem]:grid-cols-2">
-                    <div className="flex flex-col gap-2 @min-[36rem]:col-start-1 @min-[36rem]:row-start-1">
-                            <div className="flex min-h-9 flex-wrap items-center gap-2">
-                                <h3 className="flex items-center gap-2 text-base font-semibold">
-                                    <ShoppingBasket className="size-5" />
-                                    Корзины
-                                </h3>
-                                <Link href={`/rrs/${territoryUuid}/edit?period=${card.period}`} className={cn(buttonVariants({ variant: "default", size: "sm" }), "ml-auto")}>
+        <Tabs defaultValue="set" className="w-full gap-4">
+            <RrsSectionNav
+                territoryUuid={territoryUuid}
+                territoryName={card?.territory.name}
+                active="baskets"
+                period={card?.period ?? requestedPeriod}
+                subnav={card ? (
+                    <TabsList>
+                        <TabsTrigger value="set">Состав</TabsTrigger>
+                        <TabsTrigger value="history">
+                            <History />
+                            История
+                        </TabsTrigger>
+                    </TabsList>
+                ) : null}
+                controls={(
+                    <>
+                        {card ? (
+                            <RrsPeriodControls
+                                period={card.period}
+                                appliedPeriod={card.appliedPeriod}
+                                savedPeriods={card.savedPeriods}
+                                hint={cardPeriodHint(card)}
+                                onPeriodChange={(period) => {
+                                    const saved = card.savedPeriods.map((item) => item.period);
+                                    const target = saved.includes(period) ? period : connectionCardPeriod(period, saved);
+                                    router.replace(`/rrs/${territoryUuid}/baskets?period=${target}`);
+                                }}
+                            />
+                        ) : null}
+                        <div className="ml-auto flex shrink-0 items-center gap-2">
+                            {card ? (
+                                <Link href={`/rrs/${territoryUuid}/edit?period=${card.period}`} className={buttonVariants({ size: "sm" })}>
                                     <Pencil />
                                     Изменить
                                 </Link>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <label className="flex min-w-0 items-center gap-2 text-sm">
-                                    <span className="text-muted-foreground">Период</span>
-                                    <select
-                                        value={card.period}
-                                        aria-label="Период"
-                                        className={cn(selectClassName, "h-8 w-auto max-w-full")}
-                                        onChange={(event) => {
-                                            void load(event.target.value);
-                                        }}
-                                    >
-                                        {[...card.savedPeriods].sort((left, right) => left.period.localeCompare(right.period)).map((item) => (
-                                            <option key={item.period} value={item.period}>
-                                                {formatMonth(item.period)}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-                                <PeriodBadge card={card} />
-                            </div>
-                    </div>
-                        <div className="flex flex-col gap-2 @min-[36rem]:col-start-1 @min-[36rem]:row-start-2">
+                            ) : null}
+                            <HelpDrawer title="Набор корзин">
+                                <BasketHelp />
+                            </HelpDrawer>
+                        </div>
+                    </>
+                )}
+            />
+            <FormAlert message={error} />
+            {loading && !card ? <p className="text-sm text-muted-foreground">Загрузка корзин...</p> : null}
+            {card ? (
+                <>
+                    <TabsContent value="set" className="flex flex-col gap-4">
+                        {columns.length === 0 ? <p className="text-sm text-muted-foreground">В этом периоде нет подключённых корзин.</p> : null}
+                        <div className="flex flex-col gap-2">
                         {columns.map(({ basket, form, version }) => {
                         const open = openBasketIds.includes(basket.id);
                         const parameters = version?.parameters ?? [];
@@ -159,26 +171,43 @@ export function RrsCardView() {
                         );
                     })}
                         </div>
-                    <RrsHistoryPanel territoryUuid={territoryUuid} />
-                </div>
+                    </TabsContent>
+                    <TabsContent value="history">
+                        <RrsHistoryPanel territoryUuid={territoryUuid} />
+                    </TabsContent>
+                </>
             ) : null}
-        </div>
+        </Tabs>
     );
 }
 
-const PERIOD_BADGE_CLASS: Record<PeriodEffectKind, string> = {
-    current: "border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
-    future: "border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-    past: "border-border bg-muted text-muted-foreground",
-};
-
-function PeriodBadge({ card }: { card: RrsCard }) {
+function cardPeriodHint(card: RrsCard): { text: string; tone: "future" | "current" | "past" } {
     const effect = describePeriodEffect(card);
+    if (effect.kind === "future") {
+        return { tone: "future", text: `Показан набор корзин с ${formatMonth(card.period)}. Более ранние месяцы останутся без изменений.` };
+    }
+    if (effect.kind === "past") {
+        return { tone: "past", text: "Показан сохранённый набор корзин за выбранный месяц." };
+    }
+    return { tone: "current", text: "Показан действующий набор корзин." };
+}
+
+function BasketHelp() {
     return (
-        <Badge variant="outline" className={cn("h-auto max-w-full gap-1.5 whitespace-normal px-2.5 py-1 text-left font-normal leading-snug", PERIOD_BADGE_CLASS[effect.kind])}>
-            <span className="font-medium">{effect.title}</span>
-            <span>{effect.detail}</span>
-        </Badge>
+        <div className="flex flex-col gap-3">
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Состав</h3>
+                <p className="text-muted-foreground">Показаны корзины, подключённые на выбранный месяц, и заполненные параметры.</p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Изменение</h3>
+                <p className="text-muted-foreground">Кнопка «Изменить» записывает набор на выбранный месяц. Более ранние месяцы при этом не изменяются.</p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">История</h3>
+                <p className="text-muted-foreground">Вкладка «История» показывает, кто менял набор и что было до сохранения.</p>
+            </section>
+        </div>
     );
 }
 

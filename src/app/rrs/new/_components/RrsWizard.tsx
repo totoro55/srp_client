@@ -18,6 +18,7 @@ import {
     type RrsEditPolicy,
 } from "@/lib/rrs-edit-window";
 import { ApiResponse } from "@/types/api";
+import { PageHeading } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
 import { ParameterField } from "../../_components/ParameterField";
 import { VersionChoice } from "../../_components/VersionChoice";
@@ -244,7 +245,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 setError(json.error.message);
                 return;
             }
-            router.push(`/rrs/${territoryUuid}`);
+            router.push(`/rrs/${territoryUuid}/baskets?period=${month}-01`);
         } catch {
             setError(editing ? "Не удалось сохранить карточку РРС" : "Не удалось создать карточку РРС");
         } finally {
@@ -268,8 +269,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
 
     return (
         <form className="mx-auto flex w-full max-w-3xl flex-col gap-6" onSubmit={onSubmit}>
+            {territoryName ? (
+                <PageHeading trail={[
+                    { href: "/rrs", label: "Настройки РРС" },
+                    { label: territoryName },
+                ]} />
+            ) : null}
             <div className="flex items-center justify-between gap-4">
-                <Link href={editing ? `/rrs/${lockedTerritoryUuid}` : "/rrs"} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                <Link href={editing ? `/rrs/${lockedTerritoryUuid}/baskets${requestedPeriod ? `?period=${encodeURIComponent(requestedPeriod)}` : ""}` : "/rrs"} className={buttonVariants({ variant: "outline", size: "sm" })}>
                     <ArrowLeft />
                     {editing ? "К карточке" : "К списку"}
                 </Link>

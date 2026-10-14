@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -29,14 +29,18 @@ import {
     type BasketVersionStatus,
     type VersionAvailability,
     type VersionView,
+    coefficientRangeLabel,
+    coefficientsEqual,
     parameterConstraintSummary,
     parametersEqual,
     parameterKindTitle,
+    type BasketCoefficient,
     type BasketDetails,
     type BasketParameter,
     type BasketVersion,
 } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
+import { CoefficientDialog } from "./CoefficientDialog";
 import { ParameterDialog } from "./ParameterDialog";
 import { VersionTestTerritories } from "./VersionTestTerritories";
 import { ApiResponse } from "@/types/api";
@@ -57,6 +61,9 @@ export function BasketDetail() {
     const [versionDescription, setVersionDescription] = useState("");
     const [versionComment, setVersionComment] = useState("");
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
+    const [coefficients, setCoefficients] = useState<BasketCoefficient[]>([]);
+    const [coefficientEditor, setCoefficientEditor] = useState<{ index: number | null; coefficient: BasketCoefficient | null } | null>(null);
+    const [coefficientToRemove, setCoefficientToRemove] = useState<{ index: number; title: string } | null>(null);
     const [parameterEditor, setParameterEditor] = useState<{ index: number | null; parameter: BasketParameter | null } | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -68,6 +75,8 @@ export function BasketDetail() {
     const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [overIndex, setOverIndex] = useState<number | null>(null);
+    const [coefficientDragIndex, setCoefficientDragIndex] = useState<number | null>(null);
+    const [coefficientOverIndex, setCoefficientOverIndex] = useState<number | null>(null);
 
     const selected = basket?.versions.find((version) => version.id === selectedId) ?? null;
     const draft = selected?.status === "draft" ? selected : null;
@@ -77,6 +86,7 @@ export function BasketDetail() {
         || versionDescription.trim() !== selected.description.trim()
         || versionComment.trim() !== ""
         || !parametersEqual(parameters, selected.settings.parameters)
+        || !coefficientsEqual(coefficients, selected.settings.coefficients)
     );
 
     function requestVersion(version: BasketVersion | null) {
@@ -102,11 +112,16 @@ export function BasketDetail() {
         setVersionDescription(version?.description ?? "");
         setVersionComment("");
         setParameters(version?.settings.parameters ?? []);
+        setCoefficients(version?.settings.coefficients ?? []);
+        setCoefficientEditor(null);
+        setCoefficientToRemove(null);
         setParameterEditor(null);
         setParameterToRemove(null);
         setConfirmDeleteDraft(false);
         setDragIndex(null);
         setOverIndex(null);
+        setCoefficientDragIndex(null);
+        setCoefficientOverIndex(null);
     }
 
     function moveParameter(from: number, to: number) {
@@ -114,6 +129,21 @@ export function BasketDetail() {
             return;
         }
         setParameters((current) => {
+            if (from >= current.length || to >= current.length) {
+                return current;
+            }
+            const next = current.slice();
+            const [item] = next.splice(from, 1);
+            next.splice(to, 0, item);
+            return next;
+        });
+    }
+
+    function moveCoefficient(from: number, to: number) {
+        if (from === to || from < 0 || to < 0) {
+            return;
+        }
+        setCoefficients((current) => {
             if (from >= current.length || to >= current.length) {
                 return current;
             }
@@ -169,6 +199,34 @@ export function BasketDetail() {
             return current.map((item, itemIndex) => itemIndex === index ? parameter : item);
         });
         setParameterEditor(null);
+        return null;
+    }
+
+    function applyCoefficient(coefficient: BasketCoefficient): string | null {
+        const index = coefficientEditor?.index ?? null;
+        const duplicateTitle = coefficients.some((item, itemIndex) => (
+            itemIndex !== index && item.title.toLowerCase() === coefficient.title.toLowerCase()
+        ));
+        if (duplicateTitle) {
+            return "Такой коэффициент уже есть в этой версии";
+        }
+        const duplicateKey = coefficients.some((item, itemIndex) => (
+            itemIndex !== index && item.key === coefficient.key
+        ));
+        if (duplicateKey) {
+            return "Коэффициент с таким кодом уже есть в этой версии";
+        }
+        if (!/^[a-z][a-z0-9_]{0,49}$/.test(coefficient.key)) {
+            return "Укажите код: латинские буквы, цифры и подчёркивание, с буквы";
+        }
+        setError(null);
+        setCoefficients((current) => {
+            if (index === null) {
+                return [...current, coefficient];
+            }
+            return current.map((item, itemIndex) => itemIndex === index ? coefficient : item);
+        });
+        setCoefficientEditor(null);
         return null;
     }
 
@@ -246,7 +304,7 @@ export function BasketDetail() {
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
-            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters } },
+            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters, coefficients } },
             selected.id,
             undefined,
             "Версия сохранена",
@@ -284,6 +342,32 @@ export function BasketDetail() {
                     if (!open) setParameterEditor(null);
                 }}
                 onSubmit={applyParameter}
+            />
+            <CoefficientDialog
+                coefficient={coefficientEditor?.coefficient ?? null}
+                open={coefficientEditor !== null}
+                onOpenChange={(open) => {
+                    if (!open) setCoefficientEditor(null);
+                }}
+                onSubmit={applyCoefficient}
+            />
+            <ConfirmDialog
+                open={coefficientToRemove !== null}
+                title="Убрать коэффициент"
+                description={coefficientToRemove
+                    ? `Коэффициент «${coefficientToRemove.title}» будет убран из этой версии. Изменение сохранится после нажатия «Сохранить».`
+                    : ""}
+                confirmLabel="Убрать"
+                confirmVariant="destructive"
+                onConfirm={() => {
+                    if (!coefficientToRemove) return;
+                    const index = coefficientToRemove.index;
+                    setCoefficients((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                    setCoefficientToRemove(null);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setCoefficientToRemove(null);
+                }}
             />
             <ConfirmDialog
                 open={parameterToRemove !== null}
@@ -668,6 +752,114 @@ export function BasketDetail() {
                                 ) : null}
                                 </>
                             )}
+                            <div className="flex flex-col gap-3 border-t pt-4">
+                                <div className="flex items-center justify-between gap-3">
+                                    <h3 className="flex items-center gap-2 text-sm font-medium">
+                                        <Percent className="size-4" />
+                                        Коэффициенты
+                                    </h3>
+                                    {canWrite && !parametersLocked ? (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={saving}
+                                            onClick={() => setCoefficientEditor({ index: null, coefficient: null })}
+                                        >
+                                            <Plus />
+                                            Коэффициент
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Название и диапазон задаются здесь. Значение указывает РРС для филиала территории.
+                                </p>
+                                {coefficients.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">Коэффициентов нет. Филиалы можно будет оставить без значения.</p>
+                                ) : (
+                                    <>
+                                    <ul className="flex flex-col gap-2">
+                                        {coefficients.map((coefficient, index) => {
+                                            const sortable = canWrite && !parametersLocked && !saving;
+                                            return (
+                                                <li
+                                                    key={coefficient.key}
+                                                    className={cn(
+                                                        "flex min-h-16 items-start gap-2 rounded-lg border px-2 py-2",
+                                                        coefficientDragIndex === index && "opacity-50",
+                                                        coefficientOverIndex === index && coefficientDragIndex !== null && coefficientDragIndex !== index && "border-primary bg-primary/5",
+                                                    )}
+                                                    onDragOver={(event) => {
+                                                        if (!sortable || coefficientDragIndex === null) {
+                                                            return;
+                                                        }
+                                                        event.preventDefault();
+                                                        if (coefficientOverIndex !== index) {
+                                                            setCoefficientOverIndex(index);
+                                                        }
+                                                    }}
+                                                    onDrop={(event) => {
+                                                        event.preventDefault();
+                                                        const raw = event.dataTransfer.getData("text/plain");
+                                                        const from = raw.startsWith("coefficient:") ? Number(raw.slice("coefficient:".length)) : Number.NaN;
+                                                        if (Number.isInteger(from)) {
+                                                            moveCoefficient(from, index);
+                                                        }
+                                                        setCoefficientDragIndex(null);
+                                                        setCoefficientOverIndex(null);
+                                                    }}
+                                                >
+                                                    {sortable ? (
+                                                        <button
+                                                            type="button"
+                                                            draggable
+                                                            aria-label={`Переместить «${coefficient.title}»`}
+                                                            className="mt-1 inline-flex size-7 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing"
+                                                            onDragStart={(event) => {
+                                                                event.dataTransfer.effectAllowed = "move";
+                                                                event.dataTransfer.setData("text/plain", `coefficient:${index}`);
+                                                                setCoefficientDragIndex(index);
+                                                            }}
+                                                            onDragEnd={() => {
+                                                                setCoefficientDragIndex(null);
+                                                                setCoefficientOverIndex(null);
+                                                            }}
+                                                        >
+                                                            <GripVertical className="size-4" />
+                                                        </button>
+                                                    ) : null}
+                                                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                            <span className="font-medium">{coefficient.title}</span>
+                                                            <Badge variant="outline" className="font-mono">{coefficient.key}</Badge>
+                                                        </div>
+                                                        <span className="text-xs text-muted-foreground">{coefficientRangeLabel(coefficient)}</span>
+                                                        {coefficient.description ? (
+                                                            <span className="text-sm text-muted-foreground">{coefficient.description}</span>
+                                                        ) : null}
+                                                    </div>
+                                                    {sortable ? (
+                                                        <div className="flex shrink-0 gap-1">
+                                                            <Button type="button" variant="ghost" size="icon-sm" aria-label="Изменить коэффициент" onClick={() => setCoefficientEditor({ index, coefficient })}>
+                                                                <Pencil />
+                                                            </Button>
+                                                            <Button type="button" variant="ghost" size="icon-sm" aria-label="Убрать коэффициент" onClick={() => setCoefficientToRemove({ index, title: coefficient.title })}>
+                                                                <Trash2 />
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                    {canWrite && !parametersLocked && coefficients.length > 1 ? (
+                                        <p className="text-xs text-muted-foreground">
+                                            РРС заполняет коэффициенты филиалов в этом порядке. Перетащите строку за значок слева, чтобы изменить его.
+                                        </p>
+                                    ) : null}
+                                    </>
+                                )}
+                            </div>
                                 </div>
                                 <div className="flex min-w-0 flex-col gap-4 border-t pt-4 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
                                     <h3 className="text-sm font-medium">Сведения</h3>

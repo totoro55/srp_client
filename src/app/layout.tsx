@@ -6,6 +6,7 @@ import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
 import {SidebarProvider} from "@/components/ui/sidebar";
 import Header from "@/app/_components/header/header";
+import { PageHeadingProvider } from "@/app/_components/header/page-heading";
 import { AccessBanner } from "@/app/_components/AccessBanner";
 import { NoticeBanner } from "@/app/_components/NoticeBanner";
 import {AppSideBar} from "@/app/_components/appSideBar/AppSideBar";
@@ -44,12 +45,14 @@ export default function RootLayout({
       <Providers>
         <SidebarProvider defaultOpen={false}>
           <AppSideBar />
+          <PageHeadingProvider>
           <main className="w-full pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
             <NoticeBanner />
             <AccessBanner />
             <Header />
             {children}
           </main>
+          </PageHeadingProvider>
         </SidebarProvider>
       </Providers>
       </body>

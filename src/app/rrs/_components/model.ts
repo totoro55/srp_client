@@ -1,5 +1,5 @@
 import type { BasketParameter } from "@/lib/baskets";
-import { connectableVersions, resolveConnectionValues, withCalculatedValues, type RrsBasketOffer, type RrsCard, type RrsConnectionSlice, type RrsHistoryChange, type RrsHistoryEvent, type RrsVersionOffer } from "@/lib/rrs";
+import { connectableVersions, resolveConnectionValues, withCalculatedValues, type RrsBasketOffer, type RrsConnectionSlice, type RrsHistoryChange, type RrsHistoryEvent, type RrsVersionOffer } from "@/lib/rrs";
 
 export interface BasketForm {
     basketId: number;
@@ -129,7 +129,11 @@ function diffBasket(
 
 export type PeriodEffectKind = "current" | "past" | "future";
 
-export function describePeriodEffect(card: Pick<RrsCard, "period" | "appliedPeriod" | "savedPeriods">): {
+export function describePeriodEffect(card: {
+    period: string;
+    appliedPeriod: string | null;
+    savedPeriods: { period: string }[];
+}): {
     kind: PeriodEffectKind;
     title: string;
     detail: string;
