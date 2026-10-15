@@ -19,9 +19,9 @@ export function PeriodBadge({
 }) {
     const effect = describePeriodEffect({ period, appliedPeriod, savedPeriods });
     return (
-        <Badge variant="outline" className={cn("h-8 shrink-0 gap-1.5 whitespace-nowrap px-2.5 font-normal", PERIOD_BADGE_CLASS[effect.kind])}>
+        <Badge variant="outline" className={cn("h-auto min-h-8 max-w-full shrink gap-x-1.5 gap-y-0.5 whitespace-normal px-2.5 py-1 font-normal", PERIOD_BADGE_CLASS[effect.kind])}>
             <span className="font-medium">{effect.title}</span>
-            <span>{effect.detail}</span>
+            <span className="min-w-0">{effect.detail}</span>
         </Badge>
     );
 }

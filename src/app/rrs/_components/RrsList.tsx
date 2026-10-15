@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { WandSparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -46,8 +46,8 @@ export function RrsList() {
                     Карточка хранит, какие корзины включены на территории. Обязательные подключаются при создании.
                 </p>
                 <Link href="/rrs/new" className={buttonVariants({ className: "shrink-0" })}>
-                    <Plus />
-                    Добавить
+                    <WandSparkles />
+                    Запустить мастер добавления
                 </Link>
             </div>
             <FormAlert message={error} />

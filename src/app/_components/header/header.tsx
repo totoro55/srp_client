@@ -38,12 +38,12 @@ export default function Header() {
 
     return (
         <>
-        <header className="flex w-full shrink-0 flex-row items-center justify-start border-b px-3 py-2 md:p-1.5 xl:p-3">
-            <SidebarTrigger aria-label="Открыть меню" className="hidden md:inline-flex" />
+        <header className="flex w-full min-w-0 shrink-0 flex-row items-center justify-start border-b px-3 py-2 md:p-1.5 xl:p-3">
+            <SidebarTrigger aria-label="Открыть меню" className="hidden shrink-0 md:inline-flex" />
             {(heading || trail) && (
                 <>
-                    <Separator orientation="vertical" className="mx-1.5 hidden h-6 md:block xl:mx-3" />
-                    <div className="min-w-0">
+                    <Separator orientation="vertical" className="mx-1.5 hidden h-6 shrink-0 md:block xl:mx-3" />
+                    <div className="min-w-0 flex-1">
                         {trail ? (
                             <PageHeadingTrail trail={trail} />
                         ) : heading ? (
@@ -60,7 +60,7 @@ export default function Header() {
                 </>
             )}
             {identity ? (
-                <p className="ml-auto truncate px-3 text-xs text-muted-foreground">{identity}</p>
+                <p className="ml-2 hidden min-w-0 max-w-[40%] shrink truncate px-3 text-xs text-muted-foreground sm:block">{identity}</p>
             ) : null}
         </header>
         <MobileMenuButton />

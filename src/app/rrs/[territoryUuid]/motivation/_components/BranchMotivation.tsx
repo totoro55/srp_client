@@ -156,10 +156,10 @@ export function BranchMotivation() {
                                 }}
                             />
                         ) : null}
-                        <div className="relative ml-auto flex shrink-0 items-center gap-2">
+                        <div className="relative ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
                             {page && page.branches.length > 0 ? (
                                 <>
-                                    <p className={cn("absolute right-full mr-2 whitespace-nowrap text-sm text-amber-800 dark:text-amber-200", dirtyCount === 0 && "hidden")}>
+                                    <p className={cn("text-sm text-amber-800 max-sm:w-full max-sm:text-right sm:absolute sm:right-full sm:mr-2 sm:whitespace-nowrap dark:text-amber-200", dirtyCount === 0 && "hidden")}>
                                         Есть несохранённые изменения
                                     </p>
                                     <Button type="button" size="sm" disabled={saving || loading || !page.editable} onClick={requestSave}>

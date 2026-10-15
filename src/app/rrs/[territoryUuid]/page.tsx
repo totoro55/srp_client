@@ -1,5 +1,5 @@
-import { RrsReservedPage } from "./_components/RrsReservedPage";
+import { RrsOverview } from "./_components/RrsOverview";
 
 export default function RrsOverviewPage() {
-    return <RrsReservedPage section="overview" message="Сводка по территории появится здесь." />;
+    return <RrsOverview />;
 }

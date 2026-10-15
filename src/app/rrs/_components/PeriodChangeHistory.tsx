@@ -56,6 +56,18 @@ export function PeriodChangeHistory({
         };
     }, [period, reloadToken, source, territoryUuid]);
 
+    return <ChangeHistoryList events={events} loading={loading} error={error} />;
+}
+
+export function ChangeHistoryList({
+    events,
+    loading,
+    error,
+}: {
+    events: RrsFieldChangeEvent[];
+    loading: boolean;
+    error: string | null;
+}) {
     return (
         <div className="flex flex-col gap-3">
             <FormAlert message={error} />

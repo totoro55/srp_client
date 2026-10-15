@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Asterisk, BadgeCheck, ChevronDown, FlaskConical, History, Pencil } from "lucide-react";
+import { Asterisk, BadgeCheck, ChevronDown, FlaskConical, History, WandSparkles } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HelpDrawer } from "@/components/help-drawer";
@@ -102,11 +102,11 @@ export function RrsCardView() {
                                 }}
                             />
                         ) : null}
-                        <div className="ml-auto flex shrink-0 items-center gap-2">
+                        <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
                             {card ? (
-                                <Link href={`/rrs/${territoryUuid}/edit?period=${card.period}`} className={buttonVariants({ size: "sm" })}>
-                                    <Pencil />
-                                    Изменить
+                                <Link href={`/rrs/${territoryUuid}/edit?period=${card.period}`} className={buttonVariants({ size: "sm", className: "shrink-0" })}>
+                                    <WandSparkles />
+                                    Запустить мастер настройки корзин
                                 </Link>
                             ) : null}
                             <HelpDrawer title="Набор корзин">
@@ -173,7 +173,7 @@ export function RrsCardView() {
                         </div>
                     </TabsContent>
                     <TabsContent value="history">
-                        <RrsHistoryPanel territoryUuid={territoryUuid} />
+                        <RrsHistoryPanel territoryUuid={territoryUuid} period={card.period} />
                     </TabsContent>
                 </>
             ) : null}
@@ -201,11 +201,11 @@ function BasketHelp() {
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Изменение</h3>
-                <p className="text-muted-foreground">Кнопка «Изменить» записывает набор на выбранный месяц. Более ранние месяцы при этом не изменяются.</p>
+                <p className="text-muted-foreground">Кнопка «Запустить мастер настройки корзин» открывает мастер. Набор записывается на выбранный месяц, более ранние месяцы при этом не изменяются.</p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">История</h3>
-                <p className="text-muted-foreground">Вкладка «История» показывает, кто менял набор и что было до сохранения.</p>
+                <p className="text-muted-foreground">Вкладка «История» показывает, кто менял набор в выбранном месяце и что было до сохранения.</p>
             </section>
         </div>
     );

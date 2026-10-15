@@ -374,13 +374,15 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
             baskets.set(row.id, basket);
         }
         if (row.versionId !== null && row.versionNo !== null && row.versionName && (row.versionStatus === "test" || row.versionStatus === "working")) {
+            const settings = readVersionSettings(row.settings);
             const version: RrsVersionOffer = {
                 id: row.versionId,
                 versionNo: row.versionNo,
                 name: row.versionName,
                 description: row.versionDescription ?? "",
                 status: row.versionStatus,
-                parameters: readVersionSettings(row.settings).parameters,
+                parameters: settings.parameters,
+                coefficients: settings.coefficients,
                 testTerritoryUuids: [],
             };
             basket.versions.push(version);
@@ -645,21 +647,24 @@ async function writeConnected(
     }
 
     const editingThisMonth = current?.period === period;
+    const recordedAt = new Date();
     if (editingThisMonth && current) {
-        await logRegistry(query, actor, territoryUuid, basket.id, period);
+        await logRegistry(query, actor, territoryUuid, basket.id, period, recordedAt);
         if (current.versionId !== null && current.versionId !== version.id) {
-            await logAndDeleteParameters(query, actor, territoryUuid, period, versions, current.versionId);
+            await logAndDeleteParameters(query, actor, territoryUuid, period, versions, current.versionId, recordedAt);
+        } else if (current.versionId === version.id) {
+            await logParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, recordedAt);
         }
         await query(
             `
             UPDATE basket_connections
-            SET version_id = $4, connected_at = NOW(), connected_by = $5
+            SET version_id = $4, connected_at = $6, connected_by = $5
             WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
             `,
-            [territoryUuid, basket.id, period, version.id, actor],
+            [territoryUuid, basket.id, period, version.id, actor, recordedAt],
         );
         if (current.versionId === version.id) {
-            await updateParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, parsed);
+            await updateParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, parsed, recordedAt);
             return;
         }
     } else {
@@ -690,15 +695,16 @@ async function writeDisconnected(
         return;
     }
     if (current.period === period) {
-        await logRegistry(query, actor, territoryUuid, basket.id, period);
-        await logAndDeleteParameters(query, actor, territoryUuid, period, versions, current.versionId);
+        const recordedAt = new Date();
+        await logRegistry(query, actor, territoryUuid, basket.id, period, recordedAt);
+        await logAndDeleteParameters(query, actor, territoryUuid, period, versions, current.versionId, recordedAt);
         await query(
             `
             UPDATE basket_connections
-            SET version_id = NULL, connected_at = NOW(), connected_by = $4
+            SET version_id = NULL, connected_at = $5, connected_by = $4
             WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
             `,
-            [territoryUuid, basket.id, period, actor],
+            [territoryUuid, basket.id, period, actor, recordedAt],
         );
         return;
     }
@@ -711,17 +717,17 @@ async function writeDisconnected(
     );
 }
 
-async function logRegistry(query: Sql, actor: string, territoryUuid: string, basketId: number, period: string): Promise<void> {
+async function logRegistry(query: Sql, actor: string, territoryUuid: string, basketId: number, period: string, recordedAt: Date): Promise<void> {
     await query(
         `
         INSERT INTO basket_connections_log (
-            territory_uuid, basket_id, period, version_id, connected_at, connected_by, recorded_by
+            territory_uuid, basket_id, period, version_id, connected_at, connected_by, recorded_by, recorded_at
         )
-        SELECT territory_uuid, basket_id, period, version_id, connected_at, connected_by, $4
+        SELECT territory_uuid, basket_id, period, version_id, connected_at, connected_by, $4, $5
         FROM basket_connections
         WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
         `,
-        [territoryUuid, basketId, period, actor],
+        [territoryUuid, basketId, period, actor, recordedAt],
     );
 }
 
@@ -732,30 +738,56 @@ async function logAndDeleteParameters(
     period: string,
     versions: VersionRow[],
     versionId: number,
+    recordedAt: Date,
 ): Promise<void> {
+    await logParameters(query, actor, territoryUuid, period, versionTable(versions, versionId), parametersOf(versions, versionId), recordedAt);
     const version = versions.find((candidate) => candidate.id === versionId);
     if (!version?.dataTable || !DATA_TABLE_PATTERN.test(version.dataTable)) {
         return;
     }
-    const table = quoteIdent(version.dataTable);
-    const parameters = readVersionSettings(version.settings).parameters;
+    await query(
+        `DELETE FROM basket_data.${quoteIdent(version.dataTable)} WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
+    );
+}
+
+async function logParameters(
+    query: Sql,
+    actor: string,
+    territoryUuid: string,
+    period: string,
+    dataTable: string | null,
+    parameters: BasketParameter[],
+    recordedAt: Date,
+): Promise<void> {
+    if (!dataTable || !DATA_TABLE_PATTERN.test(dataTable)) {
+        return;
+    }
     const columns = parameters.map((parameter) => quoteIdent(parameter.key)).join(", ");
     const columnList = columns.length > 0 ? `, ${columns}` : "";
     await query(
         `
-        INSERT INTO basket_data.${quoteIdent(`${version.dataTable}_log`)} (
-            territory_uuid, period, connected_at, connected_by${columnList}, recorded_by
+        INSERT INTO basket_data.${quoteIdent(`${dataTable}_log`)} (
+            territory_uuid, period, connected_at, connected_by${columnList}, recorded_by, recorded_at
         )
-        SELECT territory_uuid, period, connected_at, connected_by${columnList}, $3
-        FROM basket_data.${table}
+        SELECT territory_uuid, period, connected_at, connected_by${columnList}, $3, $4
+        FROM basket_data.${quoteIdent(dataTable)}
         WHERE territory_uuid = $1 AND period = $2::date
         `,
-        [territoryUuid, period, actor],
+        [territoryUuid, period, actor, recordedAt],
     );
-    await query(
-        `DELETE FROM basket_data.${table} WHERE territory_uuid = $1 AND period = $2::date`,
-        [territoryUuid, period],
-    );
+}
+
+function versionTable(versions: VersionRow[], versionId: number): string | null {
+    return versions.find((candidate) => candidate.id === versionId)?.dataTable ?? null;
+}
+
+function parametersOf(versions: VersionRow[], versionId: number): BasketParameter[] {
+    const version = versions.find((candidate) => candidate.id === versionId);
+    if (!version) {
+        return [];
+    }
+    return readVersionSettings(version.settings).parameters;
 }
 
 async function insertParameters(
@@ -786,11 +818,12 @@ async function updateParameters(
     dataTable: string,
     parameters: BasketParameter[],
     values: Record<string, string | number>,
+    recordedAt: Date,
 ): Promise<void> {
     const assignments = [
-        "connected_at = NOW()",
-        "connected_by = $3",
-        ...parameters.map((parameter, index) => `${quoteIdent(parameter.key)} = $${index + 4}`),
+        "connected_at = $3",
+        "connected_by = $4",
+        ...parameters.map((parameter, index) => `${quoteIdent(parameter.key)} = $${index + 5}`),
     ];
     await query(
         `
@@ -798,7 +831,7 @@ async function updateParameters(
         SET ${assignments.join(", ")}
         WHERE territory_uuid = $1 AND period = $2::date
         `,
-        [territoryUuid, period, actor, ...parameters.map((parameter) => values[parameter.key])],
+        [territoryUuid, period, recordedAt, actor, ...parameters.map((parameter) => values[parameter.key])],
     );
 }
 

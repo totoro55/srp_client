@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Asterisk, Check, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
@@ -10,7 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { FormAlert } from "@/components/form-alert";
-import { withCalculatedValues, type RrsBasketOffer, type RrsCard, type RrsConnectionSlice, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
+import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { coefficientValueIssue } from "@/lib/coefficient-value";
+import { useSession } from "next-auth/react";
+import { withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
     closedPeriodMessage,
     monthIsOpen,
@@ -19,6 +22,8 @@ import {
 } from "@/lib/rrs-edit-window";
 import { ApiResponse } from "@/types/api";
 import { PageHeading } from "@/app/_components/header/page-heading";
+import { CoefficientTable } from "../../_components/CoefficientTable";
+import { deleteDraft, readDraft, restoreDraft, writeDraft, type WizardDraft } from "./wizard-draft";
 import { cn } from "@/lib/utils";
 import { ParameterField } from "../../_components/ParameterField";
 import { VersionChoice } from "../../_components/VersionChoice";
@@ -54,6 +59,24 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [branches, setBranches] = useState<RrsBranch[]>([]);
+    const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+    const [coefficientValues, setCoefficientValues] = useState<Record<string, string>>({});
+    const [coefficientSaved, setCoefficientSaved] = useState<Record<string, string>>({});
+    const [tailReady, setTailReady] = useState(false);
+    const [resumeDraft, setResumeDraft] = useState<WizardDraft | null>(null);
+    const [restoreNotes, setRestoreNotes] = useState<string[]>([]);
+    const [leaveHref, setLeaveHref] = useState<string | null>(null);
+    const promptedDrafts = useRef(new Set<string>());
+    const loadedTailKey = useRef("");
+    const finishedRef = useRef(false);
+    const advancingRef = useRef(false);
+    const allowSaveRef = useRef(false);
+    const restoredRef = useRef(false);
+    const acceptingDraftRef = useRef(false);
+    const baselineRef = useRef("");
+    const { data: session } = useSession();
+    const username = session?.user?.username ?? "";
 
     useEffect(() => {
         let cancelled = false;
@@ -118,6 +141,37 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         [baskets, territoryUuid, connections],
     );
     const included = forms.filter((form) => form.connected);
+    const enabledBranches = branches.filter((branch) => enabled[branch.uuid]);
+    const coefficientLines = included.flatMap((form) => {
+        const basket = visibleBaskets.find((item) => item.id === form.basketId);
+        const version = basket?.versions.find((item) => item.id === form.versionId);
+        if (!basket || !version) {
+            return [];
+        }
+        return enabledBranches.flatMap((branch) => (version.coefficients ?? []).map((coefficient) => ({
+            id: `${branch.uuid}:${basket.id}:${coefficient.key}`,
+            branch,
+            basketId: basket.id,
+            basketName: basket.name,
+            coefficient,
+        })));
+    });
+    const coefficientBaskets = included.flatMap((form) => {
+        const basket = visibleBaskets.find((item) => item.id === form.basketId);
+        const version = basket?.versions.find((item) => item.id === form.versionId);
+        const coefficients = version?.coefficients ?? [];
+        if (!basket || !version || coefficients.length === 0) {
+            return [];
+        }
+        return [{
+            id: basket.id,
+            name: basket.name,
+            indicatorName: basket.indicatorName,
+            versionNo: version.versionNo,
+            versionName: version.name,
+            coefficients,
+        }];
+    });
     const steps = [
         { key: "place", label: editing ? "Период" : "РРС" },
         { key: "set", label: "Состав" },
@@ -125,14 +179,23 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             const basket = visibleBaskets.find((item) => item.id === form.basketId);
             return { key: `basket-${form.basketId}`, label: basket?.name ?? "Корзина" };
         }),
+        { key: "motivation", label: "Участие" },
+        ...(coefficientLines.length > 0 ? [{ key: "coefficients", label: "Коэффициенты" }] : []),
     ];
     const safeStep = Math.min(step, Math.max(steps.length - 1, 0));
-    const currentBasket = safeStep >= 2 ? visibleBaskets.find((basket) => basket.id === included[safeStep - 2]?.basketId) : undefined;
+    const stepKey = steps[safeStep]?.key ?? "place";
+    const basketOffset = safeStep - 2;
+    const onBasketStep = stepKey.startsWith("basket-");
+    const currentBasket = onBasketStep ? visibleBaskets.find((basket) => basket.id === included[basketOffset]?.basketId) : undefined;
     const currentForm = currentBasket ? forms.find((form) => form.basketId === currentBasket.id) : undefined;
     const currentVersion = currentBasket?.versions.find((version) => version.id === currentForm?.versionId);
     const parameterIssues = currentVersion && currentForm
         ? connectionIssues(currentVersion.parameters, currentForm.values)
         : [];
+    const coefficientIssues = coefficientLines.flatMap((line) => {
+        const message = coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient);
+        return message ? [{ id: line.id, message }] : [];
+    });
 
     function updateForm(basketId: number, patch: Partial<BasketForm>) {
         setForms((current) => current.map((form) => (form.basketId === basketId ? { ...form, ...patch } : form)));
@@ -186,10 +249,17 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     }
 
     function basketStepInvalid(): boolean {
+        if (!onBasketStep) {
+            return false;
+        }
         if (!currentBasket || !currentForm || !currentVersion) {
             return true;
         }
         return parameterIssues.length > 0;
+    }
+
+    function coefficientsInvalid(): boolean {
+        return stepKey === "coefficients" && coefficientIssues.length > 0;
     }
 
     function goNext() {
@@ -205,33 +275,42 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             setError(included.length === 0 ? "Включите хотя бы одну корзину" : "У включённой корзины нет версии для подключения");
             return;
         }
-        if (safeStep >= 2 && basketStepInvalid()) {
+        if (onBasketStep && basketStepInvalid()) {
             setError("Заполните все параметры корзины");
             return;
         }
-        setError(null);
-        setStep(safeStep + 1);
-    }
-
-    async function onSubmit(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
-        if (safeStep < steps.length - 1) {
-            goNext();
+        if (coefficientsInvalid()) {
+            setError("Проверьте коэффициенты филиалов");
             return;
         }
+        setError(null);
+        allowSaveRef.current = false;
+        advancingRef.current = true;
+        setStep(safeStep + 1);
+        queueMicrotask(() => {
+            advancingRef.current = false;
+        });
+    }
+
+    async function saveCard() {
         if (basketStepInvalid()) {
             setError("Заполните все параметры корзины");
             return;
         }
+        if (coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient))) {
+            setError("Проверьте коэффициенты филиалов");
+            return;
+        }
         setSaving(true);
         setError(null);
+        const period = `${month}-01`;
         try {
-            const response = await fetch("/api/rrs/connections", {
+            const connectionResponse = await fetch("/api/rrs/connections", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     territoryUuid,
-                    period: `${month}-01`,
+                    period,
                     items: forms.map((form) => ({
                         basketId: form.basketId,
                         connected: form.connected,
@@ -240,22 +319,83 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     })),
                 }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: true }>;
-            if (!json.success) {
-                setError(json.error.message);
+            const connectionJson = (await connectionResponse.json()) as ApiResponse<{ saved: true }>;
+            if (!connectionJson.success) {
+                setError(`${connectionJson.error.message} Черновик сохранён в этом браузере.`);
                 return;
             }
-            router.push(`/rrs/${territoryUuid}/baskets?period=${month}-01`);
+            if (branches.length > 0) {
+                const motivationResponse = await fetch(`/api/rrs/cards/${territoryUuid}/motivation`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        period,
+                        items: branches.map((branch) => ({
+                            branchUuid: branch.uuid,
+                            enabled: enabled[branch.uuid] ?? false,
+                        })),
+                    }),
+                });
+                const motivationJson = (await motivationResponse.json()) as ApiResponse<{ saved: true }>;
+                if (!motivationJson.success) {
+                    setError(`${motivationJson.error.message} Черновик сохранён в этом браузере.`);
+                    return;
+                }
+            }
+            const coefficientResponse = await fetch(`/api/rrs/cards/${territoryUuid}/coefficients`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    period,
+                    items: coefficientLines.map((line) => ({
+                        branchUuid: line.branch.uuid,
+                        basketId: line.basketId,
+                        key: line.coefficient.key,
+                        value: (coefficientValues[line.id] ?? "1").trim() || "1",
+                    })),
+                }),
+            });
+            const coefficientJson = (await coefficientResponse.json()) as ApiResponse<{ saved: true }>;
+            if (!coefficientJson.success) {
+                setError(`${coefficientJson.error.message} Черновик сохранён в этом браузере.`);
+                return;
+            }
+            finishedRef.current = true;
+            if (username) {
+                deleteDraft(username, territoryUuid, month);
+            }
+            router.push(`/rrs/${territoryUuid}/baskets?period=${period}`);
         } catch {
-            setError(editing ? "Не удалось сохранить карточку РРС" : "Не удалось создать карточку РРС");
+            setError(editing ? "Не удалось сохранить карточку РРС. Черновик сохранён в этом браузере." : "Не удалось создать карточку РРС. Черновик сохранён в этом браузере.");
         } finally {
             setSaving(false);
         }
     }
 
+    function onSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (allowSaveRef.current) {
+            allowSaveRef.current = false;
+            void saveCard();
+            return;
+        }
+        if (advancingRef.current || safeStep >= steps.length - 1) {
+            return;
+        }
+        goNext();
+    }
+
     const versionFrozen = currentBasket ? versionFrozenFor(currentBasket.id) : false;
     const versionChangeAllowed = policy ? versionChangeOpen(month, policy) : false;
-    const stepTitle = safeStep === 0 ? (editing ? "Период" : "Территория и месяц") : safeStep === 1 ? "Состав корзин" : currentBasket?.name ?? "Корзина";
+    const stepTitle = stepKey === "place"
+        ? (editing ? "Период" : "Территория и месяц")
+        : stepKey === "set"
+            ? "Состав корзин"
+            : stepKey === "motivation"
+                ? "Участие филиалов"
+                : stepKey === "coefficients"
+                    ? "Коэффициенты филиалов"
+                    : currentBasket?.name ?? "Корзина";
     const stepHint = safeStep === 0
         ? editing
             ? "Изменение РРС недоступно. Укажите месяц начала действия настроек."
@@ -267,8 +407,228 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             ? "С выбранного месяца допускается смена версии. Сравните описания и выберите одну версию."
             : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
 
+    const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, forms, enabled, coefficientValues });
+    const unfinished = !finishedRef.current && !loading && tailReady && resumeDraft === null && (restoredRef.current || draftSnapshot !== baselineRef.current);
+
+    useEffect(() => {
+        if (loading || !territoryUuid || !month || !username) {
+            return;
+        }
+        const tailKey = `${username}:${territoryUuid}:${month}`;
+        if (loadedTailKey.current === tailKey) {
+            return;
+        }
+        let cancelled = false;
+        async function loadTail() {
+            setTailReady(false);
+            const period = `${month}-01`;
+            try {
+                const [motivationResponse, coefficientResponse] = await Promise.all([
+                    fetch(`/api/rrs/cards/${territoryUuid}/motivation?period=${encodeURIComponent(period)}`),
+                    fetch(`/api/rrs/cards/${territoryUuid}/coefficients?period=${encodeURIComponent(period)}`),
+                ]);
+                const motivationJson = (await motivationResponse.json()) as ApiResponse<RrsMotivationPage>;
+                const coefficientJson = (await coefficientResponse.json()) as ApiResponse<RrsCoefficientPage>;
+                if (cancelled) {
+                    return;
+                }
+                loadedTailKey.current = tailKey;
+                if (!motivationJson.success) {
+                    setError(motivationJson.error.message);
+                    setTailReady(true);
+                    return;
+                }
+                const nextBranches = motivationJson.data.branches;
+                const nextEnabled: Record<string, boolean> = {};
+                for (const branch of nextBranches) {
+                    nextEnabled[branch.uuid] = motivationJson.data.items.find((item) => item.branchUuid === branch.uuid)?.enabled ?? false;
+                }
+                const nextCoefficients: Record<string, string> = {};
+                if (coefficientJson.success) {
+                    for (const item of coefficientJson.data.values) {
+                        nextCoefficients[`${item.branchUuid}:${item.basketId}:${item.key}`] = item.value || "1";
+                    }
+                }
+                setBranches(nextBranches);
+                setEnabled(nextEnabled);
+                setCoefficientValues(nextCoefficients);
+                setCoefficientSaved({ ...nextCoefficients });
+                if (username && !finishedRef.current) {
+                    const draft = readDraft(username, territoryUuid, month);
+                    const promptKey = `${territoryUuid}:${month}`;
+                    if (draft && !promptedDrafts.current.has(promptKey)) {
+                        promptedDrafts.current.add(promptKey);
+                        setResumeDraft(draft);
+                        setTailReady(true);
+                        return;
+                    }
+                }
+                baselineRef.current = JSON.stringify({
+                    territoryUuid,
+                    month,
+                    step: safeStep,
+                    forms,
+                    enabled: nextEnabled,
+                    coefficientValues: nextCoefficients,
+                });
+                setTailReady(true);
+            } catch {
+                if (!cancelled) {
+                    setError("Не удалось загрузить филиалы территории");
+                    setTailReady(true);
+                }
+            }
+        }
+        void loadTail();
+        return () => {
+            cancelled = true;
+        };
+    }, [loading, territoryUuid, month, username]);
+
+    useEffect(() => {
+        if (!tailReady || !username || !territoryUuid || !month || resumeDraft || finishedRef.current) {
+            return;
+        }
+        if (draftSnapshot === baselineRef.current && !restoredRef.current) {
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            writeDraft(username, {
+                territoryUuid,
+                month,
+                step: safeStep,
+                forms,
+                enabled,
+                coefficients: coefficientValues,
+            });
+        }, 400);
+        return () => window.clearTimeout(timer);
+    }, [tailReady, username, territoryUuid, month, resumeDraft, draftSnapshot, safeStep, forms, enabled, coefficientValues]);
+
+    useEffect(() => {
+        function onClick(event: MouseEvent) {
+            if (!unfinished) {
+                return;
+            }
+            const anchor = (event.target as Element | null)?.closest("a");
+            if (!anchor || anchor.target === "_blank" || anchor.closest("[data-slot=alert-dialog-content]")) {
+                return;
+            }
+            const href = anchor.getAttribute("href");
+            if (!href || href.startsWith("#")) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            setLeaveHref(href);
+        }
+        function onUnload(event: BeforeUnloadEvent) {
+            if (!unfinished || !username) {
+                return;
+            }
+            writeDraft(username, {
+                territoryUuid,
+                month,
+                step: safeStep,
+                forms,
+                enabled,
+                coefficients: coefficientValues,
+            });
+            event.preventDefault();
+            event.returnValue = "";
+        }
+        document.addEventListener("click", onClick, true);
+        window.addEventListener("beforeunload", onUnload);
+        return () => {
+            document.removeEventListener("click", onClick, true);
+            window.removeEventListener("beforeunload", onUnload);
+        };
+    }, [unfinished, username, territoryUuid, month, safeStep, forms, enabled, coefficientValues]);
+
+    function acceptDraft() {
+        if (!resumeDraft) {
+            return;
+        }
+        acceptingDraftRef.current = true;
+        const restored = restoreDraft(resumeDraft, baskets, forms, branches);
+        setForms(restored.forms);
+        setEnabled(restored.enabled);
+        setCoefficientValues(restored.coefficients);
+        setCoefficientSaved({ ...restored.coefficients });
+        setStep(restored.step);
+        setRestoreNotes(restored.notes);
+        restoredRef.current = true;
+        baselineRef.current = JSON.stringify({
+            territoryUuid,
+            month,
+            step: restored.step,
+            forms: restored.forms,
+            enabled: restored.enabled,
+            coefficientValues: restored.coefficients,
+        });
+        setResumeDraft(null);
+    }
+
+    function discardDraft() {
+        if (username && resumeDraft) {
+            deleteDraft(username, resumeDraft.territoryUuid, resumeDraft.month);
+        }
+        restoredRef.current = false;
+        setResumeDraft(null);
+        baselineRef.current = draftSnapshot;
+    }
+
+    function confirmLeave() {
+        if (username && territoryUuid && month) {
+            writeDraft(username, {
+                territoryUuid,
+                month,
+                step: safeStep,
+                forms,
+                enabled,
+                coefficients: coefficientValues,
+            });
+        }
+        finishedRef.current = true;
+        const href = leaveHref ?? "/rrs";
+        setLeaveHref(null);
+        router.push(href);
+    }
+
     return (
-        <form className="mx-auto flex w-full max-w-3xl flex-col gap-6" onSubmit={onSubmit}>
+        <form className="flex w-full flex-col gap-6" onSubmit={onSubmit}>
+            <ConfirmDialog
+                open={resumeDraft !== null}
+                title="Найден черновик"
+                description="В этом браузере есть незавершённая настройка за выбранный месяц. Продолжить её или начать заново?"
+                confirmLabel="Продолжить"
+                cancelLabel="Начать заново"
+                confirmVariant="default"
+                onConfirm={acceptDraft}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        if (acceptingDraftRef.current) {
+                            acceptingDraftRef.current = false;
+                            return;
+                        }
+                        discardDraft();
+                    }
+                }}
+            />
+            <ConfirmDialog
+                open={leaveHref !== null}
+                title="Закрыть мастер?"
+                description="Настройка не завершена. Черновик будет сохранён в этом браузере, её можно продолжить при следующем открытии."
+                confirmLabel="Закрыть"
+                cancelLabel="Остаться"
+                confirmVariant="default"
+                onConfirm={confirmLeave}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setLeaveHref(null);
+                    }
+                }}
+            />
             {territoryName ? (
                 <PageHeading trail={[
                     { href: "/rrs", label: "Настройки РРС" },
@@ -315,11 +675,21 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     );
                 })}
             </ol>
+            <div className={cn("flex flex-col gap-6", stepKey !== "coefficients" && "max-w-3xl")}>
             <div>
                 <h2 className="text-lg font-semibold">{stepTitle}</h2>
                 {stepHint ? <p className="mt-1 text-sm text-muted-foreground">{stepHint}</p> : null}
             </div>
             <FormAlert message={error} />
+            {restoreNotes.length > 0 ? (
+                <Alert>
+                    <Info />
+                    <AlertTitle>Черновик восстановлен частично</AlertTitle>
+                    <AlertDescription>
+                        {restoreNotes.map((note) => <p key={note}>{note}</p>)}
+                    </AlertDescription>
+                </Alert>
+            ) : null}
             {loading ? <p className="text-sm text-muted-foreground">Загрузка...</p> : null}
             {!loading && safeStep === 0 && policy ? (
                 <div className="flex flex-col gap-4">
@@ -442,7 +812,48 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     ) : null}
                 </div>
             ) : null}
-            <div className="mt-auto flex items-center justify-between gap-2 border-t pt-4">
+            {!loading && stepKey === "motivation" ? (
+                <div className="flex flex-col gap-3">
+                    <p className="text-sm text-muted-foreground">
+                        Включите филиалы, которые участвуют в мотивации в выбранном месяце. По умолчанию филиал выключен.
+                    </p>
+                    {branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
+                    {branches.map((branch) => {
+                        const on = enabled[branch.uuid] ?? false;
+                        return (
+                            <label key={branch.uuid} className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2">
+                                <span className="text-sm font-medium">{branch.name}</span>
+                                <span className="flex items-center gap-2 text-sm">
+                                    <Switch
+                                        checked={on}
+                                        disabled={saving}
+                                        aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
+                                        onCheckedChange={(checked) => setEnabled((current) => ({ ...current, [branch.uuid]: checked }))}
+                                    />
+                                    <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
+                                        {on ? "Включена" : "Выключена"}
+                                    </span>
+                                </span>
+                            </label>
+                        );
+                    })}
+                    <p className="text-sm text-muted-foreground">Включено {enabledBranches.length} из {branches.length}</p>
+                </div>
+            ) : null}
+            </div>
+            {!loading && stepKey === "coefficients" ? (
+                <CoefficientTable
+                    branches={enabledBranches}
+                    baskets={coefficientBaskets}
+                    values={coefficientValues}
+                    saved={coefficientSaved}
+                    editable
+                    disabled={saving}
+                    bottomReserve={96}
+                    onChange={setCoefficientValues}
+                />
+            ) : null}
+            <div className="mt-auto flex max-w-3xl items-center justify-between gap-2 border-t pt-4">
                 {safeStep > 0 ? (
                     <Button type="button" variant="outline" disabled={saving} onClick={() => { setError(null); setStep(safeStep - 1); }}>
                         <ArrowLeft />
@@ -450,11 +861,25 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     </Button>
                 ) : <span />}
                 {safeStep < steps.length - 1 ? (
-                    <Button type="button" disabled={saving || loading || (safeStep === 0 && (!territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)))) || (safeStep === 1 && selectionBlocked()) || (safeStep >= 2 && basketStepInvalid())} onClick={goNext}>
+                    <Button key="wizard-next" type="button" disabled={saving || loading || !tailReady || (safeStep === 0 && (!territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)))) || (safeStep === 1 && selectionBlocked()) || basketStepInvalid() || coefficientsInvalid()} onClick={goNext}>
                         Далее
                     </Button>
                 ) : (
-                    <Button type="submit" disabled={saving || loading || !territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)) || basketStepInvalid()}>
+                    <Button
+                        key="wizard-save"
+                        type="button"
+                        disabled={saving || loading || !tailReady || !territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)) || basketStepInvalid() || coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient))}
+                        onPointerDown={() => {
+                            allowSaveRef.current = true;
+                        }}
+                        onClick={() => {
+                            if (!allowSaveRef.current) {
+                                return;
+                            }
+                            allowSaveRef.current = false;
+                            void saveCard();
+                        }}
+                    >
                         {editing ? "Сохранить" : "Создать карточку"}
                     </Button>
                 )}

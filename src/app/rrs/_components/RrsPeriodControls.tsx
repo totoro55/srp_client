@@ -50,7 +50,7 @@ export function RrsPeriodControls({
     }, [hint.text, hint.tone]);
 
     return (
-        <div className="flex h-8 items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Период</span>
                 <Input
@@ -58,7 +58,7 @@ export function RrsPeriodControls({
                     aria-label="Период"
                     value={period.slice(0, 7)}
                     disabled={disabled}
-                    className="h-8 w-40 min-w-40 max-w-40 px-2"
+                    className="h-8 w-40 px-2"
                     onChange={(event) => {
                         const month = event.target.value;
                         if (!month || disabled) {
@@ -81,7 +81,7 @@ export function RrsPeriodControls({
                 >
                     <Info className="size-4" />
                 </PopoverTrigger>
-                <PopoverContent side="bottom" align="start" className={cn("w-80 gap-1 p-3 shadow-lg", HINT_POPUP[hint.tone])}>
+                <PopoverContent side="bottom" align="start" className={cn("w-[min(20rem,calc(100vw-1.5rem))] gap-1 p-3 shadow-lg", HINT_POPUP[hint.tone])}>
                     <p className="text-sm font-medium leading-snug">{hint.text}</p>
                 </PopoverContent>
             </Popover>

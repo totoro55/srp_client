@@ -17,6 +17,7 @@ export interface RrsVersionOffer {
     description: string;
     status: "test" | "working";
     parameters: BasketParameter[];
+    coefficients: BasketCoefficient[];
     testTerritoryUuids: string[];
 }
 

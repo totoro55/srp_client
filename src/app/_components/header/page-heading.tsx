@@ -93,19 +93,19 @@ export function usePageHeadingTrail(): PageHeadingCrumb[] | null {
 export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
     return (
         <Breadcrumb className="min-w-0">
-            <BreadcrumbList className="flex-nowrap text-base font-semibold xl:text-lg">
+            <BreadcrumbList className="w-full min-w-0 flex-nowrap gap-1.5 overflow-hidden text-base font-semibold sm:gap-2.5 xl:text-lg">
                 {trail.map((item, index) => {
                     const last = index === trail.length - 1;
                     return (
                         <span key={`${item.href ?? ""}-${item.label}`} className="contents">
-                            {index > 0 ? <BreadcrumbSeparator /> : null}
-                            <BreadcrumbItem className={last ? "min-w-0" : undefined}>
+                            {index > 0 ? <BreadcrumbSeparator className="shrink-0" /> : null}
+                            <BreadcrumbItem className={last ? "min-w-0 shrink" : "shrink-0 whitespace-nowrap"}>
                                 {!last && item.href ? (
-                                    <BreadcrumbLink className="font-semibold" render={<Link href={item.href} />}>
+                                    <BreadcrumbLink className="whitespace-nowrap font-semibold" render={<Link href={item.href} />}>
                                         {item.label}
                                     </BreadcrumbLink>
                                 ) : (
-                                    <BreadcrumbPage className="truncate font-semibold">{item.label}</BreadcrumbPage>
+                                    <BreadcrumbPage className="block truncate font-semibold">{item.label}</BreadcrumbPage>
                                 )}
                             </BreadcrumbItem>
                         </span>
