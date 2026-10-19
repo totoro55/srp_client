@@ -1,9 +1,12 @@
 import {
     isBasketStatus,
     isBasketVersionStatus,
+    isTariffAxis,
     coefficientsEqual,
     parametersEqual,
     readVersionSettings,
+    SALES_INDICATOR_NAME,
+    tariffBoundIssue,
     versionSettingsPayload,
     versionStatusComment,
     type BasketDetails,
@@ -63,6 +66,7 @@ interface VersionRow {
     description: string;
     status: string;
     settings: unknown;
+    tariffAxis: string | null;
     publishedAt: Date | string | null;
 }
 
@@ -151,6 +155,7 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
             description,
             status,
             settings,
+            tariff_axis AS "tariffAxis",
             published_at AS "publishedAt"
         FROM basket_versions
         WHERE basket_id = $1
@@ -243,7 +248,7 @@ export async function createBasket(input: BasketDraftInput, author: string): Pro
                 comment: "Инициализации версии",
                 author,
                 name: "Версия 1",
-                settings: { parameters: [], coefficients: [] },
+                settings: { parameters: [], coefficients: [], tariffAxis: null },
             });
             return basketId;
         } catch (error) {
@@ -403,12 +408,19 @@ export async function updateBasketVersion(
     author: string
 ): Promise<BasketDetails> {
     await db.transaction(async (query) => {
-        const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown }>(
+        const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown; tariffAxis: string | null; indicatorName: string }>(
             `
-            SELECT id, status, data_table AS "dataTable", settings
-            FROM basket_versions
-            WHERE id = $2 AND basket_id = $1
-            FOR UPDATE
+            SELECT v.id,
+                   v.status,
+                   v.data_table AS "dataTable",
+                   v.settings,
+                   v.tariff_axis AS "tariffAxis",
+                   i.name AS "indicatorName"
+            FROM basket_versions v
+            JOIN baskets b ON b.id = v.basket_id
+            JOIN indicators i ON i.id = b.indicator_id
+            WHERE v.id = $2 AND v.basket_id = $1
+            FOR UPDATE OF v
             `,
             [basketId, versionId]
         );
@@ -425,6 +437,11 @@ export async function updateBasketVersion(
         }
 
         const currentSettings = readVersionSettings(version.settings);
+        currentSettings.tariffAxis = isTariffAxis(version.tariffAxis) ? version.tariffAxis : null;
+        const sales = version.indicatorName === SALES_INDICATOR_NAME;
+        if (!sales && input.settings.tariffAxis !== null) {
+            throw new BasketRuleError(400, "Вид расчета тарифов задаётся только у корзины продаж");
+        }
         const settingsLocked = version.status !== "draft" || version.dataTable !== null;
         if (settingsLocked && !parametersEqual(currentSettings.parameters, input.settings.parameters)) {
             throw new BasketRuleError(400, "Параметры этой версии уже зафиксированы. Измените их в новом черновике.");
@@ -432,17 +449,29 @@ export async function updateBasketVersion(
         if (settingsLocked && !coefficientsEqual(currentSettings.coefficients, input.settings.coefficients)) {
             throw new BasketRuleError(400, "Коэффициенты этой версии уже зафиксированы. Измените их в новом черновике.");
         }
-        const settings = settingsLocked ? currentSettings : input.settings;
+        if (settingsLocked && currentSettings.tariffAxis !== input.settings.tariffAxis) {
+            throw new BasketRuleError(400, "Вид расчета этой версии уже зафиксирован. Измените его в новом черновике.");
+        }
+        const settings = settingsLocked
+            ? currentSettings
+            : { ...input.settings, tariffAxis: sales ? input.settings.tariffAxis : null };
+        if (!settingsLocked) {
+            const boundsIssue = tariffBoundIssue(settings);
+            if (boundsIssue) {
+                throw new BasketRuleError(400, boundsIssue);
+            }
+        }
 
         await query(
             `
             UPDATE basket_versions
             SET name = $2,
                 description = $3,
-                settings = $4::jsonb
+                settings = $4::jsonb,
+                tariff_axis = $5
             WHERE id = $1
             `,
-            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings))]
+            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings)), settings.tariffAxis]
         );
         await insertVersionChange(query, versionId, {
             comment: input.comment,
@@ -462,8 +491,14 @@ export async function setBasketVersionStatus(
     author: string
 ): Promise<BasketDetails> {
     await db.transaction(async (query) => {
-        const baskets = await query<{ id: number; code: string }>(
-            "SELECT id, code FROM baskets WHERE id = $1 FOR UPDATE",
+        const baskets = await query<{ id: number; code: string; indicatorName: string }>(
+            `
+            SELECT b.id, b.code, i.name AS "indicatorName"
+            FROM baskets b
+            JOIN indicators i ON i.id = b.indicator_id
+            WHERE b.id = $1
+            FOR UPDATE OF b
+            `,
             [basketId]
         );
         const basket = baskets[0];
@@ -471,9 +506,9 @@ export async function setBasketVersionStatus(
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const versions = await query<{ name: string; versionNo: number; status: string; settings: unknown; dataTable: string | null }>(
+        const versions = await query<{ name: string; versionNo: number; status: string; settings: unknown; dataTable: string | null; tariffAxis: string | null }>(
             `
-            SELECT name, version_no AS "versionNo", status, settings, data_table AS "dataTable"
+            SELECT name, version_no AS "versionNo", status, settings, data_table AS "dataTable", tariff_axis AS "tariffAxis"
             FROM basket_versions
             WHERE id = $2 AND basket_id = $1
             FOR UPDATE
@@ -489,6 +524,19 @@ export async function setBasketVersionStatus(
         }
         if (version.status === status) {
             throw new BasketRuleError(400, "Версия уже в этом состоянии");
+        }
+        if ((status === "test" || status === "working")
+            && basket.indicatorName === SALES_INDICATOR_NAME
+            && !isTariffAxis(version.tariffAxis)) {
+            throw new BasketRuleError(400, "Выберите вид расчета тарифов: категория или вид изделия");
+        }
+        if ((status === "test" || status === "working") && version.status === "draft") {
+            const publishedSettings = readVersionSettings(version.settings);
+            publishedSettings.tariffAxis = isTariffAxis(version.tariffAxis) ? version.tariffAxis : publishedSettings.tariffAxis;
+            const boundsIssue = tariffBoundIssue(publishedSettings);
+            if (boundsIssue) {
+                throw new BasketRuleError(400, boundsIssue);
+            }
         }
 
         let dataTable = version.dataTable;
@@ -517,11 +565,13 @@ export async function setBasketVersionStatus(
             `,
             [versionId, status, status === "test" || status === "working", dataTable]
         );
+        const publishedSettings = readVersionSettings(version.settings);
+        publishedSettings.tariffAxis = isTariffAxis(version.tariffAxis) ? version.tariffAxis : publishedSettings.tariffAxis;
         await insertVersionChange(query, versionId, {
             comment: versionStatusComment(version.status, status),
             author,
             name: version.name,
-            settings: readVersionSettings(version.settings),
+            settings: publishedSettings,
         });
         await query("UPDATE baskets SET updated_at = NOW() WHERE id = $1", [basketId]);
     });
@@ -543,15 +593,15 @@ export async function openBasketDraft(
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const sources = await query<{ versionNo: number; name: string; settings: unknown }>(
+        const sources = await query<{ versionNo: number; name: string; settings: unknown; tariffAxis: string | null }>(
             sourceVersionId
                 ? `
-                SELECT version_no AS "versionNo", name, settings
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis"
                 FROM basket_versions
                 WHERE basket_id = $1 AND id = $2
                 `
                 : `
-                SELECT version_no AS "versionNo", name, settings
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis"
                 FROM basket_versions
                 WHERE basket_id = $1
                 ORDER BY version_no DESC
@@ -572,21 +622,23 @@ export async function openBasketDraft(
         const name = `Версия ${versionNo}`;
         const created = await query<{ id: number }>(
             `
-            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings)
-            VALUES ($1, $2, 'draft', $3, '', $4::jsonb)
+            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings, tariff_axis)
+            VALUES ($1, $2, 'draft', $3, '', $4::jsonb, $5)
             RETURNING id
             `,
-            [basketId, versionNo, name, JSON.stringify(source.settings ?? {})]
+            [basketId, versionNo, name, JSON.stringify(source.settings ?? {}), isTariffAxis(source.tariffAxis) ? source.tariffAxis : null]
         );
         const versionId = created[0]?.id;
         if (!versionId) {
             throw new BasketRuleError(400, "Не удалось создать версию");
         }
+        const copied = readVersionSettings(source.settings);
+        copied.tariffAxis = isTariffAxis(source.tariffAxis) ? source.tariffAxis : copied.tariffAxis;
         await insertVersionChange(query, versionId, {
             comment: "Инициализации версии",
             author,
             name,
-            settings: readVersionSettings(source.settings),
+            settings: copied,
         });
         await query("UPDATE baskets SET updated_at = NOW() WHERE id = $1", [basketId]);
     });
@@ -686,13 +738,15 @@ function toVersion(row: VersionRow, changes: VersionChangeRow[]): BasketVersion 
     if (!isBasketVersionStatus(row.status)) {
         throw new BasketRuleError(400, "У версии неизвестный статус");
     }
+    const settings = readVersionSettings(row.settings);
+    settings.tariffAxis = isTariffAxis(row.tariffAxis) ? row.tariffAxis : null;
     return {
         id: row.id,
         versionNo: row.versionNo,
         name: row.name,
         description: row.description ?? "",
         status: row.status,
-        settings: readVersionSettings(row.settings),
+        settings,
         publishedAt: toIso(row.publishedAt),
         changes: changes.map((change) => ({
             id: change.id,

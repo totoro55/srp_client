@@ -2,13 +2,14 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,7 +23,12 @@ import {
     VERSION_COMMENT_MAX,
     VERSION_DESCRIPTION_MAX,
     VERSION_NAME_MAX,
+    SALES_INDICATOR_NAME,
+    TARIFF_AXES,
     compareVersions,
+    isTariffAxis,
+    tariffAxisTitle,
+    tariffBoundIssue,
     versionMatchesView,
     versionStatusTitle,
     versionViewTitle,
@@ -38,6 +44,7 @@ import {
     type BasketDetails,
     type BasketParameter,
     type BasketVersion,
+    type TariffAxis,
 } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
 import { CoefficientDialog } from "./CoefficientDialog";
@@ -47,11 +54,14 @@ import { ApiResponse } from "@/types/api";
 
 export function BasketDetail() {
     const params = useParams<{ id: string }>();
+    const searchParams = useSearchParams();
     const access = useAccess();
     const validateProfile = useRequiredFields();
     const validateVersion = useRequiredFields();
     const canWrite = access.has("baskets:write");
     const basketId = params.id;
+    const versionParam = searchParams.get("version");
+    const requestedVersionId = versionParam !== null && /^\d+$/.test(versionParam) ? Number(versionParam) : null;
     const [basket, setBasket] = useState<BasketDetails | null>(null);
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [name, setName] = useState("");
@@ -62,6 +72,7 @@ export function BasketDetail() {
     const [versionComment, setVersionComment] = useState("");
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
     const [coefficients, setCoefficients] = useState<BasketCoefficient[]>([]);
+    const [tariffAxis, setTariffAxis] = useState<TariffAxis | null>(null);
     const [coefficientEditor, setCoefficientEditor] = useState<{ index: number | null; coefficient: BasketCoefficient | null } | null>(null);
     const [coefficientToRemove, setCoefficientToRemove] = useState<{ index: number; title: string } | null>(null);
     const [parameterEditor, setParameterEditor] = useState<{ index: number | null; parameter: BasketParameter | null } | null>(null);
@@ -87,7 +98,33 @@ export function BasketDetail() {
         || versionComment.trim() !== ""
         || !parametersEqual(parameters, selected.settings.parameters)
         || !coefficientsEqual(coefficients, selected.settings.coefficients)
+        || tariffAxis !== selected.settings.tariffAxis
     );
+    const salesBasket = basket?.indicatorName === SALES_INDICATOR_NAME;
+    const axisMissing = salesBasket && selected !== null && selected.settings.tariffAxis === null;
+    const boundsIssue = salesBasket && selected?.status === "draft" && selected.settings.tariffAxis
+        ? tariffBoundIssue(selected.settings)
+        : null;
+    const draftBoundsIssue = salesBasket && selected?.status === "draft"
+        ? tariffBoundIssue({ parameters, coefficients, tariffAxis })
+        : null;
+
+    function availabilityDisabled(target: VersionAvailability): boolean {
+        return saving || versionDirty || ((axisMissing || boundsIssue !== null) && target !== "off");
+    }
+
+    function availabilityTitle(target: VersionAvailability): string | undefined {
+        if (versionDirty) {
+            return "Сначала сохраните изменения";
+        }
+        if (axisMissing && target !== "off") {
+            return "Сначала выберите и сохраните вид расчета тарифов";
+        }
+        if (boundsIssue && target !== "off") {
+            return boundsIssue;
+        }
+        return undefined;
+    }
 
     function requestVersion(version: BasketVersion | null) {
         if ((version?.id ?? null) === selectedId) {
@@ -100,11 +137,8 @@ export function BasketDetail() {
     }
 
     useEffect(() => {
-        const timer = window.setTimeout(() => {
-            void load(null);
-        }, 0);
-        return () => window.clearTimeout(timer);
-    }, [basketId]);
+        void load(requestedVersionId);
+    }, [basketId, requestedVersionId]);
 
     function fillVersion(version: BasketVersion | null) {
         setSelectedId(version?.id ?? null);
@@ -113,6 +147,7 @@ export function BasketDetail() {
         setVersionComment("");
         setParameters(version?.settings.parameters ?? []);
         setCoefficients(version?.settings.coefficients ?? []);
+        setTariffAxis(version?.settings.tariffAxis ?? null);
         setCoefficientEditor(null);
         setCoefficientToRemove(null);
         setParameterEditor(null);
@@ -301,10 +336,17 @@ export function BasketDetail() {
             setError(validationMessage);
             return;
         }
+        if (selected.status === "draft") {
+            const boundsMessage = tariffBoundIssue({ parameters, coefficients, tariffAxis });
+            if (boundsMessage) {
+                setError(boundsMessage);
+                return;
+            }
+        }
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
-            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters, coefficients } },
+            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters, coefficients, tariffAxis } },
             selected.id,
             undefined,
             "Версия сохранена",
@@ -587,6 +629,11 @@ export function BasketDetail() {
                                     >
                                         <span className="text-xs text-muted-foreground">№ {version.versionNo}</span>
                                         <span className="w-full truncate text-sm font-medium">{version.name}</span>
+                                        {basket.indicatorName === SALES_INDICATOR_NAME ? (
+                                            <span className="w-full truncate text-xs text-muted-foreground">
+                                                {version.settings.tariffAxis ? tariffAxisTitle(version.settings.tariffAxis) : "Вид расчета не выбран"}
+                                            </span>
+                                        ) : null}
                                         {version.description.trim() ? (
                                             <span className="w-full truncate text-xs text-muted-foreground">{version.description}</span>
                                         ) : null}
@@ -875,6 +922,33 @@ export function BasketDetail() {
                                 />
                                 <p className="text-xs text-muted-foreground">Номер {selected.versionNo} не меняется.</p>
                             </div>
+                            {basket.indicatorName === SALES_INDICATOR_NAME ? (
+                                <div className="flex flex-col gap-1.5">
+                                    <Label htmlFor="tariff-axis">Вид расчета тарифов</Label>
+                                    <Select
+                                        value={tariffAxis}
+                                        disabled={!canWrite || saving || parametersLocked}
+                                        onValueChange={(value) => setTariffAxis(isTariffAxis(value) ? value : null)}
+                                    >
+                                                <SelectTrigger id="tariff-axis" className="w-full">
+                                                    <SelectValue placeholder="Выберите вид расчета">
+                                                        {(value) => isTariffAxis(value) ? tariffAxisTitle(value) : "Выберите вид расчета"}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                        <SelectContent>
+                                            {TARIFF_AXES.map((axis) => (
+                                                <SelectItem key={axis.code} value={axis.code}>{axis.title}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        {parametersLocked
+                                            ? "Вид расчета зафиксирован. Другой можно выбрать только в новом черновике."
+                                            : "Категория или вид изделия. После публикации вид расчета меняется только новой версией."}
+                                    </p>
+                                    {draftBoundsIssue ? <p className="text-xs text-destructive">{draftBoundsIssue}</p> : null}
+                                </div>
+                            ) : null}
                             <div className="flex flex-col gap-1.5">
                                 <Label htmlFor="version-description">Описание версии</Label>
                                 <Textarea
@@ -925,11 +999,11 @@ export function BasketDetail() {
                                     </Button>
                                     {selected.status === "draft" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("test")} title={availabilityTitle("test")} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Тестовая
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("working")} title={availabilityTitle("working")} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Рабочая
                                             </Button>
@@ -937,11 +1011,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "test" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("working")} title={availabilityTitle("working")} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Сделать рабочей
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("off")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("off")} title={availabilityTitle("off")} onClick={() => setAvailability("off")}>
                                                 <Archive />
                                                 В архив
                                             </Button>
@@ -949,11 +1023,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "working" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("test")} title={availabilityTitle("test")} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Сделать тестовой
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("off")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("off")} title={availabilityTitle("off")} onClick={() => setAvailability("off")}>
                                                 <Archive />
                                                 В архив
                                             </Button>
@@ -961,11 +1035,11 @@ export function BasketDetail() {
                                     ) : null}
                                     {selected.status === "off" ? (
                                         <>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("test")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("test")} title={availabilityTitle("test")} onClick={() => setAvailability("test")}>
                                                 <FlaskConical />
                                                 Сделать тестовой
                                             </Button>
-                                            <Button type="button" size="sm" variant="outline" disabled={saving || versionDirty} title={versionDirty ? "Сначала сохраните изменения" : undefined} onClick={() => setAvailability("working")}>
+                                            <Button type="button" size="sm" variant="outline" disabled={availabilityDisabled("working")} title={availabilityTitle("working")} onClick={() => setAvailability("working")}>
                                                 <BadgeCheck />
                                                 Сделать рабочей
                                             </Button>

@@ -1,5 +1,5 @@
-import { RrsReservedPage } from "../_components/RrsReservedPage";
+import { TariffExceptions } from "./_components/TariffExceptions";
 
 export default function RrsTariffsPage() {
-    return <RrsReservedPage section="tariffs" message="Тарифы за продажи товаров появятся здесь." />;
+    return <TariffExceptions />;
 }

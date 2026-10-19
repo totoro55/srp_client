@@ -117,9 +117,45 @@ export interface BasketCoefficient {
     integer: boolean;
 }
 
+export const SALES_INDICATOR_NAME = "Продажа товара";
+
+export const TARIFF_AXES = [
+    { code: "category", title: "Категория товара" },
+    { code: "product_kind", title: "Вид изделия" },
+] as const;
+
+export type TariffAxis = (typeof TARIFF_AXES)[number]["code"];
+
+export function isTariffAxis(value: unknown): value is TariffAxis {
+    return typeof value === "string" && TARIFF_AXES.some((item) => item.code === value);
+}
+
+export function tariffAxisTitle(axis: TariffAxis): string {
+    return TARIFF_AXES.find((item) => item.code === axis)?.title ?? axis;
+}
+
+export const TARIFF_BOUND_KEYS = ["min", "base", "max"] as const;
+
+export type TariffBoundKey = (typeof TARIFF_BOUND_KEYS)[number];
+
+export function tariffBoundIssue(settings: VersionSettings): string | null {
+    if (!settings.tariffAxis) {
+        return null;
+    }
+    const missing = TARIFF_BOUND_KEYS.filter((key) => {
+        const parameter = settings.parameters.find((item) => item.key === key);
+        return !parameter || parameter.kind !== "number";
+    });
+    if (missing.length === 0) {
+        return null;
+    }
+    return `Для вида расчёта нужны числовые параметры ${missing.join(", ")}. Они могут считаться формулой и иметь условия.`;
+}
+
 export interface VersionSettings {
     parameters: BasketParameter[];
     coefficients: BasketCoefficient[];
+    tariffAxis: TariffAxis | null;
 }
 
 export interface BasketSummary {
@@ -739,12 +775,12 @@ export function parseVersionCoefficients(value: unknown): { coefficients: Basket
 }
 
 export function readVersionSettings(value: unknown): VersionSettings {
-    const empty = { parameters: [] as BasketParameter[], coefficients: [] as BasketCoefficient[] };
+    const empty = { parameters: [] as BasketParameter[], coefficients: [] as BasketCoefficient[], tariffAxis: null };
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return empty;
     }
 
-    const record = value as { parameters?: unknown; coefficients?: unknown; tariff?: unknown };
+    const record = value as { parameters?: unknown; coefficients?: unknown; tariff?: unknown; tariffAxis?: unknown };
     let parameters: BasketParameter[] = [];
     if (Array.isArray(record.parameters)) {
         const parsed = parseVersionParameters(record.parameters);
@@ -766,9 +802,10 @@ export function readVersionSettings(value: unknown): VersionSettings {
     return {
         parameters,
         coefficients: "coefficients" in parsedCoefficients ? parsedCoefficients.coefficients : [],
+        tariffAxis: isTariffAxis(record.tariffAxis) ? record.tariffAxis : null,
     };
 }
 
-export function versionSettingsPayload(settings: VersionSettings): { parameters: BasketParameter[]; coefficients: BasketCoefficient[] } {
-    return { parameters: settings.parameters, coefficients: settings.coefficients };
+export function versionSettingsPayload(settings: VersionSettings): { parameters: BasketParameter[]; coefficients: BasketCoefficient[]; tariffAxis: TariffAxis | null } {
+    return { parameters: settings.parameters, coefficients: settings.coefficients, tariffAxis: settings.tariffAxis };
 }

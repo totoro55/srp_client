@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket, Building2 } from "lucide-react";
+import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket, Building2, SlidersHorizontal } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -84,6 +84,14 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 title: "Настройки РРС",
                 description: "Карточки настроек территорий",
                 permission: "baskets:connect",
+            },
+            {
+                name: "Алгоритмы тарифов",
+                href: "/admin/tariff-algorithms",
+                icon: SlidersHorizontal,
+                title: "Алгоритмы тарифов",
+                description: "Расчёт по категориям и по изделиям",
+                permission: "tariffs:read",
             },
         ],
     },
