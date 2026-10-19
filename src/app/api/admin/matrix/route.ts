@@ -17,6 +17,7 @@ function parsePositiveInt(value: unknown): number | null {
 export async function GET() {
     try {
         await requirePermission("access.read");
+        // Каталог прав читается из PERMISSION_CATALOG, отдельные строки в базе не заводятся.
 
         const roles = await db.query(`
             SELECT id, code, name, description, scope_kind AS "scopeKind", is_system AS "isSystem"

@@ -6,8 +6,10 @@ import {
     parseVersionDescription,
     parseVersionName,
     parseVersionParameters,
+    isTariffAxis,
     type BasketDetails,
     type BasketVersionDraftInput,
+    type TariffAxis,
 } from "@/lib/baskets";
 import { requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
@@ -48,7 +50,20 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
     if ("error" in coefficients) {
         return coefficients;
     }
-    return { name, description, comment, settings: { parameters: parsed.parameters, coefficients: coefficients.coefficients } };
+    const rawAxis = (settings as { tariffAxis?: unknown }).tariffAxis;
+    let tariffAxis: TariffAxis | null = null;
+    if (rawAxis !== undefined && rawAxis !== null && rawAxis !== "") {
+        if (!isTariffAxis(rawAxis)) {
+            return { error: "Выберите вид расчета тарифов: категория товара или вид изделия" };
+        }
+        tariffAxis = rawAxis;
+    }
+    return {
+        name,
+        description,
+        comment,
+        settings: { parameters: parsed.parameters, coefficients: coefficients.coefficients, tariffAxis },
+    };
 }
 
 export async function PATCH(

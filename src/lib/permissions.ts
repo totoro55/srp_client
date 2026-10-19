@@ -47,6 +47,19 @@ export const PERMISSION_CATALOG = [
         title: "Настройки РРС",
         description: "Подключение корзин к территории и параметры на месяц",
     },
+    // Страница /admin/tariff-algorithms. Администратор получает их как системная роль.
+    {
+        code: "tariffs:read",
+        group: "Мотивация",
+        title: "Просмотр алгоритмов тарифов",
+        description: "Веса количества в продажах и средней стоимости",
+    },
+    {
+        code: "tariffs:write",
+        group: "Мотивация",
+        title: "Изменение алгоритмов тарифов",
+        description: "Веса алгоритмов и разрешение территориям их менять",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];

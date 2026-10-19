@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Key, LayoutDashboard, Percent, Receipt, Share2, ShoppingBasket, UserCheck, WandSparkles, type LucideIcon } from "lucide-react";
+import { ChartColumn, ChevronDown, Key, LayoutDashboard, ListChecks, Percent, Receipt, Share2, ShoppingBasket, UserCheck, WandSparkles, type LucideIcon } from "lucide-react";
 import {
     NavigationMenu,
     NavigationMenuContent,
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { PageHeading } from "@/app/_components/header/page-heading";
 
-export type RrsSection = "overview" | "baskets" | "tariffs" | "motivation" | "coefficients" | "access" | "delegation";
+export type RrsSection = "overview" | "baskets" | "tariffs" | "exceptions" | "premium" | "motivation" | "coefficients" | "access" | "delegation";
 
 type MenuPage = {
     id: RrsSection | "basket-wizard";
@@ -95,15 +95,35 @@ const BLOCKS: { id: string; label: string; pages: MenuPage[] }[] = [
     {
         id: "tariffs",
         label: "Тарифы за продажу",
-        pages: [{
-            id: "tariffs",
-            label: "Тарифы",
-            hint: "Тарифы за продажу товара на выбранный месяц.",
-            path: "/tariffs",
-            icon: Receipt,
-            timed: true,
-            savedCard: true,
-        }],
+        pages: [
+            {
+                id: "tariffs",
+                label: "Тарифы",
+                hint: "Тарифы за продажу товара на выбранный месяц.",
+                path: "/tariffs",
+                icon: Receipt,
+                timed: true,
+                savedCard: true,
+            },
+            {
+                id: "exceptions",
+                label: "Исключения",
+                hint: "Включённые исключения на выбранный месяц.",
+                path: "/exceptions",
+                icon: ListChecks,
+                timed: true,
+                savedCard: false,
+            },
+            {
+                id: "premium",
+                label: "Аналитика премии",
+                hint: "Премия по сохранённым тарифам: среднее за месяц из статистики за три месяца.",
+                path: "/premium",
+                icon: ChartColumn,
+                timed: true,
+                savedCard: true,
+            },
+        ],
     },
     {
         id: "access",
