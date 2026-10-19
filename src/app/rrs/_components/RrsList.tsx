@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FormAlert } from "@/components/form-alert";
+import { TableSkeleton } from "@/components/loading-state";
 import type { RrsCardSummary } from "@/lib/rrs";
 import { ApiResponse } from "@/types/api";
 import { formatMonth } from "./model";
@@ -68,11 +69,7 @@ export function RrsList() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {!loaded ? (
-                        <TableRow>
-                            <TableCell colSpan={3} className="py-8 text-center text-xs text-muted-foreground">Загрузка карточек...</TableCell>
-                        </TableRow>
-                    ) : null}
+                    {!loaded ? <TableSkeleton columns={3} rows={6} /> : null}
                     {loaded && cards.length === 0 ? (
                         <TableRow>
                             <TableCell colSpan={3} className="py-8 text-center text-xs text-muted-foreground">Карточек пока нет.</TableCell>

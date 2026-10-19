@@ -10,6 +10,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ButtonSpinner } from "@/components/loading-state";
 
 interface ConfirmDialogProps {
     open: boolean;
@@ -64,7 +65,8 @@ export function ConfirmDialog({
                             void handleConfirm();
                         }}
                     >
-                        {isPending ? "Выполнение..." : confirmLabel}
+                        {isPending ? <ButtonSpinner /> : null}
+                        {confirmLabel}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FormAlert } from "@/components/form-alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { RrsCard } from "@/lib/rrs";
 import { ApiResponse } from "@/types/api";
 import { RrsPeriodControls } from "../../_components/RrsPeriodControls";
@@ -76,7 +77,7 @@ export function RrsReservedPage({ section, message }: { section: "overview" | "t
                 ) : null}
             />
             <FormAlert message={error} />
-            {loading && !card ? <p className="text-sm text-muted-foreground">Загрузка...</p> : null}
+            {loading && !card ? <Skeleton className="h-24 w-full rounded-lg" aria-busy="true" /> : null}
             {card ? (
                 <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{message}</p>
             ) : null}

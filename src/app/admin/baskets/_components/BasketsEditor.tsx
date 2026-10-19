@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { notifySuccess } from "@/lib/notify";
 import { useRequiredFields } from "@/lib/required-fields";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import {
     BASKET_DESCRIPTION_MAX,
     type BasketSummary,
@@ -367,7 +368,10 @@ export function BasketsEditor() {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm" disabled={saving || indicatorId === ""}>{saving ? "Сохранение..." : "Добавить"}</Button>
+                                    <Button type="submit" size="sm" disabled={saving || indicatorId === ""}>
+                                        {saving ? <ButtonSpinner /> : null}
+                                        {saving ? "Сохранение..." : "Добавить"}
+                                    </Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>
@@ -401,6 +405,7 @@ export function BasketsEditor() {
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setIndicatorOpen(false)}>Отмена</Button>
                                     <Button type="submit" size="sm" disabled={addingIndicator}>
+                                        {addingIndicator ? <ButtonSpinner /> : null}
                                         {addingIndicator ? "Сохранение..." : "Добавить"}
                                     </Button>
                                 </DialogFooter>
@@ -414,7 +419,8 @@ export function BasketsEditor() {
                 </p>
             ) : null}
             {sorting ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    {ordering ? <ButtonSpinner /> : null}
                     Перетащите корзины за маркер. Этот порядок используется при включении корзин на РРС.
                 </p>
             ) : (
@@ -453,10 +459,10 @@ export function BasketsEditor() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {rows.length === 0 ? (
+                    {!loaded ? <TableSkeleton columns={sorting ? 5 : 4} rows={6} /> : rows.length === 0 ? (
                         <TableRow>
                             <TableCell colSpan={sorting ? 5 : 4} className="py-8 text-center text-xs text-muted-foreground">
-                                {!loaded ? "Загрузка корзин..." : baskets.length === 0 ? "Корзин пока нет." : "Нет корзин по этому фильтру."}
+                                {baskets.length === 0 ? "Корзин пока нет." : "Нет корзин по этому фильтру."}
                             </TableCell>
                         </TableRow>
                     ) : null}

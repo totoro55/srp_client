@@ -12,6 +12,7 @@ import { useAccess } from "@/hooks/useAccess";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { useRequiredFields } from "@/lib/required-fields";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, LookupSkeleton, TableSkeleton } from "@/components/loading-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface RoleOption {
@@ -71,6 +72,8 @@ export function RulesEditor() {
     const [roleFilter, setRoleFilter] = useState("");
     const [pendingRule, setPendingRule] = useState<RuleRow | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     const visibleRules = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -122,21 +125,25 @@ export function RulesEditor() {
     }
 
     async function load() {
-        const [rulesResponse, rolesResponse] = await Promise.all([
-            fetch("/api/admin/rules"),
-            fetch("/api/admin/roles"),
-        ]);
-        const rulesJson = await rulesResponse.json();
-        const rolesJson = await rolesResponse.json();
-        if (rulesJson.success) {
-            setRules(rulesJson.data.rules);
-            setConflicts(rulesJson.data.conflicts);
-        }
-        if (rolesJson.success) {
-            setRoles(rolesJson.data);
-            if (!roleId && rolesJson.data[0]) {
-                setRoleId(String(rolesJson.data[0].id));
+        try {
+            const [rulesResponse, rolesResponse] = await Promise.all([
+                fetch("/api/admin/rules"),
+                fetch("/api/admin/roles"),
+            ]);
+            const rulesJson = await rulesResponse.json();
+            const rolesJson = await rolesResponse.json();
+            if (rulesJson.success) {
+                setRules(rulesJson.data.rules);
+                setConflicts(rulesJson.data.conflicts);
             }
+            if (rolesJson.success) {
+                setRoles(rolesJson.data);
+                if (!roleId && rolesJson.data[0]) {
+                    setRoleId(String(rolesJson.data[0].id));
+                }
+            }
+        } finally {
+            setLoaded(true);
         }
     }
 
@@ -209,30 +216,37 @@ export function RulesEditor() {
             return;
         }
         setError(null);
-        const response = await fetch("/api/admin/rules", {
-            method: editingId ? "PATCH" : "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                id: editingId,
-                matchType,
-                matchValue,
-                roleId: Number(roleId),
-                priority: Number(priority),
-                expiresAt: matchType === "login" ? expiresAt : null,
-            }),
-        });
-        const json = await response.json();
-        if (!json.success) {
-            setError(json.error?.message ?? "Не удалось сохранить правило");
-            return;
+        setSaving(true);
+        try {
+            const response = await fetch("/api/admin/rules", {
+                method: editingId ? "PATCH" : "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: editingId,
+                    matchType,
+                    matchValue,
+                    roleId: Number(roleId),
+                    priority: Number(priority),
+                    expiresAt: matchType === "login" ? expiresAt : null,
+                }),
+            });
+            const json = await response.json();
+            if (!json.success) {
+                setError(json.error?.message ?? "Не удалось сохранить правило");
+                return;
+            }
+            const wasEditing = editingId !== null;
+            setEditingId(null);
+            resetLookup();
+            setExpiresAt("");
+            setCreateOpen(false);
+            notifySuccess(wasEditing ? "Правило сохранено" : "Правило добавлено");
+            await load();
+        } catch {
+            setError("Не удалось сохранить правило");
+        } finally {
+            setSaving(false);
         }
-        const wasEditing = editingId !== null;
-        setEditingId(null);
-        resetLookup();
-        setExpiresAt("");
-        setCreateOpen(false);
-        notifySuccess(wasEditing ? "Правило сохранено" : "Правило добавлено");
-        await load();
     }
 
     async function confirmDelete() {
@@ -322,9 +336,11 @@ export function RulesEditor() {
                                         <div className="max-h-48 overflow-auto rounded-md border">
                                             {matchType === "login" ? (
                                                 employees.length === 0 ? (
+                                                    directoryLoading ? <LookupSkeleton /> : (
                                                     <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                                                        {directoryLoading ? "Ищем…" : "Сотрудники не найдены."}
+                                                        Сотрудники не найдены.
                                                     </p>
+                                                    )
                                                 ) : employees.map((employee) => (
                                                     <button
                                                         key={employee.login}
@@ -342,9 +358,11 @@ export function RulesEditor() {
                                                     </button>
                                                 ))
                                             ) : visiblePositions.length === 0 ? (
+                                                positionsLoaded ? (
                                                 <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                                                    {positionsLoaded ? "Должности не найдены." : "Загружаем должности…"}
+                                                    Должности не найдены.
                                                 </p>
+                                                ) : <LookupSkeleton lines={1} />
                                             ) : visiblePositions.map((position) => (
                                                 <button
                                                     key={position}
@@ -397,7 +415,10 @@ export function RulesEditor() {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm" disabled={!matchValue}>{editingId ? "Сохранить" : "Добавить"}</Button>
+                                    <Button type="submit" size="sm" disabled={!matchValue || saving}>
+                                        {saving ? <ButtonSpinner /> : null}
+                                        {saving ? "Сохранение..." : editingId ? "Сохранить" : "Добавить"}
+                                    </Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>
@@ -448,7 +469,7 @@ export function RulesEditor() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {visibleRules.length === 0 ? (
+                    {!loaded ? <TableSkeleton columns={6} rows={6} /> : visibleRules.length === 0 ? (
                         <TableRow>
                             <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
                                 {rules.length === 0 ? "Правил пока нет." : "Нет правил по этому фильтру."}

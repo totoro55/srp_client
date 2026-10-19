@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MatrixToolbar } from './MatrixToolbar';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
+import { ButtonSpinner } from "@/components/loading-state";
 
 interface Role { id: number; name: string; description?: string | null; isSystem?: boolean }
 interface Permission { code: string; group: string; title: string; description?: string }
@@ -130,9 +131,10 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                             return (
                                                 <TableCell key={role.id} className="text-center align-middle py-3">
                                                     <div className="flex items-center justify-center">
+                                                        {loadingKeys.includes(key) ? <ButtonSpinner /> : (
                                                         <Checkbox
                                                             checked={isChecked(role, perm.code)}
-                                                            disabled={!canWrite || locked || loadingKeys.includes(key)}
+                                                            disabled={!canWrite || locked}
                                                             title={locked ? "Полный доступ администратора" : undefined}
                                                             onCheckedChange={(checked) => {
                                                                 if (locked) return;
@@ -140,6 +142,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                                             }}
                                                             className="h-4 w-4 transition-transform data-[state=checked]:scale-105"
                                                         />
+                                                        )}
                                                     </div>
                                                 </TableCell>
                                             );

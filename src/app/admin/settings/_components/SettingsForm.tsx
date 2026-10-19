@@ -6,6 +6,7 @@ import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -94,8 +95,11 @@ export function SettingsForm() {
                 <Card className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
                     <CardContent className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                         <div className="flex w-full max-w-xl flex-col gap-6">
+                            {loading ? <FormSkeleton fields={6} /> : (
+                            <>
                             <div className="flex justify-end">
-                                <Button type="submit" size="sm" disabled={loading || saving || !canWrite}>
+                                <Button type="submit" size="sm" disabled={saving || !canWrite}>
+                                    {saving ? <ButtonSpinner /> : null}
                                     {saving ? "Сохранение..." : "Сохранить"}
                                 </Button>
                             </div>
@@ -195,6 +199,8 @@ export function SettingsForm() {
                                     />
                                 </div>
                             </section>
+                            </>
+                            )}
                         </div>
                     </CardContent>
                 </Card>

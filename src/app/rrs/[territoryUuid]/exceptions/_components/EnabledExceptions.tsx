@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { BadgePercent, Check, ChevronRight, Eye, EyeOff, Folder, Hash, ListChecks, Package, Save, Tag, Trash2, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { HelpDrawer } from "@/components/help-drawer";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -343,7 +344,7 @@ export function EnabledExceptions() {
                         />
                         <div className="ml-auto flex flex-wrap items-center gap-2">
                             <Button type="button" size="sm" disabled={!page.editable || !dirty || saveBlocked || saving} onClick={() => void saveExceptions()}>
-                                <Save />
+                                {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
                             <Button type="button" size="sm" variant="outline" disabled={!dirty || saving} onClick={discardDraft}>
@@ -358,7 +359,7 @@ export function EnabledExceptions() {
                 ) : null}
             />
             <FormAlert message={preview ? null : (error ?? previewError)} />
-            {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка исключений...</p> : null}
+            {loading && !page ? <DataTableSkeleton columns={6} rows={8} /> : null}
             {page?.editable ? (
                 <div className="flex flex-wrap items-center gap-2">
                     <Button type="button" size="sm" disabled={!page.axis || saving} onClick={openPicker}>
@@ -369,6 +370,7 @@ export function EnabledExceptions() {
                         <>
                             <p className="text-sm">Тарифы этого месяца нужно пересчитать.</p>
                             <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void recalculate()}>
+                                {saving ? <ButtonSpinner /> : null}
                                 Пересчитать
                             </Button>
                         </>
@@ -378,6 +380,7 @@ export function EnabledExceptions() {
                 <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm">Тарифы этого месяца нужно пересчитать.</p>
                     <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void recalculate()}>
+                        {saving ? <ButtonSpinner /> : null}
                         Пересчитать
                     </Button>
                 </div>
@@ -527,7 +530,7 @@ export function EnabledExceptions() {
                     <DialogFooter>
                         <Button type="button" variant="outline" size="sm" disabled={savingTariffs} onClick={() => { setPreview(null); setRecalcPending(true); }}>Закрыть</Button>
                         <Button type="button" size="sm" disabled={previewIncomplete || savingTariffs || !preview?.length} onClick={() => void saveTariffs()}>
-                            <Save />
+                            {savingTariffs ? <ButtonSpinner /> : <Save />}
                             Сохранить в базу
                         </Button>
                     </DialogFooter>

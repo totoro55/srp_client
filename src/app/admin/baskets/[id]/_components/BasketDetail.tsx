@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ButtonSpinner, PageSkeleton } from "@/components/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -354,7 +355,7 @@ export function BasketDetail() {
     }
 
     if (loading && !basket) {
-        return <p className="text-sm text-muted-foreground">Загрузка корзины...</p>;
+        return <PageSkeleton />;
     }
 
     if (!basket) {
@@ -504,7 +505,7 @@ export function BasketDetail() {
                         <CardAction className="flex items-center gap-2">
                             {profileOpen && canWrite ? (
                                 <Button type="submit" size="sm" disabled={saving}>
-                                    <Save />
+                                    {saving ? <ButtonSpinner /> : <Save />}
                                     Сохранить
                                 </Button>
                             ) : null}
@@ -994,7 +995,7 @@ export function BasketDetail() {
                                 ) : null}
                                 <div className="flex flex-wrap gap-2">
                                     <Button type="submit" size="sm" disabled={saving || !versionDirty || versionComment.trim() === ""}>
-                                        <Save />
+                                        {saving ? <ButtonSpinner /> : <Save />}
                                         Сохранить
                                     </Button>
                                     {selected.status === "draft" ? (

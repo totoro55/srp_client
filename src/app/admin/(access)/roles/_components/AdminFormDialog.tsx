@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner } from "@/components/loading-state";
 import { useRequiredFields } from "@/lib/required-fields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -164,7 +165,10 @@ export function AdminFormDialog({
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>Отмена</Button>
-                        <Button type="submit" size="sm" disabled={loading}>{loading ? 'Сохранение...' : 'Сохранить'}</Button>
+                        <Button type="submit" size="sm" disabled={loading}>
+                            {loading ? <ButtonSpinner /> : null}
+                            {loading ? "Сохранение..." : "Сохранить"}
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

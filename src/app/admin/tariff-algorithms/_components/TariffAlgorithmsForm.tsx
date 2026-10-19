@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner } from "@/components/loading-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAccess } from "@/hooks/useAccess";
 import { versionStatusTitle } from "@/lib/baskets";
@@ -134,11 +136,17 @@ export function TariffAlgorithmsForm() {
                                     Отменить
                                 </Button>
                                 <Button type="submit" size="sm" disabled={!canWrite || loading || saving || !dirty}>
+                                    {saving ? <ButtonSpinner /> : null}
                                     {saving ? "Сохранение..." : "Сохранить"}
                                 </Button>
                             </div>
                             <FormAlert message={error} />
-                            {loading && algorithms.length === 0 ? <p className="text-sm text-muted-foreground">Загрузка</p> : null}
+                            {loading && algorithms.length === 0 ? (
+                                <div className="flex flex-col gap-6" aria-busy="true" aria-live="polite">
+                                    <Skeleton className="h-40 w-full" />
+                                    <Skeleton className="h-40 w-full" />
+                                </div>
+                            ) : null}
                             {algorithms.map((algorithm) => (
                                 <AlgorithmCard
                                     key={algorithm.code}

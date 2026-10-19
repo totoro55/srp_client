@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { FormAlert } from "@/components/form-alert";
+import { DataTableSkeleton } from "@/components/loading-state";
 import type { RrsCoefficientPage } from "@/lib/rrs";
 import { ApiResponse } from "@/types/api";
 import { CoefficientTable, coefficientFieldKey } from "../../_components/CoefficientTable";
@@ -64,7 +65,7 @@ export function RrsOverview() {
                 cardPeriod={page ? connectionCardPeriod(page.period, page.savedPeriods) : null}
             />
             <FormAlert message={error} />
-            {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка сводки...</p> : null}
+            {loading && !page ? <DataTableSkeleton columns={4} rows={8} /> : null}
             {page ? (
                 <>
                     <p className="text-sm text-muted-foreground">

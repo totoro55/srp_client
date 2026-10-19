@@ -8,6 +8,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner } from "@/components/loading-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { HelpDrawer } from "@/components/help-drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { tariffAxisTitle, type TariffAxis } from "@/lib/baskets";
@@ -259,7 +261,7 @@ export function TariffExceptions() {
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
                             <Button type="button" size="sm" title={referenceTest ? "Тестовый расчёт не записывается. Для сохранения выберите среднее." : undefined} disabled={saving || referenceTest || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
-                                <Save />
+                                {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
                             <Button type="button" size="sm" variant="outline" disabled={saving || (!dirty && !weightsDirty && !fieldEditing && !referenceTest)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => { flushEdit.current = null; weightFlush.current = null; linesRef.current = savedRef.current; setLines(savedRef.current); setFieldEditing(false); weightsRef.current = weightBaseline; setWeights(weightBaseline); setReference(DEFAULT_TARIFF_REFERENCE); }}>
@@ -275,8 +277,8 @@ export function TariffExceptions() {
                 ) : null}
             />
             <FormAlert message={error} />
-            {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка статистики...</p> : null}
-            {page && !blankPeriod ? (
+            {loading ? <TariffPageSkeleton /> : null}
+            {!loading && page && !blankPeriod ? (
                 <section className="flex flex-col gap-4">
                     <ConnectionNote connection={page.connection} />
                     {page.connection?.axis ? (
@@ -818,6 +820,40 @@ function formatStat(value: string | null): string {
         return value;
     }
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(number);
+}
+
+function TariffPageSkeleton() {
+    return (
+        <div className="flex flex-col gap-4" aria-busy="true" aria-live="polite">
+            <Skeleton className="h-5 w-80 max-w-full" />
+            <div className="grid w-full max-w-4xl gap-6 rounded-lg border p-4 md:grid-cols-2">
+                <div className="flex flex-col gap-3">
+                    <Skeleton className="h-5 w-48" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-2 w-full rounded-full" />
+                </div>
+                <div className="flex flex-col gap-2">
+                    {Array.from({ length: 5 }, (_, index) => (
+                        <Skeleton key={index} className="h-5 w-full" />
+                    ))}
+                </div>
+            </div>
+            <div className="flex items-end justify-between gap-3">
+                <Skeleton className="h-9 w-full max-w-sm" />
+                <Skeleton className="h-4 w-24" />
+            </div>
+            <div className="overflow-hidden rounded-lg border">
+                {Array.from({ length: 11 }, (_, rowIndex) => (
+                    <div key={rowIndex} className={rowIndex === 0 ? "flex gap-2 bg-muted/50 px-2 py-3" : "flex gap-2 border-t px-2 py-2.5"}>
+                        {Array.from({ length: 11 }, (_, columnIndex) => (
+                            <Skeleton key={columnIndex} className="h-4 min-w-0 flex-1" />
+                        ))}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
 }
 
 function ConnectionNote({ connection }: { connection: TariffExceptionPage["connection"] }) {
