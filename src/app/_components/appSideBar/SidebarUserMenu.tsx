@@ -27,6 +27,7 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
+import { ButtonSpinner } from "@/components/loading-state";
 import { useAccess } from "@/hooks/useAccess";
 import { useSidebar } from "@/components/ui/sidebar";
 
@@ -40,6 +41,8 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
     const { isMobile } = useSidebar();
 
     const [mounted, setMounted] = useState(false);
+    const [switching, setSwitching] = useState(false);
+    const [signingOut, setSigningOut] = useState(false);
     const [, startTransition] = useTransition();
     const access = useAccess();
     const previewRoleName = access.previewRoleName;
@@ -55,14 +58,29 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
     const isCurrentlyImpersonating = Boolean(previewRoleName);
 
     const handleMaskChange = async (roleId: number | null) => {
-        await fetch('/api/admin/impersonate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(roleId ? { roleId } : { reset: true })
-        });
-
-        window.location.reload();
+        if (switching) {
+            return;
+        }
+        setSwitching(true);
+        try {
+            await fetch('/api/admin/impersonate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(roleId ? { roleId } : { reset: true })
+            });
+            window.location.reload();
+        } catch {
+            setSwitching(false);
+        }
     };
+
+    function leave() {
+        if (signingOut) {
+            return;
+        }
+        setSigningOut(true);
+        void signOut({ callbackUrl: '/login' });
+    }
 
     if (isMobile) {
         const previewValue = access.previewChoices.find((role) => role.name === previewRoleName)?.id.toString() ?? "";
@@ -105,10 +123,12 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                 </div>
 
                 {isAuthenticated && isOriginalAdmin && (access.previewChoices.length > 0 || isCurrentlyImpersonating) && (
+                    <div className="flex items-center gap-2">
                     <select
                         aria-label="Режим тестирования"
-                        className="h-8 w-full rounded-md border bg-background px-2 text-xs text-foreground"
+                        className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs text-foreground"
                         value={previewValue}
+                        disabled={switching}
                         onChange={(event) => {
                             const value = event.target.value;
                             void handleMaskChange(value ? Number(value) : null);
@@ -119,15 +139,18 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                             <option key={role.id} value={role.id}>{role.name}</option>
                         ))}
                     </select>
+                    {switching ? <ButtonSpinner /> : null}
+                    </div>
                 )}
 
                 {isAuthenticated && (
                     <button
                         type="button"
-                        onClick={() => signOut({ callbackUrl: '/login' })}
-                        className="flex h-11 items-center justify-center gap-2 rounded-md border border-destructive/30 bg-background text-sm font-medium text-destructive"
+                        disabled={signingOut}
+                        onClick={leave}
+                        className="flex h-11 items-center justify-center gap-2 rounded-md border border-destructive/30 bg-background text-sm font-medium text-destructive disabled:opacity-50"
                     >
-                        <LogOut className="size-4" />
+                        {signingOut ? <ButtonSpinner /> : <LogOut className="size-4" />}
                         Выйти из системы
                     </button>
                 )}
@@ -193,8 +216,8 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
                     {isOriginalAdmin && (access.previewChoices.length > 0 || isCurrentlyImpersonating) && (
                         <>
                             <DropdownMenuSub>
-                                <DropdownMenuSubTrigger className="text-xs gap-2 cursor-pointer">
-                                    {isCurrentlyImpersonating ? <Eye className="h-3.5 w-3.5 text-amber-500" /> : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+                                <DropdownMenuSubTrigger className="text-xs gap-2 cursor-pointer" disabled={switching}>
+                                    {switching ? <ButtonSpinner /> : isCurrentlyImpersonating ? <Eye className="h-3.5 w-3.5 text-amber-500" /> : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
                                     <span>Режим тестирования</span>
                                 </DropdownMenuSubTrigger>
                                 <DropdownMenuSubContent className="w-48">
@@ -252,10 +275,14 @@ export function SidebarUserMenu({ isOpen }: SidebarUserMenuProps) {
 
                     {/* Кнопка выхода */}
                     <DropdownMenuItem
-                        onClick={() => signOut({ callbackUrl: '/login' })}
+                        disabled={signingOut}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            leave();
+                        }}
                         className="text-xs gap-2 text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer py-2"
                     >
-                        <LogOut className="h-3.5 w-3.5" />
+                        {signingOut ? <ButtonSpinner /> : <LogOut className="h-3.5 w-3.5" />}
                         <span>Выйти из системы</span>
                     </DropdownMenuItem>
                 </DropdownMenuContent>

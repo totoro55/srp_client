@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, HistorySkeleton } from "@/components/loading-state";
 import type { RrsFieldChangeEvent } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
@@ -71,7 +72,13 @@ export function ChangeHistoryList({
     return (
         <div className="flex flex-col gap-3">
             <FormAlert message={error} />
-            {loading ? <p className="text-sm text-muted-foreground">Загрузка истории...</p> : null}
+            {loading && events.length === 0 ? <HistorySkeleton /> : null}
+            {loading && events.length > 0 ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ButtonSpinner />
+                    Обновление истории
+                </p>
+            ) : null}
             {!loading && !error && events.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Изменений за этот месяц пока нет.</p>
             ) : null}

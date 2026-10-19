@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { notifySuccess } from "@/lib/notify";
@@ -187,7 +188,7 @@ export function BranchCoefficients() {
                                         Есть несохранённые значения
                                     </p>
                                     <Button type="button" size="sm" disabled={saving || loading || !page?.editable} onClick={requestSave}>
-                                        <Save />
+                                        {saving ? <ButtonSpinner /> : <Save />}
                                         Сохранить
                                     </Button>
                                     <Button
@@ -219,7 +220,7 @@ export function BranchCoefficients() {
                     )}
                 />
                 <FormAlert message={error} />
-                {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка филиалов...</p> : null}
+                {loading && !page ? <DataTableSkeleton columns={4} rows={8} /> : null}
             </div>
             <TabsContent value="values" className="flex flex-col gap-4">
             {page ? (

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { useSession } from "next-auth/react";
@@ -690,7 +691,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     </AlertDescription>
                 </Alert>
             ) : null}
-            {loading ? <p className="text-sm text-muted-foreground">Загрузка...</p> : null}
+            {loading ? <FormSkeleton fields={4} /> : null}
             {!loading && safeStep === 0 && policy ? (
                 <div className="flex flex-col gap-4">
                     <PeriodDisclaimer policy={policy} periodNote={periodNote} />
@@ -880,6 +881,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                             void saveCard();
                         }}
                     >
+                        {saving ? <ButtonSpinner /> : null}
                         {editing ? "Сохранить" : "Создать карточку"}
                     </Button>
                 )}

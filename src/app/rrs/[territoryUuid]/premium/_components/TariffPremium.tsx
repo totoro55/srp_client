@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Boxes, ChevronRight, CircleHelp, Maximize2 } from "lucide-react";
 import { FormAlert } from "@/components/form-alert";
+import { AnalyticsSkeleton } from "@/components/loading-state";
 import { HelpDrawer } from "@/components/help-drawer";
 import { PinnedTable } from "@/components/pinned-table";
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,7 @@ export function TariffPremium() {
                 ) : null}
             />
             <FormAlert message={error} />
-            {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка аналитики...</p> : null}
+            {loading && !page ? <AnalyticsSkeleton /> : null}
             {page ? (
                 <section className="flex flex-col gap-4">
                     <p className="text-sm text-muted-foreground">

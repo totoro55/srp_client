@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner } from "@/components/loading-state";
 import { type BasketTestTerritory, type BasketTestTerritorySettings } from "@/lib/baskets";
 import { notifySuccess } from "@/lib/notify";
 import { ApiResponse } from "@/types/api";
@@ -127,9 +128,9 @@ export function VersionTestTerritories({
             >
                 <PopoverTrigger
                     render={(
-                        <Button type="button" variant="outline" size="sm" disabled={loading}>
-                            <MapPinned />
-                            {loading ? "Загрузка..." : label}
+                        <Button type="button" variant="outline" size="sm" disabled={loading || saving}>
+                            {loading ? <ButtonSpinner /> : <MapPinned />}
+                            {loading ? "Тестовые РРС" : label}
                         </Button>
                     )}
                 />
@@ -157,6 +158,7 @@ export function VersionTestTerritories({
                     <FormAlert message={error} />
                     {canWrite ? (
                         <Button type="button" size="sm" className="self-end" disabled={saving || loading} onClick={() => void save()}>
+                            {saving ? <ButtonSpinner /> : null}
                             {saving ? "Сохранение..." : "Сохранить"}
                         </Button>
                     ) : null}

@@ -1,7 +1,8 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Loader2Icon, Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
+import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { FormAlert } from "@/components/form-alert";
@@ -29,6 +30,7 @@ export function RolesEditor() {
     const validateRequired = useRequiredFields();
     const canWrite = access.has("access.write");
     const [roles, setRoles] = useState<RoleRow[]>([]);
+    const [loaded, setLoaded] = useState(false);
     const [name, setName] = useState("");
     const [code, setCode] = useState("");
     const [description, setDescription] = useState("");
@@ -54,10 +56,14 @@ export function RolesEditor() {
     }, [roles, query, scopeFilter]);
 
     async function load() {
-        const response = await fetch("/api/admin/roles");
-        const json = await response.json();
-        if (json.success) {
-            setRoles(json.data);
+        try {
+            const response = await fetch("/api/admin/roles");
+            const json = await response.json();
+            if (json.success) {
+                setRoles(json.data);
+            }
+        } finally {
+            setLoaded(true);
         }
     }
 
@@ -234,7 +240,7 @@ export function RolesEditor() {
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => setCreateOpen(false)}>Отмена</Button>
                                     <Button type="submit" size="sm" disabled={saving}>
-                                        {saving ? <Loader2Icon className="animate-spin" /> : null}
+                                        {saving ? <ButtonSpinner /> : null}
                                         {saving ? "Сохранение..." : editingRole ? "Сохранить" : "Добавить"}
                                     </Button>
                                 </DialogFooter>
@@ -276,7 +282,7 @@ export function RolesEditor() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {visibleRoles.length === 0 ? (
+                    {!loaded ? <TableSkeleton columns={5} rows={6} /> : visibleRoles.length === 0 ? (
                         <TableRow>
                             <TableCell colSpan={5} className="py-8 text-center text-xs text-muted-foreground">
                                 {roles.length === 0 ? "Ролей пока нет." : "Нет ролей по этому фильтру."}

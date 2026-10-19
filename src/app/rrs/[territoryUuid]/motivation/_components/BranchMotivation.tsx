@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { notifySuccess } from "@/lib/notify";
 import type { RrsMotivationPage } from "@/lib/rrs";
@@ -163,7 +164,7 @@ export function BranchMotivation() {
                                         Есть несохранённые изменения
                                     </p>
                                     <Button type="button" size="sm" disabled={saving || loading || !page.editable} onClick={requestSave}>
-                                        <Save />
+                                        {saving ? <ButtonSpinner /> : <Save />}
                                         Сохранить
                                     </Button>
                                     <Button
@@ -190,7 +191,7 @@ export function BranchMotivation() {
                 )}
             />
             <FormAlert message={error} />
-            {loading && !page ? <p className="text-sm text-muted-foreground">Загрузка филиалов...</p> : null}
+            {loading && !page ? <DataTableSkeleton columns={2} rows={8} /> : null}
             {page ? (
                 <>
                     <TabsContent value="participation" className="flex flex-col gap-4">

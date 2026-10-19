@@ -23,11 +23,13 @@ import {
 } from "@/components/ui/popover"
 import {useRouter} from "next/navigation";
 import {useRequiredFields} from "@/lib/required-fields";
+import {ButtonSpinner} from "@/components/loading-state";
 
 export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [pending, setPending] = useState(false);
     const validateRequired = useRequiredFields();
     const router = useRouter()
 
@@ -40,21 +42,24 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
         }
 
         setError("")
-        await signIn("credentials", {
-            username,
-            password,
-            redirect: false,
-        })
-            .then(res => {
-                if (!res || res.status !== 200) {
-                    setError(res?.error || "Произошла неизвестная ошибка")
-                    return
-                }
-                if (res.status === 200) {
-                    router.push("/");
-                }
+        setPending(true)
+        try {
+            const res = await signIn("credentials", {
+                username,
+                password,
+                redirect: false,
             })
-            .catch(err => console.log(err))
+            if (!res || res.status !== 200) {
+                setError(res?.error || "Произошла неизвестная ошибка")
+                setPending(false)
+                return
+            }
+            router.push("/");
+        } catch (err) {
+            console.log(err)
+            setError("Произошла неизвестная ошибка")
+            setPending(false)
+        }
     }
 
     return (
@@ -85,7 +90,7 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                         <FieldGroup>
                             <Field>
                                 <FieldLabel htmlFor="login">Логин</FieldLabel>
-                                <Input id="login" placeholder="Логин AD" type="text" required
+                                <Input id="login" placeholder="Логин AD" type="text" required disabled={pending}
                                        aria-invalid={error && !username ? "true" : "false"}
                                        value={username} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                     setUsername(e.target.value)
@@ -95,7 +100,7 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                             </Field>
                             <Field>
                                 <FieldLabel htmlFor="password">Пароль</FieldLabel>
-                                <Input id="password" type="password" placeholder="••••••••" required
+                                <Input id="password" type="password" placeholder="••••••••" required disabled={pending}
                                        aria-invalid={error && !password ? "true" : "false"}
                                        value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                     setPassword(e.target.value)
@@ -105,7 +110,8 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                             </Field>
                         </FieldGroup>
                         <Field>
-                            <Button type="submit">
+                            <Button type="submit" disabled={pending}>
+                                {pending ? <ButtonSpinner /> : null}
                                 Войти
                             </Button>
                             {devLogin ? (

@@ -12,6 +12,7 @@ import { useAccess } from "@/hooks/useAccess";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { useRequiredFields } from "@/lib/required-fields";
 import { FormAlert } from "@/components/form-alert";
+import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface Territory {
@@ -41,6 +42,8 @@ export function ScopesEditor() {
     const [territoryFilter, setTerritoryFilter] = useState("");
     const [pendingGrant, setPendingGrant] = useState<Grant | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     const visibleGrants = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -53,13 +56,17 @@ export function ScopesEditor() {
     }, [grants, query, territoryFilter]);
 
     async function load() {
-        const response = await fetch("/api/admin/scopes");
-        const json = await response.json();
-        if (!json.success) return;
-        setTerritories(json.data.territories);
-        setGrants(json.data.grants);
-        if (!territoryUuid && json.data.territories[0]) {
-            setTerritoryUuid(json.data.territories[0].uuid);
+        try {
+            const response = await fetch("/api/admin/scopes");
+            const json = await response.json();
+            if (!json.success) return;
+            setTerritories(json.data.territories);
+            setGrants(json.data.grants);
+            if (!territoryUuid && json.data.territories[0]) {
+                setTerritoryUuid(json.data.territories[0].uuid);
+            }
+        } finally {
+            setLoaded(true);
         }
     }
 
@@ -78,21 +85,28 @@ export function ScopesEditor() {
             return;
         }
         setError(null);
-        const response = await fetch("/api/admin/scopes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username, territoryUuid }),
-        });
-        const json = await response.json();
-        if (!json.success) {
-            setError(json.error?.message ?? "Не удалось назначить территорию");
-            return;
+        setSaving(true);
+        try {
+            const response = await fetch("/api/admin/scopes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, territoryUuid }),
+            });
+            const json = await response.json();
+            if (!json.success) {
+                setError(json.error?.message ?? "Не удалось назначить территорию");
+                return;
+            }
+            const savedUsername = username.trim();
+            setUsername("");
+            setGrantOpen(false);
+            notifySuccess(`Территория назначена ${savedUsername}`);
+            await load();
+        } catch {
+            setError("Не удалось назначить территорию");
+        } finally {
+            setSaving(false);
         }
-        const savedUsername = username.trim();
-        setUsername("");
-        setGrantOpen(false);
-        notifySuccess(`Территория назначена ${savedUsername}`);
-        await load();
     }
 
     async function confirmRevoke() {
@@ -166,7 +180,10 @@ export function ScopesEditor() {
                                 </div>
                                 <DialogFooter>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setGrantOpen(false)}>Отмена</Button>
-                                    <Button type="submit" size="sm">Назначить</Button>
+                                    <Button type="submit" size="sm" disabled={saving || territoryUuid === ""}>
+                                        {saving ? <ButtonSpinner /> : null}
+                                        {saving ? "Назначение..." : "Назначить"}
+                                    </Button>
                                 </DialogFooter>
                             </form>
                         </DialogContent>
@@ -207,7 +224,7 @@ export function ScopesEditor() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {visibleGrants.length === 0 ? (
+                    {!loaded ? <TableSkeleton columns={3} rows={6} /> : visibleGrants.length === 0 ? (
                         <TableRow>
                             <TableCell colSpan={3} className="py-8 text-center text-xs text-muted-foreground">
                                 {grants.length === 0 ? "Назначений пока нет." : "Нет назначений по этому фильтру."}

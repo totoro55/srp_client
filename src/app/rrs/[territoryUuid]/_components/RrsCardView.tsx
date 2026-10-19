@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
+import { StackSkeleton } from "@/components/loading-state";
 import { versionStatusTitle, type BasketVersionStatus } from "@/lib/baskets";
 import type { RrsBasketOffer, RrsCard, RrsVersionOffer } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
@@ -117,7 +118,7 @@ export function RrsCardView() {
                 )}
             />
             <FormAlert message={error} />
-            {loading && !card ? <p className="text-sm text-muted-foreground">Загрузка корзин...</p> : null}
+            {loading && !card ? <StackSkeleton /> : null}
             {card ? (
                 <>
                     <TabsContent value="set" className="flex flex-col gap-4">
