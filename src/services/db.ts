@@ -12,6 +12,8 @@ class DbService {
             connectionString: process.env.DATABASE_URL,
             max: 20,
             idleTimeoutMillis: 30000,
+            // Имена в запросах без схемы. public первый, чтобы служебные таблицы оставались там.
+            options: "-c search_path=public,dictionaries,raw,main,basket_data",
         });
 
         this.pool.on("error", (err) => console.error("Ошибка в пуле pg:", err));
@@ -67,6 +69,15 @@ class DbService {
             }
 
             await client.query("COMMIT");
+            await client.query(`
+                DO $$
+                BEGIN
+                    EXECUTE format(
+                        'ALTER DATABASE %I SET search_path TO public, dictionaries, raw, main, basket_data',
+                        current_database()
+                    );
+                END $$;
+            `);
             this.isInitialized = true;
         } catch (error) {
             await client.query("ROLLBACK");

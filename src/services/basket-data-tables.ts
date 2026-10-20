@@ -55,7 +55,7 @@ export function buildVersionConnectionDdl(
     }
 
     const main = [
-        "    territory_uuid UUID NOT NULL REFERENCES territories (uuid) ON DELETE CASCADE",
+        "    territory_uuid UUID NOT NULL REFERENCES dictionaries.territories (uuid) ON DELETE CASCADE",
         "    period DATE NOT NULL",
         "    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
         "    connected_by VARCHAR(255) NOT NULL",
