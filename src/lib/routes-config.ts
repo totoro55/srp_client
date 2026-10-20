@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, MapPinned, Settings, ShieldAlert, Home, Users, ShoppingBasket, Building2, SlidersHorizontal } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -75,8 +75,8 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         ],
     },
     {
-        id: "application",
-        label: "Приложение",
+        id: "administration",
+        label: "Администрирование",
         items: [
             {
                 name: "Настройки",
@@ -126,6 +126,30 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                     },
                 ],
             },
+            {
+                kind: "subgroup",
+                id: "users",
+                label: "Пользователи",
+                icon: UserRound,
+                items: [
+                    {
+                        name: "Список",
+                        href: "/admin/users",
+                        icon: List,
+                        title: "Пользователи",
+                        description: "Кто входил и с какого адреса",
+                        permission: "access.read",
+                    },
+                    {
+                        name: "Неуспешные входы",
+                        href: "/admin/users/failures",
+                        icon: ShieldX,
+                        title: "Неуспешные входы",
+                        description: "Отказы при проверке пароля",
+                        permission: "access.read",
+                    },
+                ],
+            },
         ],
     },
 ];
@@ -159,10 +183,23 @@ const EXTRA_PAGE_HEADINGS: Record<string, PageHeading> = {
 };
 
 export function isRouteActive(pathname: string, href: string): boolean {
+    const matches = navigationHrefs().filter((itemHref) => hrefMatches(pathname, itemHref));
+    if (matches.length === 0) {
+        return false;
+    }
+    const best = matches.reduce((longest, itemHref) => (itemHref.length > longest.length ? itemHref : longest));
+    return best === href;
+}
+
+function hrefMatches(pathname: string, href: string): boolean {
     if (href === "/") {
         return pathname === "/";
     }
     return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function navigationHrefs(): string[] {
+    return APP_NAVIGATION_MAP.flatMap((group) => routesIn(group).map((item) => item.href));
 }
 
 export function getPageHeading(pathname: string): PageHeading | null {

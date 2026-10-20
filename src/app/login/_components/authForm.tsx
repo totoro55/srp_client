@@ -22,6 +22,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover"
 import {useRouter} from "next/navigation";
+import {loginFailureMessage} from "@/lib/login-journal";
 import {useRequiredFields} from "@/lib/required-fields";
 import {ButtonSpinner} from "@/components/loading-state";
 import {Eye, EyeOff} from "lucide-react";
@@ -52,7 +53,7 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                 redirect: false,
             })
             if (!res || res.status !== 200) {
-                setError(res?.error || "Произошла неизвестная ошибка")
+                setError(res ? loginFailureMessage(res.error) : "Произошла неизвестная ошибка")
                 setPending(false)
                 return
             }

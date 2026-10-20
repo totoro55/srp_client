@@ -2,9 +2,9 @@ import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { getAppSettings } from "@/services/app-settings";
-import { isDevLoginName } from "@/services/dev-auth";
 import { IMPERSONATION_COOKIE_ROLE_ID } from "@/services/impersonation";
 import { db } from "@/services/db";
+import { decideAccess, type MatchedRole } from "@/server/authz/match-access";
 import {
     isWritePermission,
     PERMISSION_CODES,
@@ -34,13 +34,7 @@ export interface AccessView {
     previewChoices: { id: number; name: string }[];
 }
 
-interface RoleRecord {
-    id: number;
-    code: string;
-    name: string;
-    scope_kind: ScopeKind;
-    is_system: boolean;
-}
+type RoleRecord = MatchedRole;
 
 const EMPTY_ACCESS = (username: string, title: string): AccessView => ({
     username,
@@ -111,54 +105,18 @@ export async function resolveAccess(
 }
 
 async function resolveActor(username: string, title: string): Promise<AccessView> {
-    if (isDevLoginName(username)) {
-        const admin = await loadRoleByCode("admin");
-        if (!admin) {
-            return EMPTY_ACCESS(username, title);
-        }
-        return finishActor(username, title, admin, false);
+    const decision = await decideAccess(username, title);
+    if (decision.source === "conflict") {
+        return {
+            ...EMPTY_ACCESS(username, title),
+            scopeLabel: "Настройки доступа противоречат друг другу",
+            conflict: true,
+        };
     }
-
-    const rules = await db.query<{ priority: number } & RoleRecord>(
-        `
-        SELECT rr.priority, r.id, r.code, r.name, r.scope_kind, r.is_system
-        FROM role_rules rr
-        JOIN roles r ON r.id = rr.role_id
-        WHERE (rr.expires_at IS NULL OR rr.expires_at > NOW())
-          AND (
-            (rr.match_type = 'login' AND lower(rr.match_value) = lower($1))
-            OR (rr.match_type = 'title' AND rr.match_value = $2 AND $2 <> '')
-          )
-        `,
-        [username, title]
-    );
-
-    if (rules.length > 0) {
-        const topPriority = Math.max(...rules.map((rule) => rule.priority));
-        const top = rules.filter((rule) => rule.priority === topPriority);
-        const roleIds = new Set(top.map((rule) => rule.id));
-        if (roleIds.size > 1) {
-            return {
-                ...EMPTY_ACCESS(username, title),
-                scopeLabel: "Настройки доступа противоречат друг другу",
-                conflict: true,
-            };
-        }
-        return finishActor(username, title, top[0], false);
+    if (!decision.role) {
+        return EMPTY_ACCESS(username, title);
     }
-
-    const employees = await db.query<{ uuid: string }>(
-        "SELECT uuid FROM employees WHERE lower(login) = lower($1) LIMIT 1",
-        [username]
-    );
-    if (employees.length > 0) {
-        const linear = await loadRoleByCode("linear");
-        if (linear) {
-            return finishActor(username, title, linear, false);
-        }
-    }
-
-    return EMPTY_ACCESS(username, title);
+    return finishActor(username, title, decision.role, false);
 }
 
 async function finishActor(
@@ -228,14 +186,6 @@ async function loadPermissionCodes(roleId: number): Promise<PermissionCode[]> {
     return rows
         .map((row) => row.permission_code)
         .filter((code): code is PermissionCode => (PERMISSION_CODES as string[]).includes(code));
-}
-
-async function loadRoleByCode(code: string): Promise<RoleRecord | null> {
-    const rows = await db.query<RoleRecord>(
-        "SELECT id, code, name, scope_kind, is_system FROM roles WHERE code = $1",
-        [code]
-    );
-    return rows[0] ?? null;
 }
 
 async function loadRoleById(id: number): Promise<RoleRecord | null> {

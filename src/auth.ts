@@ -1,7 +1,27 @@
 import { NextAuthOptions } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { clientAddress, clientUserAgent } from "@/lib/request-address";
+import type { LoginFailureReason } from "@/lib/login-journal";
 import { authenticateDevUser, isDevLoginName } from "@/services/dev-auth";
 import { authenticateLDAPUser } from "@/services/ldap";
+import { recordFailedLogin, recordSuccessfulLogin } from "@/services/login-journal";
+
+class LoginRejected extends Error {
+    constructor(reason: LoginFailureReason) {
+        super(reason);
+        this.name = "LoginRejected";
+    }
+}
+
+async function rejectLogin(input: {
+    username: string;
+    reason: LoginFailureReason;
+    ip: string | null;
+    userAgent: string | null;
+}): Promise<never> {
+    await recordFailedLogin(input);
+    throw new LoginRejected(input.reason);
+}
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -11,17 +31,57 @@ export const authOptions: NextAuthOptions = {
                 username: { label: "Логин", type: "text" },
                 password: { label: "Пароль", type: "password" },
             },
-            async authorize(credentials) {
+            async authorize(credentials, request) {
                 if (!credentials?.username || !credentials?.password) return null;
 
                 const username = credentials.username as string;
                 const password = credentials.password as string;
+                const ip = clientAddress(request.headers);
+                const userAgent = clientUserAgent(request.headers);
 
                 if (isDevLoginName(username)) {
-                    return await authenticateDevUser(username, password);
+                    const user = await authenticateDevUser(username, password);
+                    if (!user) {
+                        return rejectLogin({ username, reason: "invalid_credentials", ip, userAgent });
+                    }
+
+                    await recordSuccessfulLogin({
+                        username: user.username,
+                        displayName: user.displayName,
+                        email: user.email ?? null,
+                        department: user.department ?? null,
+                        title: user.title ?? "",
+                        objectGuid: null,
+                        ip,
+                        userAgent,
+                    });
+                    return user;
                 }
 
-                return await authenticateLDAPUser(username, password);
+                const result = await authenticateLDAPUser(username, password);
+                if (!result.ok) {
+                    return rejectLogin({ username, reason: result.reason, ip, userAgent });
+                }
+
+                await recordSuccessfulLogin({
+                    username: result.user.username,
+                    displayName: result.user.displayName,
+                    email: result.user.email,
+                    department: result.user.department || null,
+                    title: result.user.title,
+                    objectGuid: result.user.objectGuid,
+                    ip,
+                    userAgent,
+                });
+
+                return {
+                    id: result.user.id,
+                    username: result.user.username,
+                    displayName: result.user.displayName,
+                    email: result.user.email ?? undefined,
+                    title: result.user.title,
+                    department: result.user.department || "—",
+                };
             },
         }),
     ],
