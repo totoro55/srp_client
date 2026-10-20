@@ -6,9 +6,10 @@ name: srp-stand
 services:
   db:
     image: postgres:16
+    env_file:
+      - C:/srp-stand/.env
     environment:
       POSTGRES_USER: srp
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: srp
     volumes:
       - srp_pg:/var/lib/postgresql/data
@@ -16,7 +17,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U srp -d srp"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
   app:

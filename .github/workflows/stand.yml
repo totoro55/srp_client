@@ -12,9 +12,28 @@ jobs:
       - name: Require stand settings
         shell: pwsh
         run: |
-          if (-not (Test-Path 'C:\srp-stand\.env')) {
+          $path = 'C:\srp-stand\.env'
+          if (-not (Test-Path $path)) {
             throw 'Создайте C:\srp-stand\.env по образцу stand.env.example'
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          $utf16 = $bytes.Length -ge 2 -and (
+            ($bytes[0] -eq 255 -and $bytes[1] -eq 254) -or
+            ($bytes[0] -eq 254 -and $bytes[1] -eq 255)
+          )
+          if ($utf16) {
+            throw 'C:\srp-stand\.env сохранён в UTF-16. В Блокноте выберите Сохранить как и кодировку UTF-8.'
+          }
+          $text = [System.IO.File]::ReadAllText($path)
+          if ($text -notmatch '(?m)^POSTGRES_PASSWORD=\S+') {
+            throw 'В C:\srp-stand\.env задайте непустой POSTGRES_PASSWORD одной строкой.'
           }
       - name: Build and restart
         shell: pwsh
-        run: docker compose --env-file C:\srp-stand\.env up -d --build
+        run: |
+          docker compose --env-file C:\srp-stand\.env up -d --build
+          if ($LASTEXITCODE -ne 0) {
+            docker compose --env-file C:\srp-stand\.env ps -a
+            docker compose --env-file C:\srp-stand\.env logs db --tail 80
+            exit $LASTEXITCODE
+          }
