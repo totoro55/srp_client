@@ -3,7 +3,7 @@ export const PERMISSION_CATALOG = [
         code: "access.read",
         group: "Доступ",
         title: "Просмотр настроек",
-        description: "Роли, матрица, трансляция и области",
+        description: "Роли, матрица, трансляция, области и история входов",
     },
     {
         code: "access.write",
