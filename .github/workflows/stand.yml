@@ -25,15 +25,15 @@ jobs:
             throw 'C:\srp-stand\.env сохранён в UTF-16. В Блокноте выберите Сохранить как и кодировку UTF-8.'
           }
           $text = [System.IO.File]::ReadAllText($path)
-          if ($text -notmatch '(?m)^POSTGRES_PASSWORD=\S+') {
-            throw 'В C:\srp-stand\.env задайте непустой POSTGRES_PASSWORD одной строкой.'
+          if ($text -notmatch '(?m)^DATABASE_URL=postgresql://\S+@yug-5372-base\.partner\.ru:\d+/srp\s*$') {
+            throw 'В C:\srp-stand\.env укажите DATABASE_URL на yug-5372-base.partner.ru, базу srp.'
           }
       - name: Build and restart
         shell: pwsh
         run: |
-          docker compose --env-file C:\srp-stand\.env up -d --build
+          docker compose --env-file C:\srp-stand\.env up -d --build --remove-orphans
           if ($LASTEXITCODE -ne 0) {
             docker compose --env-file C:\srp-stand\.env ps -a
-            docker compose --env-file C:\srp-stand\.env logs db --tail 80
+            docker compose --env-file C:\srp-stand\.env logs app --tail 80
             exit $LASTEXITCODE
           }

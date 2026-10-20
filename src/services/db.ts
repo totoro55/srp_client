@@ -6,6 +6,7 @@ class DbService {
     private static instance: DbService;
     private pool: Pool;
     private isInitialized = false;
+    private migrationTask: Promise<void> | null = null;
 
     private constructor() {
         this.pool = new Pool({
@@ -26,9 +27,24 @@ class DbService {
         return DbService.instance;
     }
 
+    private ready(): Promise<void> {
+        if (this.isInitialized) {
+            return Promise.resolve();
+        }
+        if (!this.migrationTask) {
+            this.migrationTask = this.runMigrations().finally(() => {
+                this.migrationTask = null;
+            });
+        }
+        return this.migrationTask;
+    }
+
     private async runMigrations(): Promise<void> {
         const client = await this.pool.connect();
+        let locked = false;
         try {
+            await client.query("SELECT pg_advisory_lock(82420036)");
+            locked = true;
             await client.query("BEGIN");
             await client.query(`
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -85,6 +101,9 @@ class DbService {
             console.error("Критическая ошибка применения миграции схемы БД:", error);
             throw error;
         } finally {
+            if (locked) {
+                await client.query("SELECT pg_advisory_unlock(82420036)");
+            }
             client.release();
         }
     }
@@ -93,9 +112,7 @@ class DbService {
         text: string,
         params?: unknown[]
     ): Promise<T[]> {
-        if (!this.isInitialized) {
-            await this.runMigrations();
-        }
+        await this.ready();
         const res = await this.pool.query<T>(text, params);
         return res.rows;
     }
@@ -103,9 +120,7 @@ class DbService {
     public async transaction<T>(
         fn: (query: <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>) => Promise<T>
     ): Promise<T> {
-        if (!this.isInitialized) {
-            await this.runMigrations();
-        }
+        await this.ready();
 
         const client = await this.pool.connect();
         try {
@@ -125,9 +140,7 @@ class DbService {
     }
 
     public async getUserAuthContext(username: string, ldapPosition: string) {
-        if (!this.isInitialized) {
-            await this.runMigrations();
-        }
+        await this.ready();
 
         const queryText = `
             WITH user_role AS (
