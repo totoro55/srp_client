@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
+import { getServerSession } from "next-auth";
 import "./globals.css";
-import Head from "next/head";
 import Providers from "@/app/providers";
 import { Inter } from "next/font/google";
+import { authOptions } from "@/auth";
 import { cn } from "@/lib/utils";
-import {SidebarProvider} from "@/components/ui/sidebar";
-import Header from "@/app/_components/header/header";
-import { PageHeadingProvider } from "@/app/_components/header/page-heading";
-import { AccessBanner } from "@/app/_components/AccessBanner";
+import { AppFrame } from "@/app/_components/AppFrame";
 import { NoticeBanner } from "@/app/_components/NoticeBanner";
-import {AppSideBar} from "@/app/_components/appSideBar/AppSideBar";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -18,21 +15,19 @@ export const metadata: Metadata = {
   description: "Система рассчета премии дивизиона Юг",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await getServerSession(authOptions);
+
   return (
     <html
       lang="ru"
       suppressHydrationWarning
       className={cn("h-full", "antialiased", "font-sans", inter.variable)}
     >
-    <Head>
-      {/* <link rel="shortcut icon" href={favicon} /> */}
-      <link rel="shortcut icon" href="/icon.ico" />
-    </Head>
     <body
         className={cn(
             inter.className,
@@ -43,17 +38,9 @@ export default function RootLayout({
             "h-full w-full min-h-screen bg-background text-foreground overflow-x-hidden"
         )}>
       <Providers>
-        <SidebarProvider defaultOpen={false}>
-          <AppSideBar />
-          <PageHeadingProvider>
-          <main className="w-full pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
-            <NoticeBanner />
-            <AccessBanner />
-            <Header />
-            {children}
-          </main>
-          </PageHeadingProvider>
-        </SidebarProvider>
+        <AppFrame initialSignedIn={Boolean(session)} notice={<NoticeBanner />}>
+          {children}
+        </AppFrame>
       </Providers>
       </body>
     </html>

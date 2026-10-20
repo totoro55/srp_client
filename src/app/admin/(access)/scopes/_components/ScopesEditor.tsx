@@ -126,9 +126,6 @@ export function ScopesEditor() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
-            <p className="text-sm text-muted-foreground">
-                Здесь назначаются территории директору. Справочники сотрудников и территорий наполняет загрузка данных, приложение их не меняет. Филиал линейного сотрудника берётся из карточки сотрудника.
-            </p>
             <ConfirmDialog
                 open={pendingGrant !== null}
                 title="Снять назначение"

@@ -167,9 +167,6 @@ export function RolesEditor() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
-            <p className="text-sm text-muted-foreground">
-                Роль задаёт, что можно делать, и на каком уровне: дивизион, территория или филиал. Права отмечаются в матрице, логин и должность — в трансляции.
-            </p>
             <ConfirmDialog
                 open={pendingRole !== null}
                 title="Удалить роль"

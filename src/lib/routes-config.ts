@@ -10,11 +10,24 @@ export interface RouteItem {
     permission?: PermissionCode;
 }
 
+export interface NavigationSubgroup {
+    kind: "subgroup";
+    id: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    items: RouteItem[];
+}
+
+export type NavigationEntry = RouteItem | NavigationSubgroup;
+
+export function isNavigationSubgroup(entry: NavigationEntry): entry is NavigationSubgroup {
+    return "kind" in entry && entry.kind === "subgroup";
+}
+
 export interface NavigationGroup {
     id: string;
     label: string;
-    icon?: React.ComponentType<{ className?: string }>;
-    items: RouteItem[];
+    items: NavigationEntry[];
 }
 
 export const APP_NAVIGATION_MAP: NavigationGroup[] = [
@@ -26,57 +39,9 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         ],
     },
     {
-        id: "security",
-        label: "Доступ",
-        icon: ShieldAlert,
+        id: "rrs",
+        label: "Настройки мотивации",
         items: [
-            {
-                name: "Роли",
-                href: "/admin/roles",
-                icon: Users,
-                title: "Роли",
-                description: "Создание ролей и вид их области",
-                permission: "access.read",
-            },
-            {
-                name: "Матрица",
-                href: "/admin/matrix",
-                icon: Grid3X3,
-                title: "Матрица прав",
-                description: "Какие права есть у роли",
-                permission: "access.read",
-            },
-            {
-                name: "Трансляция",
-                href: "/admin/rules",
-                icon: KeyRound,
-                title: "Трансляция ролей",
-                description: "Логин или должность определяют роль",
-                permission: "access.read",
-            },
-            {
-                name: "Области",
-                href: "/admin/scopes",
-                icon: MapPinned,
-                title: "Области",
-                description: "Назначение территорий из справочника",
-                permission: "access.read",
-            },
-        ],
-    },
-    {
-        id: "motivation",
-        label: "Мотивация",
-        icon: ShoppingBasket,
-        items: [
-            {
-                name: "Корзины",
-                href: "/admin/baskets",
-                icon: ShoppingBasket,
-                title: "Корзины",
-                description: "Каталог схем расчёта и их версии",
-                permission: "baskets:read",
-            },
             {
                 name: "Настройки РРС",
                 href: "/rrs",
@@ -84,6 +49,20 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 title: "Настройки РРС",
                 description: "Карточки настроек территорий",
                 permission: "baskets:connect",
+            },
+        ],
+    },
+    {
+        id: "baskets",
+        label: "Корзины мотивации",
+        items: [
+            {
+                name: "Настройка корзин",
+                href: "/admin/baskets",
+                icon: ShoppingBasket,
+                title: "Настройка корзин",
+                description: "Каталог схем расчёта и их версии",
+                permission: "baskets:read",
             },
             {
                 name: "Алгоритмы тарифов",
@@ -98,7 +77,6 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
     {
         id: "application",
         label: "Приложение",
-        icon: Settings,
         items: [
             {
                 name: "Настройки",
@@ -108,9 +86,66 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 description: "Обслуживание, объявления и просмотр ролей",
                 permission: "settings:read",
             },
+            {
+                kind: "subgroup",
+                id: "access",
+                label: "Права",
+                icon: ShieldAlert,
+                items: [
+                    {
+                        name: "Роли",
+                        href: "/admin/roles",
+                        icon: Users,
+                        title: "Роли",
+                        description: "Создание ролей и вид их области",
+                        permission: "access.read",
+                    },
+                    {
+                        name: "Матрица",
+                        href: "/admin/matrix",
+                        icon: Grid3X3,
+                        title: "Матрица прав",
+                        description: "Какие права есть у роли",
+                        permission: "access.read",
+                    },
+                    {
+                        name: "Трансляция",
+                        href: "/admin/rules",
+                        icon: KeyRound,
+                        title: "Трансляция ролей",
+                        description: "Логин или должность определяют роль",
+                        permission: "access.read",
+                    },
+                    {
+                        name: "Области",
+                        href: "/admin/scopes",
+                        icon: MapPinned,
+                        title: "Области",
+                        description: "Назначение территорий из справочника",
+                        permission: "access.read",
+                    },
+                ],
+            },
         ],
     },
 ];
+
+export function visibleNavigation(can: (permission: PermissionCode) => boolean): NavigationGroup[] {
+    return APP_NAVIGATION_MAP.flatMap((group) => {
+        const items = group.items.flatMap((entry): NavigationEntry[] => {
+            if (isNavigationSubgroup(entry)) {
+                const visibleItems = entry.items.filter((item) => !item.permission || can(item.permission));
+                return visibleItems.length > 0 ? [{ ...entry, items: visibleItems }] : [];
+            }
+            return !entry.permission || can(entry.permission) ? [entry] : [];
+        });
+        return items.length > 0 ? [{ ...group, items }] : [];
+    });
+}
+
+function routesIn(group: NavigationGroup): RouteItem[] {
+    return group.items.flatMap((entry) => (isNavigationSubgroup(entry) ? entry.items : [entry]));
+}
 
 export interface PageHeading {
     title: string;
@@ -138,7 +173,7 @@ export function getPageHeading(pathname: string): PageHeading | null {
 
     let best: RouteItem | null = null;
     for (const group of APP_NAVIGATION_MAP) {
-        for (const item of group.items) {
+        for (const item of routesIn(group)) {
             if (!isRouteActive(pathname, item.href)) {
                 continue;
             }

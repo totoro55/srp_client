@@ -266,9 +266,6 @@ export function RulesEditor() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
-            <p className="text-sm text-muted-foreground">
-                Сначала сравнивается логин, затем точная должность. Если ничего не совпало и человек есть в справочнике сотрудников, назначается роль линейного сотрудника. Справочник наполняется загрузкой данных.
-            </p>
             {conflicts.length > 0 ? (
                 <p className="text-sm text-destructive">
                     {`Приоритеты ${conflicts.join(", ")} заняты правилами разных типов. Один человек может попасть под оба.`}

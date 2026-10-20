@@ -260,9 +260,6 @@ export function BasketsEditor() {
 
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
-            <p className="text-sm text-muted-foreground">
-                Корзина описывает расчёт одного показателя. Директор подключает тестовую или рабочую версию. Обязательную корзину РРС включает на территории вместе с остальными.
-            </p>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             {canWrite ? (
                 <div className="flex flex-wrap items-center gap-2">

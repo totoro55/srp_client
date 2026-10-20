@@ -12,7 +12,7 @@ import {Input} from "@/components/ui/input";
 import React, {useState} from "react";
 import {signIn} from "next-auth/react";
 import {Button} from "@/components/ui/button";
-import {Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle} from "@/components/ui/card";
+import {Card, CardContent, CardDescription, CardFooter, CardHeader} from "@/components/ui/card";
 import {
     Popover,
     PopoverContent,
@@ -24,10 +24,12 @@ import {
 import {useRouter} from "next/navigation";
 import {useRequiredFields} from "@/lib/required-fields";
 import {ButtonSpinner} from "@/components/loading-state";
+import {Eye, EyeOff} from "lucide-react";
 
 export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState("");
     const [pending, setPending] = useState(false);
     const validateRequired = useRequiredFields();
@@ -64,9 +66,16 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
 
     return (
         <Card className="w-full max-w-sm">
-            <CardHeader>
-                <CardTitle>Авторизация</CardTitle>
-                <CardDescription>
+            <CardHeader className="items-center text-center">
+                <div className="flex items-center justify-self-center">
+                    <span className="flex size-14 shrink-0 items-center justify-center rounded-xl border-2 border-primary text-xl font-extrabold leading-none tracking-tight text-primary">
+                        СРП
+                    </span>
+                    <span className="pl-2.5 text-lg font-semibold leading-none whitespace-nowrap">
+                        Система расчета премии
+                    </span>
+                </div>
+                <CardDescription className="text-center">
                     {"Для авторизации введите данные вашей учётной записи "}
                     <Popover>
                         <PopoverTrigger className="cursor-help underline">
@@ -96,17 +105,28 @@ export default function AuthForm({ devLogin }: { devLogin?: string | null }) {
                                     setUsername(e.target.value)
                                 }}
                                 />
-                                <FieldDescription>Введите ваш логин AD</FieldDescription>
                             </Field>
                             <Field>
                                 <FieldLabel htmlFor="password">Пароль</FieldLabel>
-                                <Input id="password" type="password" placeholder="••••••••" required disabled={pending}
-                                       aria-invalid={error && !password ? "true" : "false"}
-                                       value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                    setPassword(e.target.value)
-                                }}
-                                />
-                                <FieldDescription>Введите пароль AD</FieldDescription>
+                                <div className="relative">
+                                    <Input id="password" type={showPassword ? "text" : "password"} placeholder="••••••••" required disabled={pending}
+                                           className="pr-10"
+                                           aria-invalid={error && !password ? "true" : "false"}
+                                           value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        setPassword(e.target.value)
+                                    }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground disabled:pointer-events-none disabled:opacity-50"
+                                        aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                                        aria-pressed={showPassword}
+                                        disabled={pending}
+                                        onClick={() => setShowPassword((visible) => !visible)}
+                                    >
+                                        {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                    </button>
+                                </div>
                             </Field>
                         </FieldGroup>
                         <Field>

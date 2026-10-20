@@ -4,18 +4,21 @@
 import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
-import { APP_NAVIGATION_MAP, isRouteActive, NavigationGroup } from '@/lib/routes-config';
+import { isNavigationSubgroup, isRouteActive, visibleNavigation } from '@/lib/routes-config';
 import { SidebarUserMenu } from './SidebarUserMenu';
 import { SidebarNavItem } from './SidebarNavItem';
+import { SidebarNavSubgroup } from './SidebarNavSubgroup';
 import { useAccess } from "@/hooks/useAccess";
 import {
     Sidebar,
     SidebarContent,
+    SidebarHeader,
     SidebarMenu,
     SidebarGroup,
     SidebarGroupLabel,
     SidebarFooter
 } from "@/components/ui/sidebar";
+import { SidebarBrand } from "./SidebarBrand";
 
 export function AppSideBar() {
     const pathname = usePathname();
@@ -26,44 +29,47 @@ export function AppSideBar() {
         setOpenMobile(false);
     }, [pathname, setOpenMobile]);
 
-    const dynamicNavigation = useMemo((): NavigationGroup[] => {
-        return APP_NAVIGATION_MAP.map((group) => {
-            const visibleItems = group.items.filter((item) => !item.permission || access.has(item.permission));
-            return {
-                id: group.id,
-                label: group.label,
-                icon: group.icon,
-                items: visibleItems,
-            };
-        }).filter((group) => group.items.length > 0);
-    }, [access]);
+    const dynamicNavigation = useMemo(() => {
+        const visible = visibleNavigation((permission) => access.has(permission));
+        return isMobile ? visible : visible.filter((group) => group.id !== "main");
+    }, [access, isMobile]);
 
     return (
         <Sidebar variant="sidebar" collapsible="icon">
             {isMobile && (
+                <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-muted-foreground/30" />
+            )}
+            {!isMobile && (
+                <SidebarHeader className="h-16 justify-center gap-0 p-3">
+                    <SidebarBrand />
+                </SidebarHeader>
+            )}
+            {isMobile && (
                 <div className="shrink-0 border-b px-4 pt-2 pb-3">
-                    <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-muted-foreground/30" />
                     <SidebarUserMenu isOpen />
                 </div>
             )}
-            <SidebarContent>
+            <SidebarContent className="gap-3">
                 {dynamicNavigation.map((group) => {
-                    const GroupIcon = group.icon;
-
                     return (
-                        <SidebarGroup key={group.id} className="animate-in fade-in duration-200">
-                            <SidebarGroupLabel className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground select-none">
-                                {GroupIcon && <GroupIcon className="w-3.5 h-3.5 shrink-0 text-primary" />}
-                                <span>{group.label}</span>
-                            </SidebarGroupLabel>
+                        <SidebarGroup key={group.id} className="animate-in fade-in px-3 py-0 duration-200">
+                            {!(isMobile && group.id === "main") && (
+                                <SidebarGroupLabel className="text-xs font-semibold text-muted-foreground select-none">
+                                    {group.label}
+                                </SidebarGroupLabel>
+                            )}
 
-                            <SidebarMenu>
-                                {group.items.map((item) => (
-                                    <SidebarNavItem
-                                        key={item.href}
-                                        item={item}
-                                        isActive={isRouteActive(pathname, item.href)}
-                                    />
+                            <SidebarMenu className="group-data-[collapsible=icon]:items-center">
+                                {group.items.map((entry) => (
+                                    isNavigationSubgroup(entry) ? (
+                                        <SidebarNavSubgroup key={entry.id} subgroup={entry} pathname={pathname} />
+                                    ) : (
+                                        <SidebarNavItem
+                                            key={entry.href}
+                                            item={entry}
+                                            isActive={isRouteActive(pathname, entry.href)}
+                                        />
+                                    )
                                 ))}
                             </SidebarMenu>
                         </SidebarGroup>
@@ -72,7 +78,7 @@ export function AppSideBar() {
             </SidebarContent>
 
             {!isMobile && (
-                <SidebarFooter className="border-t bg-muted/20 p-2">
+                <SidebarFooter className="border-t bg-muted/20 p-3">
                     <SidebarMenu>
                         <SidebarMenuItem>
                             <SidebarUserMenu isOpen={open} />

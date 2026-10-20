@@ -42,10 +42,7 @@ export function RrsList() {
 
     return (
         <div className="flex flex-col gap-4">
-            <div className="flex items-start justify-between gap-4">
-                <p className="text-sm text-muted-foreground">
-                    Карточка хранит, какие корзины включены на территории. Обязательные подключаются при создании.
-                </p>
+            <div className="flex items-start justify-end gap-4">
                 <Link href="/rrs/new" className={buttonVariants({ className: "shrink-0" })}>
                     <WandSparkles />
                     Запустить мастер добавления

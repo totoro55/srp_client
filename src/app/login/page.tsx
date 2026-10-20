@@ -16,13 +16,15 @@ export default async function LoginPage() {
     const settings = await getAppSettings();
 
     return (
-        <main className="w-full h-9/10 max-w-7xl mx-auto flex flex-col items-center justify-center gap-4">
-            {settings.maintenanceEnabled ? (
-                <p className="max-w-md px-4 text-center text-sm whitespace-pre-wrap text-muted-foreground">
-                    {maintenanceText(settings.maintenanceMessage)}
-                </p>
-            ) : null}
-            <AuthForm devLogin={devLoginHint()} />
-        </main>
+        <div className="flex min-h-svh w-full items-center justify-center px-4 py-8">
+            <div className="flex w-full max-w-sm flex-col items-center gap-4">
+                {settings.maintenanceEnabled ? (
+                    <p className="px-4 text-center text-sm whitespace-pre-wrap text-muted-foreground">
+                        {maintenanceText(settings.maintenanceMessage)}
+                    </p>
+                ) : null}
+                <AuthForm devLogin={devLoginHint()} />
+            </div>
+        </div>
     );
 }
