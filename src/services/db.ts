@@ -74,11 +74,11 @@ class DbService {
             if (defaultAdmin && defaultAdmin.trim() !== "") {
                 await client.query(
                     `
-                    INSERT INTO user_role_exceptions (username, role_id, reason)
-                    SELECT $1, r.id, 'Первоначальный администратор безопасности (создан автоматически из .env)'
+                    INSERT INTO role_rules (priority, match_type, match_value, role_id)
+                    SELECT 100, 'login', $1, r.id
                     FROM roles r
-                    WHERE r.name = 'ADMIN'
-                    ON CONFLICT (username) DO NOTHING
+                    WHERE r.code = 'admin'
+                    ON CONFLICT (match_type, match_value) DO NOTHING
                     `,
                     [defaultAdmin.trim()]
                 );
