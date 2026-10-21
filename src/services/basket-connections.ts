@@ -24,6 +24,7 @@ import {
 } from "@/lib/rrs";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
+import { territoryWithCard } from "@/services/directory-visibility";
 import type { QueryResultRow } from "pg";
 
 export class RrsRuleError extends Error {
@@ -74,7 +75,12 @@ export async function listRrsTerritories(access: AccessView): Promise<RrsTerrito
     const scope = access.role?.scopeKind;
     if (scope === "division" || access.fullAccess) {
         return db.query<RrsTerritory>(
-            `SELECT uuid, code, name FROM territories ORDER BY name`,
+            `
+            SELECT uuid, code, name
+            FROM territories
+            WHERE ${territoryWithCard("territories")}
+            ORDER BY name
+            `,
         );
     }
     if (scope === "granted") {
@@ -84,6 +90,7 @@ export async function listRrsTerritories(access: AccessView): Promise<RrsTerrito
             FROM scope_grants g
             JOIN territories t ON t.uuid = g.territory_uuid
             WHERE lower(g.username) = lower($1)
+              AND ${territoryWithCard("t")}
             ORDER BY t.name
             `,
             [access.username],
@@ -270,6 +277,25 @@ export async function saveRrsMonth(
     period: string,
     items: RrsConnectionInput[],
 ): Promise<void> {
+    const territory = await db.query<{ deleted: boolean; linked: boolean }>(
+        `
+        SELECT deleted,
+               EXISTS (
+                   SELECT 1
+                   FROM basket_connections
+                   WHERE territory_uuid = territories.uuid
+               ) AS linked
+        FROM territories
+        WHERE uuid = $1
+        `,
+        [territoryUuid],
+    );
+    if (!territory[0]) {
+        throw new RrsRuleError(404, "Территория не найдена");
+    }
+    if (territory[0].deleted && !territory[0].linked) {
+        throw new RrsRuleError(400, "Территория помечена на удаление, подключить её нельзя");
+    }
     await assertTerritory(access, territoryUuid);
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
@@ -314,7 +340,9 @@ export async function saveRrsMonth(
                 const allowed = connectableVersions(basket, territoryUuid, current?.versionId ?? null);
                 const chosen = basket.versions.find((version) => version.id === item.versionId);
                 if (chosen && !allowed.some((version) => version.id === chosen.id)) {
-                    throw new RrsRuleError(400, `Тестовую версию корзины «${basket.name}» можно подключить только на выбранных территориях`);
+                    throw new RrsRuleError(400, chosen.status === "off"
+                        ? `Архивную версию корзины «${basket.name}» нельзя подключить заново`
+                        : `Тестовую версию корзины «${basket.name}» можно подключить только на выбранных территориях`);
                 }
                 await writeConnected(query, access.username, territoryUuid, period, basket, item, versions, current, storedValues);
             } else {
@@ -329,6 +357,10 @@ async function assertTerritory(access: AccessView, territoryUuid: string): Promi
     if (!territories.some((territory) => territory.uuid.toLowerCase() === territoryUuid.toLowerCase())) {
         throw new RrsRuleError(403, "Эта РРС вам не назначена");
     }
+}
+
+function isOfferedStatus(status: string | null): status is RrsVersionOffer["status"] {
+    return status === "test" || status === "working" || status === "off";
 }
 
 async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
@@ -352,7 +384,7 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
         JOIN indicators i ON i.id = b.indicator_id
         LEFT JOIN basket_versions v
             ON v.basket_id = b.id
-           AND v.status IN ('test', 'working')
+           AND v.status IN ('test', 'working', 'off')
            AND v.data_table IS NOT NULL
         WHERE b.status = 'active'
         ORDER BY b.sort_order, b.id, v.version_no
@@ -373,7 +405,7 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
             };
             baskets.set(row.id, basket);
         }
-        if (row.versionId !== null && row.versionNo !== null && row.versionName && (row.versionStatus === "test" || row.versionStatus === "working")) {
+        if (row.versionId !== null && row.versionNo !== null && row.versionName && isOfferedStatus(row.versionStatus)) {
             const settings = readVersionSettings(row.settings);
             const version: RrsVersionOffer = {
                 id: row.versionId,

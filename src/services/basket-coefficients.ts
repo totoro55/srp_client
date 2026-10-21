@@ -6,6 +6,7 @@ import type { RrsCoefficientPage, RrsCoefficientValue, RrsFieldChangeEvent } fro
 import { getRrsCard, getRrsMonth, RrsRuleError } from "@/services/basket-connections";
 import { listEnabledBranchUuids } from "@/services/branch-motivation";
 import { db } from "@/services/db";
+import { branchListedInPeriod } from "@/services/directory-visibility";
 import type { AccessView } from "@/server/authz/resolve-access";
 
 export async function getBranchCoefficients(
@@ -67,12 +68,13 @@ export async function getBranchCoefficients(
     const enabledBranches = await listEnabledBranchUuids(territoryUuid, period);
     const branches = await db.query<{ uuid: string; code: string; name: string }>(
         `
-        SELECT uuid::text AS uuid, code, name
-        FROM branches
-        WHERE territory_uuid = $1
-        ORDER BY name
+        SELECT branch.uuid::text AS uuid, branch.code, branch.name
+        FROM branches branch
+        WHERE branch.territory_uuid = $1
+          AND ${branchListedInPeriod("branch", "$2")}
+        ORDER BY branch.name
         `,
-        [territoryUuid],
+        [territoryUuid, period],
     );
     const connectionRows = await db.query<{ basketId: number; versionId: number; period: string }>(
         `
@@ -177,8 +179,21 @@ export async function saveBranchCoefficients(
             [territoryUuid, page.period, access.username],
         );
         await query(
-            "DELETE FROM basket_branch_coefficients WHERE territory_uuid = $1 AND period = $2::date",
-            [territoryUuid, page.period],
+            `
+            DELETE FROM basket_branch_coefficients AS coefficient
+            WHERE coefficient.territory_uuid = $1
+              AND coefficient.period = $2::date
+              AND (
+                  coefficient.branch_uuid = ANY($3::uuid[])
+                  OR NOT EXISTS (
+                      SELECT 1
+                      FROM branches AS branch
+                      WHERE branch.uuid = coefficient.branch_uuid
+                        AND branch.deleted
+                  )
+              )
+            `,
+            [territoryUuid, page.period, [...new Set(prepared.map((item) => item.branchUuid)), "00000000-0000-0000-0000-000000000000"]],
         );
         for (const item of prepared) {
             await query(

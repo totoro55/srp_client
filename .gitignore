@@ -34,6 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Снимок справочников для стенда: в нём фамилии и логины сотрудников.
+/scripts/pg-directory/initial-external.sql
+/scripts/pg-directory/initial-external-data.sql
+
 # vercel
 .vercel
 

@@ -37,7 +37,7 @@ const BLOCKS: { id: string; label: string; pages: MenuPage[] }[] = [
         pages: [{
             id: "overview",
             label: "Обзор",
-            hint: "Сводные сведения по выбранной территории.",
+            hint: "Что уже настроено на территории и чего не хватает.",
             path: "",
             icon: LayoutDashboard,
             timed: false,

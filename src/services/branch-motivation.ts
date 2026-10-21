@@ -1,23 +1,48 @@
 import { buildChangeEvents, snapshotsFromRows, type StoredChangeRow } from "@/lib/field-changes";
-import { closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
-import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage } from "@/lib/rrs";
-import { getRrsCard, RrsRuleError } from "@/services/basket-connections";
+import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen, type RrsEditPolicy } from "@/lib/rrs-edit-window";
+import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage, RrsTerritory } from "@/lib/rrs";
+import { getAppSettings } from "@/services/app-settings";
+import { getRrsCard, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { db } from "@/services/db";
+import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
 import type { AccessView } from "@/server/authz/resolve-access";
 
 const DEFAULT_ENABLED = false;
 
+interface MotivationContext {
+    territory: RrsTerritory;
+    period: string;
+    savedPeriods: { period: string }[];
+    appliedPeriod: string | null;
+    editPolicy: RrsEditPolicy;
+}
+
+async function motivationContext(access: AccessView, territoryUuid: string): Promise<MotivationContext> {
+    try {
+        return await getRrsCard(access, territoryUuid, null);
+    } catch (error) {
+        if (!(error instanceof RrsRuleError) || error.status !== 404) {
+            throw error;
+        }
+    }
+    const territory = (await listRrsTerritories(access)).find((item) => item.uuid.toLowerCase() === territoryUuid.toLowerCase());
+    if (!territory) {
+        throw new RrsRuleError(403, "Эта РРС вам не назначена");
+    }
+    const settings = await getAppSettings();
+    const editPolicy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    return {
+        territory,
+        period: `${editPolicy.currentMonth}-01`,
+        savedPeriods: [],
+        appliedPeriod: null,
+        editPolicy,
+    };
+}
+
 export async function listEnabledBranchUuids(territoryUuid: string, period: string): Promise<Set<string>> {
     const stored = await db.query<{ branchUuid: string; enabled: boolean }>(
-        `
-        SELECT DISTINCT ON (branch_uuid)
-               branch_uuid::text AS "branchUuid",
-               enabled
-        FROM basket_branch_motivation
-        WHERE territory_uuid = $1
-          AND period <= $2::date
-        ORDER BY branch_uuid, period DESC
-        `,
+        PERIOD_MOTIVATION_SQL,
         [territoryUuid, period],
     );
     return new Set(
@@ -32,27 +57,20 @@ export async function getBranchMotivation(
     territoryUuid: string,
     requestedPeriod: string | null,
 ): Promise<RrsMotivationPage> {
-    const card = await getRrsCard(access, territoryUuid, null);
+    const card = await motivationContext(access, territoryUuid);
     const period = requestedPeriod ?? card.period;
     const branches = await db.query<{ uuid: string; code: string; name: string }>(
         `
-        SELECT uuid::text AS uuid, code, name
-        FROM branches
-        WHERE territory_uuid = $1
-        ORDER BY name
+        SELECT branch.uuid::text AS uuid, branch.code, branch.name
+        FROM branches branch
+        WHERE branch.territory_uuid = $1
+          AND ${branchListedInPeriod("branch", "$2")}
+        ORDER BY branch.name
         `,
-        [territoryUuid],
+        [territoryUuid, period],
     );
     const stored = await db.query<{ branchUuid: string; enabled: boolean }>(
-        `
-        SELECT DISTINCT ON (branch_uuid)
-               branch_uuid::text AS "branchUuid",
-               enabled
-        FROM basket_branch_motivation
-        WHERE territory_uuid = $1
-          AND period <= $2::date
-        ORDER BY branch_uuid, period DESC
-        `,
+        PERIOD_MOTIVATION_SQL,
         [territoryUuid, period],
     );
     const enabledByBranch = new Map(stored.map((item) => [item.branchUuid.toLowerCase(), item.enabled]));
@@ -97,6 +115,23 @@ export async function saveBranchMotivation(
     }
     if (seen.size !== expected.size) {
         throw new RrsRuleError(400, "Передайте участие каждого филиала");
+    }
+    const removed = await db.query<{ uuid: string }>(
+        `
+        SELECT uuid::text AS uuid
+        FROM branches
+        WHERE uuid = ANY($1::uuid[])
+          AND deleted
+        `,
+        [prepared.length === 0 ? ["00000000-0000-0000-0000-000000000000"] : prepared.map((item) => item.branchUuid)],
+    );
+    const removedIds = new Set(removed.map((row) => row.uuid.toLowerCase()));
+    for (const item of prepared) {
+        const current = page.items.find((row) => row.branchUuid === item.branchUuid);
+        if (item.enabled && removedIds.has(item.branchUuid) && !current?.enabled) {
+            const branch = page.branches.find((row) => row.uuid === item.branchUuid);
+            throw new RrsRuleError(400, `Филиал «${branch?.name ?? item.branchUuid}» помечен на удаление, подключить его нельзя`);
+        }
     }
 
     await db.transaction(async (query) => {

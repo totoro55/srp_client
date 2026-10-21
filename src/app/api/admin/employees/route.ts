@@ -22,14 +22,18 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Em
         const query = new URL(request.url).searchParams.get("q")?.trim().slice(0, 100) ?? "";
         const rows = await db.query<EmployeeLookup>(
             `
-            SELECT login, name, title, branch
-            FROM employees
+            SELECT employee.login,
+                   employee.name,
+                   employee.title,
+                   COALESCE(branch.name, '') AS branch
+            FROM employees employee
+            LEFT JOIN branches branch ON branch.uuid = employee.branch_uuid
             WHERE $1::text = ''
-               OR lower(login) LIKE $2 ESCAPE '\\'
-               OR lower(name) LIKE $2 ESCAPE '\\'
-               OR lower(title) LIKE $2 ESCAPE '\\'
-               OR lower(branch) LIKE $2 ESCAPE '\\'
-            ORDER BY name
+               OR lower(employee.login) LIKE $2 ESCAPE '\\'
+               OR lower(employee.name) LIKE $2 ESCAPE '\\'
+               OR lower(employee.title) LIKE $2 ESCAPE '\\'
+               OR lower(branch.name) LIKE $2 ESCAPE '\\'
+            ORDER BY employee.name
             LIMIT 30
             `,
             [query, likePattern(query.toLowerCase())]

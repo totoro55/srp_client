@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Asterisk, BadgeCheck, ChevronDown, FlaskConical, History, WandSparkles } from "lucide-react";
+import { Archive, Asterisk, BadgeCheck, ChevronDown, FlaskConical, History, WandSparkles } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HelpDrawer } from "@/components/help-drawer";
@@ -213,9 +213,18 @@ function BasketHelp() {
 }
 
 function VersionStatusIcon({ status }: { status: BasketVersionStatus }) {
-    const className = cn("size-3.5", status === "test" ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300");
+    const className = cn(
+        "size-3.5",
+        status === "test" && "text-amber-700 dark:text-amber-300",
+        status === "working" && "text-emerald-700 dark:text-emerald-300",
+        status === "off" && "text-destructive",
+    );
+    const label = versionStatusTitle(status);
     if (status === "test") {
-        return <FlaskConical className={className} aria-label={versionStatusTitle(status)} />;
+        return <FlaskConical className={className} aria-label={label} />;
     }
-    return <BadgeCheck className={className} aria-label={versionStatusTitle(status)} />;
+    if (status === "off") {
+        return <Archive className={className} aria-label={label} />;
+    }
+    return <BadgeCheck className={className} aria-label={label} />;
 }

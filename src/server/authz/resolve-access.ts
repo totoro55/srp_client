@@ -154,7 +154,13 @@ async function scopeLabelFor(username: string, scopeKind: ScopeKind): Promise<st
 
     if (scopeKind === "home_branch") {
         const rows = await db.query<{ branch: string | null }>(
-            "SELECT branch FROM employees WHERE lower(login) = lower($1) LIMIT 1",
+            `
+            SELECT branch.name AS branch
+            FROM employees employee
+            LEFT JOIN branches branch ON branch.uuid = employee.branch_uuid
+            WHERE lower(employee.login) = lower($1)
+            LIMIT 1
+            `,
             [username]
         );
         return rows[0]?.branch || "Филиал не назначен";

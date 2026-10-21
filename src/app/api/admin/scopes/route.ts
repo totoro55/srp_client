@@ -17,7 +17,7 @@ function parseUuid(value: unknown): string | null {
 export async function GET() {
     try {
         await requirePermission("access.read");
-        const territories = await db.query("SELECT uuid, code, name FROM territories ORDER BY name");
+        const territories = await db.query("SELECT uuid, code, name FROM territories WHERE NOT deleted ORDER BY name");
         const grants = await db.query(`
             SELECT g.id, g.username, g.territory_uuid AS "territoryUuid", t.name AS "territoryName"
             FROM scope_grants g
@@ -44,6 +44,17 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
         const territoryUuid = parseUuid(body.territoryUuid);
         if (!username || !territoryUuid) {
             return createErrorResponse("BAD_REQUEST", "Укажите логин и территорию", 400);
+        }
+
+        const territories = await db.query<{ deleted: boolean }>(
+            `SELECT deleted FROM territories WHERE uuid = $1`,
+            [territoryUuid],
+        );
+        if (!territories[0]) {
+            return createErrorResponse("BAD_REQUEST", "Территория не найдена", 400);
+        }
+        if (territories[0].deleted) {
+            return createErrorResponse("BAD_REQUEST", "Территория помечена на удаление, назначить её нельзя", 400);
         }
 
         try {

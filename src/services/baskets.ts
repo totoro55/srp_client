@@ -284,7 +284,19 @@ export async function updateBasket(id: number, input: BasketProfileInput): Promi
 export async function getVersionTestTerritories(basketId: number, versionId: number): Promise<BasketTestTerritorySettings> {
     await requireVersion(basketId, versionId);
     const territories = await db.query<BasketTestTerritory>(
-        "SELECT uuid::text AS uuid, code, name FROM territories ORDER BY name",
+        `
+        SELECT territory.uuid::text AS uuid, territory.code, territory.name
+        FROM territories territory
+        WHERE NOT territory.deleted
+           OR EXISTS (
+               SELECT 1
+               FROM basket_version_test_territories selected
+               WHERE selected.version_id = $1
+                 AND selected.territory_uuid = territory.uuid
+           )
+        ORDER BY territory.name
+        `,
+        [versionId],
     );
     const selected = await db.query<{ territoryUuid: string }>(
         `SELECT territory_uuid::text AS "territoryUuid" FROM basket_version_test_territories WHERE version_id = $1`,
@@ -317,6 +329,23 @@ export async function replaceVersionTestTerritories(
             );
             if (known.length !== unique.length) {
                 throw new BasketRuleError(400, "Выберите территории из списка");
+            }
+            const marked = await query<{ uuid: string }>(
+                `
+                SELECT uuid::text AS uuid
+                FROM territories
+                WHERE uuid = ANY($1::uuid[])
+                  AND deleted
+                `,
+                [unique],
+            );
+            const previous = await query<{ territoryUuid: string }>(
+                `SELECT territory_uuid::text AS "territoryUuid" FROM basket_version_test_territories WHERE version_id = $1`,
+                [versionId],
+            );
+            const previousIds = new Set(previous.map((row) => row.territoryUuid.toLowerCase()));
+            if (marked.some((row) => !previousIds.has(row.uuid.toLowerCase()))) {
+                throw new BasketRuleError(400, "Территория помечена на удаление, подключить её нельзя");
             }
         }
         await query("DELETE FROM basket_version_test_territories WHERE version_id = $1", [versionId]);

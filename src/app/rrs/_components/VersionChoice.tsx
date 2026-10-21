@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeCheck, FileText, FlaskConical, GitBranch } from "lucide-react";
+import { Archive, BadgeCheck, FileText, FlaskConical, GitBranch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { versionStatusTitle } from "@/lib/baskets";
 import type { RrsVersionOffer } from "@/lib/rrs";
@@ -52,7 +52,7 @@ export function VersionChoice({
                             />
                             <span className="min-w-0 flex-1 truncate font-medium">№ {version.versionNo} {version.name}</span>
                             <Badge variant="outline" className={versionBadgeClass(version.status)}>
-                                {version.status === "test" ? <FlaskConical /> : <BadgeCheck />}
+                                <VersionMark status={version.status} />
                                 {versionStatusTitle(version.status)}
                             </Badge>
                         </label>
@@ -72,9 +72,22 @@ export function VersionChoice({
     );
 }
 
+function VersionMark({ status }: { status: RrsVersionOffer["status"] }) {
+    if (status === "test") {
+        return <FlaskConical />;
+    }
+    if (status === "off") {
+        return <Archive />;
+    }
+    return <BadgeCheck />;
+}
+
 function versionBadgeClass(status: RrsVersionOffer["status"]): string {
     if (status === "test") {
         return "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200";
+    }
+    if (status === "off") {
+        return "border-destructive/40 bg-destructive/10 text-destructive";
     }
     return "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200";
 }

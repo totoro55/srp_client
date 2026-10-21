@@ -36,7 +36,22 @@ export async function getTariffAlgorithmSettings(): Promise<TariffAlgorithmPage>
         `,
     );
     const territories = await db.query<{ uuid: string; code: string; name: string }>(
-        `SELECT uuid::text AS uuid, code, name FROM territories ORDER BY name`,
+        `
+        SELECT territory.uuid::text AS uuid, territory.code, territory.name
+        FROM territories territory
+        WHERE NOT territory.deleted
+           OR EXISTS (
+               SELECT 1
+               FROM tariff_algorithm_weight_grants weight_grant
+               WHERE weight_grant.territory_uuid = territory.uuid
+           )
+           OR EXISTS (
+               SELECT 1
+               FROM tariff_algorithm_reference_grants reference_grant
+               WHERE reference_grant.territory_uuid = territory.uuid
+           )
+        ORDER BY territory.name
+        `,
     );
     const enabled = await db.query<{ axis: string; id: number; name: string; versionId: number; versionNo: number; versionName: string; status: "draft" | "test" | "working" | "off" }>(
         `
@@ -91,9 +106,30 @@ export async function saveTariffAlgorithmSettings(access: AccessView, items: Tar
         throw new TariffAlgorithmError("Список алгоритмов не совпадает с настройками");
     }
     const knownTerritories = new Set(current.territories.map((territory) => territory.uuid));
+    const requested = [...new Set(items.flatMap((item) => [...item.territoryUuids, ...item.referenceTerritoryUuids]))];
+    const markedRows = requested.length === 0
+        ? []
+        : await db.query<{ uuid: string }>(
+            `
+            SELECT uuid::text AS uuid
+            FROM territories
+            WHERE uuid = ANY($1::uuid[])
+              AND deleted
+            `,
+            [requested],
+        );
+    const markedIds = new Set(markedRows.map((row) => row.uuid.toLowerCase()));
     for (const item of items) {
         if ([...item.territoryUuids, ...item.referenceTerritoryUuids].some((uuid) => !knownTerritories.has(uuid))) {
             throw new TariffAlgorithmError("В списке есть территория, которой нет в справочнике");
+        }
+        const algorithm = current.algorithms.find((row) => row.code === item.code);
+        const previousWeight = new Set((algorithm?.territoryUuids ?? []).map((uuid) => uuid.toLowerCase()));
+        const previousReference = new Set((algorithm?.referenceTerritoryUuids ?? []).map((uuid) => uuid.toLowerCase()));
+        const connectsRemoved = item.territoryUuids.some((uuid) => markedIds.has(uuid.toLowerCase()) && !previousWeight.has(uuid.toLowerCase()))
+            || item.referenceTerritoryUuids.some((uuid) => markedIds.has(uuid.toLowerCase()) && !previousReference.has(uuid.toLowerCase()));
+        if (connectsRemoved) {
+            throw new TariffAlgorithmError("Территория помечена на удаление, подключить её нельзя");
         }
     }
     await db.transaction(async (query) => {

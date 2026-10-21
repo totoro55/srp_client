@@ -3,8 +3,9 @@
 -- уже созданные таблицы из public, если загрузка успела положить их туда.
 --
 -- Ожидаемые колонки со стороны приложения:
---   employees:   uuid, login, name, title, branch
---   territories: uuid, code, name
+--   employees:   uuid, login, name, title, branch_uuid
+--   territories: uuid, code, name, deleted
+--   branches:    uuid, code, name, territory_uuid, deleted
 
 CREATE SCHEMA IF NOT EXISTS dictionaries;
 
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS dictionaries.territories (
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT territories_code_unique UNIQUE (code)
 );
 
@@ -24,6 +26,7 @@ CREATE TABLE IF NOT EXISTS dictionaries.branches (
     code VARCHAR(50) NOT NULL,
     name VARCHAR(255) NOT NULL,
     territory_uuid UUID REFERENCES dictionaries.territories (uuid) ON DELETE SET NULL,
+    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT branches_code_unique UNIQUE (code),
@@ -38,8 +41,6 @@ CREATE TABLE IF NOT EXISTS dictionaries.employees (
     login VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
     title VARCHAR(255),
-    -- Текст, как его читает приложение (подпись филиала), совпадает с branches.name.
-    branch VARCHAR(255),
     branch_uuid UUID REFERENCES dictionaries.branches (uuid) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

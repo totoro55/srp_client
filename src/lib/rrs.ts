@@ -15,7 +15,7 @@ export interface RrsVersionOffer {
     versionNo: number;
     name: string;
     description: string;
-    status: "test" | "working";
+    status: "test" | "working" | "off";
     parameters: BasketParameter[];
     coefficients: BasketCoefficient[];
     testTerritoryUuids: string[];
@@ -40,6 +40,7 @@ export function connectableVersions(
         if (version.status === "working") {
             return true;
         }
+        // Уже подключённая версия остаётся в наборе, в том числе после перевода в архив.
         if (keepVersionId !== null && version.id === keepVersionId) {
             return true;
         }
@@ -174,6 +175,18 @@ export interface RrsSetup {
     territories: RrsTerritory[];
     baskets: RrsBasketOffer[];
     editPolicy: RrsEditPolicy;
+}
+
+export type RrsTariffReadiness = "calculated" | "missing" | "no-sales" | "no-axis";
+
+export interface RrsReadiness {
+    territory: RrsTerritory;
+    period: string;
+    savedPeriods: string[];
+    connectedBaskets: number;
+    branches: { enabled: number; total: number };
+    coefficients: { defined: number; saved: number; expected: number };
+    tariffs: RrsTariffReadiness;
 }
 
 export interface RrsConnectionInput {

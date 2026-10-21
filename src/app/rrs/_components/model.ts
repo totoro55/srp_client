@@ -187,9 +187,13 @@ export function formatSavedAt(value: string): string {
 }
 
 export function preferredVersion(basket: RrsBasketOffer, versionId: number | null): RrsVersionOffer | undefined {
-    return basket.versions.find((version) => version.id === versionId)
-        ?? [...basket.versions].reverse().find((version) => version.status === "working")
-        ?? basket.versions[basket.versions.length - 1];
+    const selected = versionId === null ? undefined : basket.versions.find((version) => version.id === versionId);
+    if (selected) {
+        return selected;
+    }
+    const open = basket.versions.filter((version) => version.status !== "off");
+    return [...open].reverse().find((version) => version.status === "working")
+        ?? open[open.length - 1];
 }
 
 export function valuesFor(version: RrsVersionOffer | undefined, connection: RrsConnectionSlice | undefined): Record<string, string> {
