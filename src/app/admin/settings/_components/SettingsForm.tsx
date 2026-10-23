@@ -1,13 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { CalendarDays, Eye, Info, Megaphone, MessageSquareText, Text, Wrench } from "lucide-react";
+import { CalendarDays, Eye, Info, Megaphone, MessageSquareText, Paperclip, Text, Wrench } from "lucide-react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
-import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +17,15 @@ import {
     DEFAULT_APP_SETTINGS,
     type AppSettings,
 } from "@/lib/app-settings";
+import { Input } from "@/components/ui/input";
+import {
+    FEEDBACK_FILE_COUNT_MAX,
+    FEEDBACK_FILE_COUNT_MIN,
+    FEEDBACK_FILE_KINDS,
+    FEEDBACK_FILE_MAX_MB_MAX,
+    FEEDBACK_FILE_MAX_MB_MIN,
+    parseFeedbackExtensions,
+} from "@/lib/feedback-files";
 import { RRS_EDIT_CUTOFF_MAX, RRS_EDIT_CUTOFF_MIN } from "@/lib/rrs-edit-window";
 import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
@@ -61,6 +70,22 @@ export function SettingsForm() {
 
     async function onSubmit(event: FormEvent) {
         event.preventDefault();
+        if (!Number.isInteger(settings.feedbackFileMaxMb)
+            || settings.feedbackFileMaxMb < FEEDBACK_FILE_MAX_MB_MIN
+            || settings.feedbackFileMaxMb > FEEDBACK_FILE_MAX_MB_MAX) {
+            setError("Размер вложения — число от 1 до 50 МБ.");
+            return;
+        }
+        if (!Number.isInteger(settings.feedbackFileMaxCount)
+            || settings.feedbackFileMaxCount < FEEDBACK_FILE_COUNT_MIN
+            || settings.feedbackFileMaxCount > FEEDBACK_FILE_COUNT_MAX) {
+            setError("Число вложений — от 1 до 10.");
+            return;
+        }
+        if (parseFeedbackExtensions(settings.feedbackFileExtensions).length === 0) {
+            setError("Выберите хотя бы один тип файла.");
+            return;
+        }
         if (!Number.isInteger(settings.rrsEditCutoffDay)
             || settings.rrsEditCutoffDay < RRS_EDIT_CUTOFF_MIN
             || settings.rrsEditCutoffDay > RRS_EDIT_CUTOFF_MAX) {
@@ -183,6 +208,83 @@ export function SettingsForm() {
                                             }
                                         }}
                                     />
+                                </div>
+                            </section>
+                            <section className="flex flex-col gap-3 border-b pb-6">
+                                <h2 className="text-base font-medium">Вложения обращений</h2>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                                            <Label htmlFor="feedback-file-max-mb">Размер файла, МБ</Label>
+                                            <FieldHint text="Один файл не может быть больше этого размера. Допустимы значения от 1 до 50." />
+                                        </div>
+                                        <Input
+                                            id="feedback-file-max-mb"
+                                            type="number"
+                                            min={FEEDBACK_FILE_MAX_MB_MIN}
+                                            max={FEEDBACK_FILE_MAX_MB_MAX}
+                                            step={1}
+                                            value={settings.feedbackFileMaxMb}
+                                            disabled={loading || saving || !canWrite}
+                                            onChange={(event) => {
+                                                const value = Number(event.target.value);
+                                                if (Number.isInteger(value)) {
+                                                    update({ feedbackFileMaxMb: value });
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <Label htmlFor="feedback-file-max-count">Файлов за раз</Label>
+                                            <FieldHint text="Сколько файлов можно приложить к одному обращению или ответу. От 1 до 10." />
+                                        </div>
+                                        <Input
+                                            id="feedback-file-max-count"
+                                            type="number"
+                                            min={FEEDBACK_FILE_COUNT_MIN}
+                                            max={FEEDBACK_FILE_COUNT_MAX}
+                                            step={1}
+                                            value={settings.feedbackFileMaxCount}
+                                            disabled={loading || saving || !canWrite}
+                                            onChange={(event) => {
+                                                const value = Number(event.target.value);
+                                                if (Number.isInteger(value)) {
+                                                    update({ feedbackFileMaxCount: value });
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <Label>Типы файлов</Label>
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        {FEEDBACK_FILE_KINDS.map((kind) => {
+                                            const selected = parseFeedbackExtensions(settings.feedbackFileExtensions);
+                                            const checked = kind.extensions.some((extension) => selected.includes(extension));
+                                            return (
+                                                <label key={kind.id} className="flex items-center gap-2 text-sm">
+                                                    <Checkbox
+                                                        checked={checked}
+                                                        disabled={loading || saving || !canWrite}
+                                                        onCheckedChange={(value) => {
+                                                            const next = new Set(selected);
+                                                            for (const extension of kind.extensions) {
+                                                                if (value === true) {
+                                                                    next.add(extension);
+                                                                } else {
+                                                                    next.delete(extension);
+                                                                }
+                                                            }
+                                                            update({ feedbackFileExtensions: [...next].join(",") });
+                                                        }}
+                                                    />
+                                                    {kind.label}
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </section>
                             <section className="flex flex-col gap-3">

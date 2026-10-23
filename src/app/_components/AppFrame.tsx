@@ -7,7 +7,6 @@ import Header from '@/app/_components/header/header';
 import { PageHeadingProvider } from '@/app/_components/header/page-heading';
 import { AccessBanner } from '@/app/_components/AccessBanner';
 import { AppSideBar } from '@/app/_components/appSideBar/AppSideBar';
-import { cn } from '@/lib/utils';
 
 export function AppFrame({
     initialSignedIn,
@@ -25,7 +24,7 @@ export function AppFrame({
         <SidebarProvider defaultOpen={false}>
             {signedIn ? <AppSideBar /> : null}
             <PageHeadingProvider>
-                <main className={cn('w-full', signedIn && 'pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0')}>
+                <main className="w-full">
                     {notice}
                     {signedIn ? <AccessBanner /> : null}
                     {signedIn ? <Header /> : null}

@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { coefficientRangeLabel, coefficientValueIssue } from "@/lib/coefficient-value";
 import type { BasketCoefficient } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
+import { WikiVersionHint } from "@/components/wiki-version-hint";
 
 const COLUMN_GROUPS = [
     {
@@ -50,6 +51,7 @@ export type CoefficientTableBasket = {
     indicatorName: string;
     versionNo: number;
     versionName: string;
+    versionId: number;
     coefficients: BasketCoefficient[];
 };
 
@@ -228,6 +230,7 @@ export function CoefficientTable({
                                         onMouseEnter={() => setHover({ row: null, column: `group:${basket.id}` })}
                                     >
                                         {basket.indicatorName}
+                                        <WikiVersionHint versionId={basket.versionId} />
                                     </TableHead>
                                 );
                             })}

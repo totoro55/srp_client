@@ -60,6 +60,30 @@ export const PERMISSION_CATALOG = [
         title: "Изменение алгоритмов тарифов",
         description: "Веса алгоритмов и разрешение территориям их менять",
     },
+    {
+        code: "news:write",
+        group: "Приложение",
+        title: "Публикация новостей",
+        description: "Новости и набор ролей, которым они видны",
+    },
+    {
+        code: "wiki:write",
+        group: "Приложение",
+        title: "Правка базы знаний",
+        description: "Группы, статьи и описания версий корзин",
+    },
+    {
+        code: "roadmap:write",
+        group: "Приложение",
+        title: "Правка дорожной карты",
+        description: "Вехи и их статус",
+    },
+    {
+        code: "feedback:process",
+        group: "Приложение",
+        title: "Обработка обращений",
+        description: "Очередь обращений, статус и ответ",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];
@@ -71,7 +95,7 @@ export function isPermissionCode(value: string): value is PermissionCode {
 }
 
 export function isWritePermission(code: PermissionCode): boolean {
-    return code.endsWith(":write") || code === "baskets:connect";
+    return code.endsWith(":write") || code === "baskets:connect" || code === "feedback:process";
 }
 
 export const SCOPE_KINDS = ["division", "granted", "home_branch", "none"] as const;

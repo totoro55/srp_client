@@ -1,4 +1,9 @@
 import { DEFAULT_RRS_EDIT_CUTOFF_DAY } from "@/lib/rrs-edit-window";
+import {
+    DEFAULT_FEEDBACK_FILE_EXTENSIONS,
+    DEFAULT_FEEDBACK_FILE_MAX_COUNT,
+    DEFAULT_FEEDBACK_FILE_MAX_MB,
+} from "@/lib/feedback-files";
 
 export interface AppSettings {
     maintenanceEnabled: boolean;
@@ -7,6 +12,9 @@ export interface AppSettings {
     noticeMessage: string;
     rolePreviewEnabled: boolean;
     rrsEditCutoffDay: number;
+    feedbackFileMaxMb: number;
+    feedbackFileMaxCount: number;
+    feedbackFileExtensions: string;
 }
 
 export const APP_SETTINGS_MESSAGE_MAX = 500;
@@ -21,6 +29,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     noticeMessage: "",
     rolePreviewEnabled: true,
     rrsEditCutoffDay: DEFAULT_RRS_EDIT_CUTOFF_DAY,
+    feedbackFileMaxMb: DEFAULT_FEEDBACK_FILE_MAX_MB,
+    feedbackFileMaxCount: DEFAULT_FEEDBACK_FILE_MAX_COUNT,
+    feedbackFileExtensions: DEFAULT_FEEDBACK_FILE_EXTENSIONS,
 };
 
 export function maintenanceText(message: string): string {

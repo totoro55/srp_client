@@ -13,6 +13,7 @@ import {
 
 export type PageHeadingCrumb = {
     label: string;
+    compactLabel?: string;
     href?: string;
 };
 
@@ -30,7 +31,7 @@ const PageHeadingActionsContext = createContext<PageHeadingActions | null>(null)
 const PageHeadingTrailContext = createContext<PageHeadingCrumb[] | null>(null);
 
 function sameTrail(left: PageHeadingCrumb[], right: PageHeadingCrumb[]): boolean {
-    return left.length === right.length && left.every((item, index) => item.label === right[index]?.label && item.href === right[index]?.href);
+    return left.length === right.length && left.every((item, index) => item.label === right[index]?.label && item.compactLabel === right[index]?.compactLabel && item.href === right[index]?.href);
 }
 
 export function PageHeadingProvider({ children }: { children: ReactNode }) {
@@ -71,7 +72,7 @@ export function PageHeadingProvider({ children }: { children: ReactNode }) {
 export function PageHeading({ trail }: { trail: PageHeadingCrumb[] }) {
     const actions = useContext(PageHeadingActionsContext);
     const id = useId();
-    const signature = trail.map((item) => `${item.href ?? ""}\0${item.label}`).join("\n");
+    const signature = trail.map((item) => `${item.href ?? ""}\0${item.label}\0${item.compactLabel ?? ""}`).join("\n");
     const trailRef = useRef(trail);
     trailRef.current = trail;
 
@@ -84,6 +85,18 @@ export function PageHeading({ trail }: { trail: PageHeadingCrumb[] }) {
     }, [actions, id]);
 
     return null;
+}
+
+function CrumbLabel({ item }: { item: PageHeadingCrumb }) {
+    if (!item.compactLabel) {
+        return item.label;
+    }
+    return (
+        <>
+            <span className="md:hidden">{item.compactLabel}</span>
+            <span className="hidden md:inline">{item.label}</span>
+        </>
+    );
 }
 
 export function usePageHeadingTrail(): PageHeadingCrumb[] | null {
@@ -102,10 +115,10 @@ export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
                             <BreadcrumbItem className={last ? "min-w-0 shrink" : "shrink-0 whitespace-nowrap"}>
                                 {!last && item.href ? (
                                     <BreadcrumbLink className="whitespace-nowrap font-semibold" render={<Link href={item.href} />}>
-                                        {item.label}
+                                        <CrumbLabel item={item} />
                                     </BreadcrumbLink>
                                 ) : (
-                                    <BreadcrumbPage className="block truncate font-semibold">{item.label}</BreadcrumbPage>
+                                    <BreadcrumbPage className="block truncate font-semibold"><CrumbLabel item={item} /></BreadcrumbPage>
                                 )}
                             </BreadcrumbItem>
                         </span>

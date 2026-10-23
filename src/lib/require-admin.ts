@@ -34,6 +34,14 @@ export async function requirePermission(permission: PermissionCode): Promise<Acc
     return access;
 }
 
+export async function requireAnyPermission(permissions: PermissionCode[]): Promise<AccessView> {
+    const access = await getActiveAccess();
+    if (!permissions.some((permission) => can(access, permission))) {
+        throw new AdminAuthError(403);
+    }
+    return access;
+}
+
 export async function requireActorFullAccess(): Promise<AccessView> {
     const session = await getServerSession(authOptions);
     if (!session?.user?.username) {

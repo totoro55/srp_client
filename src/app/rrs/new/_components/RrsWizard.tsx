@@ -170,6 +170,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             indicatorName: basket.indicatorName,
             versionNo: version.versionNo,
             versionName: version.name,
+            versionId: version.id,
             coefficients,
         }];
     });

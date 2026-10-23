@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, Map, MessageSquareText, FileText } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -8,6 +8,7 @@ export interface RouteItem {
     title?: string;
     description?: string;
     permission?: PermissionCode;
+    permissionAny?: PermissionCode[];
 }
 
 export interface NavigationSubgroup {
@@ -24,6 +25,13 @@ export function isNavigationSubgroup(entry: NavigationEntry): entry is Navigatio
     return "kind" in entry && entry.kind === "subgroup";
 }
 
+function routeVisible(item: RouteItem, can: (permission: PermissionCode) => boolean): boolean {
+    if (item.permissionAny && item.permissionAny.length > 0) {
+        return item.permissionAny.some((permission) => can(permission));
+    }
+    return !item.permission || can(item.permission);
+}
+
 export interface NavigationGroup {
     id: string;
     label: string;
@@ -36,6 +44,16 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         label: "Основное меню",
         items: [
             { name: "Главная", href: "/", icon: Home, title: "Главная" },
+        ],
+    },
+    {
+        id: "workspace",
+        label: "Приложение",
+        items: [
+            { name: "Новости", href: "/news", icon: Newspaper, title: "Новости", description: "Сообщения для выбранных ролей" },
+            { name: "База знаний", href: "/wiki", icon: BookOpen, title: "База знаний", description: "Описания работы и версии корзин" },
+            { name: "Дорожная карта", href: "/roadmap", icon: Map, title: "Дорожная карта", description: "Что уже сделано и что дальше" },
+            { name: "Обратная связь", href: "/feedback", icon: MessageSquareText, title: "Обратная связь", description: "Обращения и ответы поддержки" },
         ],
     },
     {
@@ -85,6 +103,14 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 title: "Настройки",
                 description: "Обслуживание, объявления и просмотр ролей",
                 permission: "settings:read",
+            },
+            {
+                name: "Техническая документация",
+                href: "/admin/docs",
+                icon: FileText,
+                title: "Техническая документация",
+                description: "Таблицы, маршруты, настройки и контракт расчёта",
+                permissionAny: ["settings:read", "access.read"],
             },
             {
                 kind: "subgroup",
@@ -158,10 +184,10 @@ export function visibleNavigation(can: (permission: PermissionCode) => boolean):
     return APP_NAVIGATION_MAP.flatMap((group) => {
         const items = group.items.flatMap((entry): NavigationEntry[] => {
             if (isNavigationSubgroup(entry)) {
-                const visibleItems = entry.items.filter((item) => !item.permission || can(item.permission));
+                const visibleItems = entry.items.filter((item) => routeVisible(item, can));
                 return visibleItems.length > 0 ? [{ ...entry, items: visibleItems }] : [];
             }
-            return !entry.permission || can(entry.permission) ? [entry] : [];
+            return routeVisible(entry, can) ? [entry] : [];
         });
         return items.length > 0 ? [{ ...group, items }] : [];
     });

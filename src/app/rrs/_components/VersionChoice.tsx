@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { versionStatusTitle } from "@/lib/baskets";
 import type { RrsVersionOffer } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
+import { WikiVersionHint } from "@/components/wiki-version-hint";
 
 export function VersionChoice({
     basketId,
@@ -50,7 +51,10 @@ export function VersionChoice({
                                 checked={active}
                                 onChange={() => onChange(version.id)}
                             />
-                            <span className="min-w-0 flex-1 truncate font-medium">№ {version.versionNo} {version.name}</span>
+                            <span className="flex min-w-0 flex-1 items-center gap-2 truncate font-medium">
+                                № {version.versionNo} {version.name}
+                                <WikiVersionHint versionId={version.id} />
+                            </span>
                             <Badge variant="outline" className={versionBadgeClass(version.status)}>
                                 <VersionMark status={version.status} />
                                 {versionStatusTitle(version.status)}

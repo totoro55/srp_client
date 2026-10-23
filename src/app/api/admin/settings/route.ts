@@ -5,6 +5,13 @@ import {
     type AppSettings,
 } from "@/lib/app-settings";
 import { RRS_EDIT_CUTOFF_MAX, RRS_EDIT_CUTOFF_MIN } from "@/lib/rrs-edit-window";
+import {
+    FEEDBACK_FILE_COUNT_MAX,
+    FEEDBACK_FILE_COUNT_MIN,
+    FEEDBACK_FILE_MAX_MB_MAX,
+    FEEDBACK_FILE_MAX_MB_MIN,
+    parseFeedbackExtensions,
+} from "@/lib/feedback-files";
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { getAppSettings, updateAppSettings } from "@/services/app-settings";
 import { audit } from "@/server/authz/resolve-access";
@@ -30,6 +37,11 @@ function readSettings(body: unknown): AppSettings | null {
     const maintenanceMessage = readMessage(record.maintenanceMessage);
     const noticeMessage = readMessage(record.noticeMessage);
     const cutoffDay = record.rrsEditCutoffDay;
+    const maxMb = record.feedbackFileMaxMb;
+    const maxCount = record.feedbackFileMaxCount;
+    const extensions = typeof record.feedbackFileExtensions === "string"
+        ? parseFeedbackExtensions(record.feedbackFileExtensions)
+        : [];
     if (
         typeof record.maintenanceEnabled !== "boolean" ||
         typeof record.noticeEnabled !== "boolean" ||
@@ -38,6 +50,15 @@ function readSettings(body: unknown): AppSettings | null {
         !Number.isInteger(cutoffDay) ||
         cutoffDay < RRS_EDIT_CUTOFF_MIN ||
         cutoffDay > RRS_EDIT_CUTOFF_MAX ||
+        typeof maxMb !== "number" ||
+        !Number.isInteger(maxMb) ||
+        maxMb < FEEDBACK_FILE_MAX_MB_MIN ||
+        maxMb > FEEDBACK_FILE_MAX_MB_MAX ||
+        typeof maxCount !== "number" ||
+        !Number.isInteger(maxCount) ||
+        maxCount < FEEDBACK_FILE_COUNT_MIN ||
+        maxCount > FEEDBACK_FILE_COUNT_MAX ||
+        extensions.length === 0 ||
         maintenanceMessage === null ||
         noticeMessage === null
     ) {
@@ -55,6 +76,9 @@ function readSettings(body: unknown): AppSettings | null {
         noticeMessage,
         rolePreviewEnabled: record.rolePreviewEnabled,
         rrsEditCutoffDay: cutoffDay,
+        feedbackFileMaxMb: maxMb,
+        feedbackFileMaxCount: maxCount,
+        feedbackFileExtensions: extensions.join(","),
     };
 }
 
@@ -77,7 +101,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Ap
         if (!settings) {
             return createErrorResponse(
                 "BAD_REQUEST",
-                "Проверьте переключатели, текст и день отсечки (от 1 до 28). Сообщение не длиннее 500 символов, у объявления он обязателен.",
+                "Проверьте переключатели, текст, день отсечки (от 1 до 28) и вложения обращений. Сообщение не длиннее 500 символов, у объявления он обязателен.",
                 400
             );
         }
@@ -86,7 +110,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Ap
         await audit(
             access.username,
             "settings.update",
-            `обслуживание=${saved.maintenanceEnabled}; объявление=${saved.noticeEnabled}; просмотр ролей=${saved.rolePreviewEnabled}; отсечка РРС=${saved.rrsEditCutoffDay}`
+            `обслуживание=${saved.maintenanceEnabled}; объявление=${saved.noticeEnabled}; просмотр ролей=${saved.rolePreviewEnabled}; отсечка РРС=${saved.rrsEditCutoffDay}; вложения=${saved.feedbackFileMaxCount} по ${saved.feedbackFileMaxMb} МБ`
         );
         return NextResponse.json({ success: true, data: saved });
     } catch (error) {

@@ -961,6 +961,7 @@ export function BasketDetail() {
                                     onChange={(event) => setVersionDescription(event.target.value)}
                                 />
                                 <p className="text-xs text-muted-foreground">Руководитель видит этот текст, когда выбирает версию.</p>
+                                <Link href={`/wiki/version/${selected.id}`} className="text-xs underline">Описание в базе знаний</Link>
                             </div>
                             <VersionTestTerritories key={selected.id} basketId={basketId} versionId={selected.id} canWrite={canWrite} />
                                 </div>
