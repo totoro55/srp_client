@@ -1,7 +1,8 @@
 # Стенд на тестовом ПК. База и LDAP читаются из C:\srp-stand\.env.
 # Запуск: docker compose --env-file C:/srp-stand/.env up -d --build
-# Вложения обращений лежат в MinIO рядом с приложением. Снаружи порт не открыт,
-# чтобы не пересечься с локальным хранилищем на 127.0.0.1:9000.
+# Вложения обращений лежат в объектном хранилище рядом с приложением.
+# Образ minio/minio с Docker Hub снят, поэтому сервис minio запускает Silo.
+# Снаружи порт не открыт, чтобы не пересечься с локальным хранилищем на 127.0.0.1:9000.
 
 name: srp-stand
 
@@ -23,7 +24,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio
+    image: "docker.io/pgsty/silo:RELEASE.2026-10-18T00-00-00Z@sha256:2636fc4155d9a7e41ff58cdb65ddd13ba9304e67184e13c25bc5cb34016269d7"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-srp-stand}
