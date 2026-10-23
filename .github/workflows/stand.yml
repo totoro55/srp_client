@@ -31,10 +31,81 @@ jobs:
       - name: Build and restart
         shell: pwsh
         run: |
-          docker compose --env-file C:\srp-stand\.env up -d --build --remove-orphans
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          Set-Location -LiteralPath $env:GITHUB_WORKSPACE
+          Remove-Item Env:\COMPOSE_FILE -ErrorAction SilentlyContinue
+          Remove-Item Env:\COMPOSE_PROJECT_DIRECTORY -ErrorAction SilentlyContinue
+          $env:COMPOSE_BAKE = 'false'
+          $env:COMPOSE_PROJECT_NAME = 'srp-stand'
+
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "::notice::Сборка стенда $head"
+
+          $public = Join-Path $pwd 'public'
+          if (-not (Test-Path -LiteralPath $public)) {
+            New-Item -ItemType Directory -Path $public | Out-Null
+          }
+          Set-Content -LiteralPath (Join-Path $public 'stand-revision.txt') -Value $head -Encoding ascii -NoNewline
+
+          $base = @(
+            'compose',
+            '--project-directory', $pwd.Path,
+            '--project-name', 'srp-stand',
+            '-f', (Join-Path $pwd 'docker-compose.yml'),
+            '--env-file', 'C:\srp-stand\.env'
+          )
+          $configArgs = $base + @('config', '--services')
+          $services = @(& docker @configArgs | ForEach-Object { "$_".Trim() }) | Where-Object { $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($services -notcontains 'app' -or $services -notcontains 'minio') {
+            Write-Host "::error::Compose-файл без сервисов app и minio: $($services -join ', ')"
+            exit 1
+          }
+
+          $started = [DateTimeOffset]::UtcNow
+          $buildArgs = $base + @('build', '--progress', 'plain')
+          & docker @buildArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $pullArgs = $base + @('pull', 'minio')
+          & docker @pullArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $upArgs = $base + @('up', '-d', '--force-recreate', '--remove-orphans')
+          & docker @upArgs
           if ($LASTEXITCODE -ne 0) {
-            docker compose --env-file C:\srp-stand\.env ps -a
-            docker compose --env-file C:\srp-stand\.env logs app --tail 80
-            docker compose --env-file C:\srp-stand\.env logs minio --tail 40
+            $psArgs = $base + @('ps', '-a')
+            & docker @psArgs
+            $appLogs = $base + @('logs', 'app', '--tail', '80')
+            & docker @appLogs
+            $minioLogs = $base + @('logs', 'minio', '--tail', '40')
+            & docker @minioLogs
             exit $LASTEXITCODE
           }
+
+          $psqArgs = $base + @('ps', '-q', 'app')
+          $appId = @(& docker @psqArgs | ForEach-Object { "$_".Trim() }) | Where-Object { $_ } | Select-Object -First 1
+          if (-not $appId) {
+            Write-Host '::error::Контейнер приложения не запущен'
+            exit 1
+          }
+          $createdRaw = (docker inspect --format '{{.Created}}' $appId).Trim()
+          $created = [DateTimeOffset]::Parse(
+            $createdRaw.Substring(0, 19) + 'Z',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind
+          )
+          if ($created -lt $started.AddMinutes(-1)) {
+            Write-Host "::error::Контейнер приложения не пересоздан: $createdRaw"
+            exit 1
+          }
+          $inside = (docker exec $appId node -e "process.stdout.write(require('fs').readFileSync('/app/public/stand-revision.txt','utf8'))" | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $inside -ne $head) {
+            Write-Host "::error::В контейнере ревизия '$inside', ожидалась $head"
+            exit 1
+          }
+          Write-Host "::notice::Контейнер приложения создан $createdRaw, ревизия $head"
