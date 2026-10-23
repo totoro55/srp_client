@@ -45,6 +45,17 @@ function parseRuleInput(body: {
     };
 }
 
+async function unknownLogin(rule: RuleInput): Promise<boolean> {
+    if (rule.matchType !== "login") return false;
+    const rows = await db.query<{ login: string }>(
+        "SELECT login FROM employees WHERE lower(login) = lower($1) LIMIT 1",
+        [rule.matchValue]
+    );
+    if (rows.length === 0) return true;
+    rule.matchValue = rows[0].login.toLowerCase();
+    return false;
+}
+
 export async function GET() {
     try {
         await requirePermission("access.read");
@@ -75,6 +86,9 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<{
         const rule = parseRuleInput(await request.json());
         if (!rule) {
             return createErrorResponse("BAD_REQUEST", "Заполните тип, значение, роль и приоритет", 400);
+        }
+        if (await unknownLogin(rule)) {
+            return createErrorResponse("BAD_REQUEST", "Выберите сотрудника из списка", 400);
         }
 
         const conflict = await db.query<{ id: number }>(
@@ -123,6 +137,9 @@ export async function PATCH(request: Request): Promise<NextResponse<ApiResponse<
         const rule = parseRuleInput(body);
         if (!id || !rule) {
             return createErrorResponse("BAD_REQUEST", "Заполните тип, значение, роль и приоритет", 400);
+        }
+        if (await unknownLogin(rule)) {
+            return createErrorResponse("BAD_REQUEST", "Выберите сотрудника из списка", 400);
         }
 
         const existing = await db.query<{ id: number }>("SELECT id FROM role_rules WHERE id = $1", [id]);

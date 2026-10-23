@@ -4,21 +4,23 @@ import { createErrorResponse } from '@/lib/api-error';
 import { ApiResponse } from '@/types/api';
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 
-export async function GET(): Promise<NextResponse<ApiResponse<string[]>>> {
+export interface AvailablePosition {
+    title: string;
+    count: number;
+}
+
+export async function GET(): Promise<NextResponse<ApiResponse<AvailablePosition[]>>> {
     try {
         await requirePermission("access.read");
-        // Выполняем быстрый запрос к представлению в схеме public
-        const positions = await db.query<{ position_name: string }>(
-            `SELECT DISTINCT title AS position_name
+        const positions = await db.query<AvailablePosition>(
+            `SELECT btrim(title) AS title, COUNT(*)::int AS count
              FROM employees
              WHERE title IS NOT NULL AND btrim(title) <> ''
-             ORDER BY title ASC`
+             GROUP BY btrim(title)
+             ORDER BY btrim(title) ASC`
         );
 
-        // Превращаем массив объектов [{ position_name: '...' }] в плоский массив строк
-        const cleanPositions = positions.map(p => p.position_name);
-
-        return NextResponse.json({ success: true, data: cleanPositions });
+        return NextResponse.json({ success: true, data: positions });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) return authResponse;

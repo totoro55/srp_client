@@ -1,7 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
+import { EmployeeCard } from "./EmployeeCard";
+import { PositionCard } from "./PositionCard";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -37,6 +39,13 @@ interface EmployeeLookup {
     branch: string;
 }
 
+const PRIORITY_PRESETS = [1, 10, 100] as const;
+
+interface PositionOption {
+    title: string;
+    count: number;
+}
+
 function toDateInput(value: string | null): string {
     if (!value) return "";
     const date = new Date(value);
@@ -58,7 +67,7 @@ export function RulesEditor() {
     const [selectedLabel, setSelectedLabel] = useState("");
     const [directoryQuery, setDirectoryQuery] = useState("");
     const [employees, setEmployees] = useState<EmployeeLookup[]>([]);
-    const [positions, setPositions] = useState<string[]>([]);
+    const [positions, setPositions] = useState<PositionOption[]>([]);
     const [positionsLoaded, setPositionsLoaded] = useState(false);
     const [directoryLoading, setDirectoryLoading] = useState(false);
     const [roleId, setRoleId] = useState("");
@@ -74,6 +83,7 @@ export function RulesEditor() {
     const [deleting, setDeleting] = useState(false);
     const [loaded, setLoaded] = useState(false);
     const [saving, setSaving] = useState(false);
+    const pickedLogin = useRef("");
 
     const visibleRules = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -92,13 +102,22 @@ export function RulesEditor() {
     const visiblePositions = useMemo(() => {
         const needle = directoryQuery.trim().toLowerCase();
         if (!needle) return positions;
-        return positions.filter((position) => position.toLowerCase().includes(needle));
+        return positions.filter((position) => position.title.toLowerCase().includes(needle));
     }, [positions, directoryQuery]);
 
     function resetLookup() {
+        pickedLogin.current = "";
         setMatchValue("");
         setSelectedLabel("");
         setDirectoryQuery("");
+    }
+
+    function chooseEmployee(employee: EmployeeLookup) {
+        const login = employee.login.trim();
+        pickedLogin.current = login;
+        setMatchValue(login);
+        setSelectedLabel(employee.name);
+        setDirectoryQuery(login);
     }
 
     function openCreate() {
@@ -114,6 +133,7 @@ export function RulesEditor() {
     function openEdit(rule: RuleRow) {
         setEditingId(rule.id);
         setMatchType(rule.matchType);
+        pickedLogin.current = rule.matchType === "login" ? rule.matchValue : "";
         setMatchValue(rule.matchValue);
         setSelectedLabel("");
         setDirectoryQuery(rule.matchValue);
@@ -211,7 +231,8 @@ export function RulesEditor() {
             setError(validationMessage);
             return;
         }
-        if (!matchValue.trim()) {
+        const chosen = matchType === "login" ? pickedLogin.current.trim() : matchValue.trim();
+        if (!chosen) {
             setError(matchType === "login" ? "Выберите сотрудника" : "Выберите должность");
             return;
         }
@@ -224,7 +245,7 @@ export function RulesEditor() {
                 body: JSON.stringify({
                     id: editingId,
                     matchType,
-                    matchValue,
+                    matchValue: chosen,
                     roleId: Number(roleId),
                     priority: Number(priority),
                     expiresAt: matchType === "login" ? expiresAt : null,
@@ -326,7 +347,14 @@ export function RulesEditor() {
                                         <Input
                                             id="rule-search"
                                             value={directoryQuery}
-                                            onChange={(event) => setDirectoryQuery(event.target.value)}
+                                            onChange={(event) => {
+                                                const next = event.target.value;
+                                                setDirectoryQuery(next);
+                                                if (matchType !== "login" || next.trim().toLowerCase() === pickedLogin.current.trim().toLowerCase()) return;
+                                                pickedLogin.current = "";
+                                                setMatchValue("");
+                                                setSelectedLabel("");
+                                            }}
                                             placeholder={matchType === "login" ? "Имя, логин, должность или филиал" : "Должность"}
                                             autoComplete="off"
                                         />
@@ -343,9 +371,9 @@ export function RulesEditor() {
                                                         key={employee.login}
                                                         type="button"
                                                         className={`flex w-full flex-col items-start gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted ${matchValue.toLowerCase() === employee.login.toLowerCase() ? "bg-muted" : ""}`}
-                                                        onClick={() => {
-                                                            setMatchValue(employee.login);
-                                                            setSelectedLabel(employee.name);
+                                                        onMouseDown={(event) => {
+                                                            event.preventDefault();
+                                                            chooseEmployee(employee);
                                                         }}
                                                     >
                                                         <span className="text-sm">{employee.name}</span>
@@ -362,22 +390,28 @@ export function RulesEditor() {
                                                 ) : <LookupSkeleton lines={1} />
                                             ) : visiblePositions.map((position) => (
                                                 <button
-                                                    key={position}
+                                                    key={position.title}
                                                     type="button"
-                                                    className={`flex w-full items-start border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted ${matchValue === position ? "bg-muted" : ""}`}
+                                                    className={`flex w-full items-baseline justify-between gap-3 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted ${matchValue === position.title ? "bg-muted" : ""}`}
                                                     onClick={() => {
-                                                        setMatchValue(position);
-                                                        setSelectedLabel(position);
+                                                        setMatchValue(position.title);
+                                                        setSelectedLabel(position.title);
                                                     }}
                                                 >
-                                                    {position}
+                                                    <span className="min-w-0">{position.title}</span>
+                                                    <span className="shrink-0 text-xs text-muted-foreground">{position.count}</span>
                                                 </button>
                                             ))}
                                         </div>
                                         <p className="text-xs text-muted-foreground">
                                             {matchValue
                                                 ? matchType === "login"
-                                                    ? `В правило запишется логин ${matchValue}${selectedLabel ? ` (${selectedLabel})` : ""}.`
+                                                    ? (
+                                                        <span className="inline-flex items-center gap-1">
+                                                            {`В правило запишется логин ${matchValue}${selectedLabel ? ` (${selectedLabel})` : ""}.`}
+                                                            <EmployeeCard login={matchValue} />
+                                                        </span>
+                                                    )
                                                     : `Правило сработает для должности «${matchValue}».`
                                                 : matchType === "login"
                                                     ? "Выберите сотрудника. В правило попадёт его логин."
@@ -400,7 +434,23 @@ export function RulesEditor() {
                                     </div>
                                     <div className="flex flex-col gap-1.5">
                                         <Label htmlFor="rule-priority">Приоритет</Label>
-                                        <Input id="rule-priority" value={priority} onChange={(event) => setPriority(event.target.value)} type="number" required />
+                                        <div className="flex items-center gap-2">
+                                            <Input id="rule-priority" className="min-w-0 flex-1" value={priority} onChange={(event) => setPriority(event.target.value)} type="number" required />
+                                            {PRIORITY_PRESETS.map((value) => (
+                                                <Button
+                                                    key={value}
+                                                    type="button"
+                                                    variant={Number(priority) === value ? "secondary" : "outline"}
+                                                    size="sm"
+                                                    className="h-9 px-2.5"
+                                                    aria-label={`Установить приоритет ${value}`}
+                                                    aria-pressed={Number(priority) === value}
+                                                    onClick={() => setPriority(String(value))}
+                                                >
+                                                    {value}
+                                                </Button>
+                                            ))}
+                                        </div>
                                     </div>
                                     {matchType === "login" ? (
                                         <div className="flex flex-col gap-1.5">
@@ -477,7 +527,14 @@ export function RulesEditor() {
                         <TableRow key={rule.id}>
                             <TableCell>{rule.priority}</TableCell>
                             <TableCell>{rule.matchType === "login" ? "Логин" : "Должность"}</TableCell>
-                            <TableCell>{rule.matchValue}</TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-1">
+                                    <span className="min-w-0 wrap-break-word">{rule.matchValue}</span>
+                                    {rule.matchType === "login"
+                                        ? <EmployeeCard login={rule.matchValue} />
+                                        : <PositionCard title={rule.matchValue} />}
+                                </div>
+                            </TableCell>
                             <TableCell>{rule.roleName}</TableCell>
                             <TableCell>{rule.expiresAt ? new Date(rule.expiresAt).toLocaleDateString("ru-RU") : "—"}</TableCell>
                             <TableCell>
