@@ -1,5 +1,7 @@
 # Стенд на тестовом ПК. База и LDAP читаются из C:\srp-stand\.env.
 # Запуск: docker compose --env-file C:/srp-stand/.env up -d --build
+# Вложения обращений лежат в MinIO рядом с приложением. Снаружи порт не открыт,
+# чтобы не пересечься с локальным хранилищем на 127.0.0.1:9000.
 
 name: srp-stand
 
@@ -10,18 +12,22 @@ services:
       - "3000:3000"
     env_file:
       - C:/srp-stand/.env
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-srp-feedback}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-srp-stand}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-srp-stand-change-me}
+      S3_REGION: ${S3_REGION:-us-east-1}
+    depends_on:
+      - minio
     restart: unless-stopped
 
   minio:
-    profiles: ["storage"]
     image: minio/minio
     command: server /data --console-address ":9001"
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-srp-stand}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-srp-stand-change-me}
     volumes:
       - minio-data:/data
     restart: unless-stopped

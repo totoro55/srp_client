@@ -2,7 +2,7 @@ name: Update test stand
 
 on:
   push:
-    branches: [master]
+    branches: [master, mvp-wave-1]
 
 jobs:
   deploy:
@@ -35,5 +35,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             docker compose --env-file C:\srp-stand\.env ps -a
             docker compose --env-file C:\srp-stand\.env logs app --tail 80
+            docker compose --env-file C:\srp-stand\.env logs minio --tail 40
             exit $LASTEXITCODE
           }
