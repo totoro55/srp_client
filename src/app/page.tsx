@@ -6,6 +6,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { listNews } from "@/services/news";
+import { newsAuthorLine } from "@/lib/news";
 
 export default async function Home() {
     const session = await getServerSession(authOptions);
@@ -14,6 +15,7 @@ export default async function Home() {
     }
     const access = await getRequestAccess();
     const news = access ? await listNews(access) : [];
+    const published = news.filter((post) => post.status === "published" && new Date(post.publishedAt).getTime() <= Date.now());
 
     return (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-8">
@@ -33,19 +35,21 @@ export default async function Home() {
                     <h2 className="text-base font-semibold">Новости</h2>
                     <Link href="/news" className="text-sm text-muted-foreground underline-offset-4 hover:underline">Все новости</Link>
                 </div>
-                {news.length === 0 ? (
+                {published.length === 0 ? (
                     <Card>
                         <CardContent className="text-sm text-muted-foreground">Новостей пока нет.</CardContent>
                     </Card>
                 ) : null}
-                {news.slice(0, 3).map((post) => (
-                    <Card key={post.id}>
-                        <CardHeader>
-                            <CardTitle>{post.title}</CardTitle>
-                            <CardDescription>{new Date(post.publishedAt).toLocaleString("ru-RU")} · {post.author}</CardDescription>
-                        </CardHeader>
-                        <CardContent className="line-clamp-4 whitespace-pre-wrap text-sm">{post.body}</CardContent>
-                    </Card>
+                {published.slice(0, 2).map((post) => (
+                    <Link key={post.id} href={`/news/${post.id}`} className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                        <Card className="h-full transition-colors hover:bg-muted/40">
+                            <CardHeader>
+                                <CardTitle className="wrap-break-word">{post.title}</CardTitle>
+                                <CardDescription>{new Date(post.publishedAt).toLocaleString("ru-RU")} · {newsAuthorLine(post)}</CardDescription>
+                            </CardHeader>
+                            <CardContent className="line-clamp-4 wrap-break-word whitespace-pre-wrap text-sm">{post.body}</CardContent>
+                        </Card>
+                    </Link>
                 ))}
             </section>
             <Card>
@@ -60,3 +64,4 @@ export default async function Home() {
         </div>
     );
 }
+

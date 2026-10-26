@@ -1,5 +1,7 @@
 import { can } from "@/lib/access";
-import { NEWS_BODY_MAX, NEWS_TITLE_MAX, boundedText, roleIds } from "@/lib/content";
+import { NEWS_BODY_MAX, NEWS_TITLE_MAX, boundedText } from "@/lib/content";
+import { newsAssetIds, newsPlainText, readNewsDocument, type NewsNode } from "@/lib/news-document";
+import type { NewsStatus } from "@/lib/news";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
 import { ContentError } from "@/services/content-error";
@@ -8,8 +10,12 @@ export interface NewsPost {
     id: number;
     title: string;
     body: string;
+    document: NewsNode | null;
+    status: NewsStatus;
     publishedAt: string;
     author: string;
+    authorName: string | null;
+    authorTitle: string | null;
     roleIds: number[];
 }
 
@@ -17,30 +23,56 @@ interface NewsRow {
     id: number;
     title: string;
     body: string;
+    document?: unknown;
+    status: string;
     published_at: Date;
     author: string;
+    author_name: string | null;
+    author_title: string | null;
     role_ids: number[];
 }
 
-export async function listNews(access: AccessView): Promise<NewsPost[]> {
+const DOCUMENT_LIMIT = 100_000;
+
+export function listNews(access: AccessView): Promise<NewsPost[]> {
+    return queryNews(access, null, false);
+}
+
+export async function getNews(access: AccessView, id: number): Promise<NewsPost | null> {
+    const posts = await queryNews(access, id, true);
+    return posts[0] ?? null;
+}
+
+async function queryNews(access: AccessView, id: number | null, includeDocument: boolean): Promise<NewsPost[]> {
     const writer = can(access, "news:write");
     const roleId = access.role?.id ?? null;
     const rows = await db.query<NewsRow>(
         `
-        SELECT post.id, post.title, post.body, post.published_at, post.author,
+        SELECT post.id, post.title, post.body, post.status, post.published_at, post.author,
+               ${includeDocument ? "post.document," : ""}
+               employee.name AS author_name, employee.title AS author_title,
                COALESCE(json_agg(link.role_id) FILTER (WHERE link.role_id IS NOT NULL), '[]') AS role_ids
         FROM news_posts post
         LEFT JOIN news_post_roles link ON link.post_id = post.id
-        WHERE $1::boolean OR EXISTS (
-            SELECT 1 FROM news_post_roles visible
-            WHERE visible.post_id = post.id AND visible.role_id = $2
-        )
-        GROUP BY post.id
+        LEFT JOIN employees employee ON lower(employee.login) = lower(post.author)
+        WHERE ($3::int IS NULL OR post.id = $3)
+          AND (
+            $1::boolean
+            OR (
+                post.status = 'published'
+                AND post.published_at <= NOW()
+                AND EXISTS (
+                    SELECT 1 FROM news_post_roles visible
+                    WHERE visible.post_id = post.id AND visible.role_id = $2
+                )
+            )
+          )
+        GROUP BY post.id, employee.name, employee.title
         ORDER BY post.published_at DESC, post.id DESC
         `,
-        [writer, roleId]
+        [writer, roleId, id]
     );
-    return rows.map(toNews);
+    return rows.map((row) => toNews(row, includeDocument));
 }
 
 export async function saveNews(access: AccessView, id: number | null, body: unknown): Promise<NewsPost> {
@@ -49,24 +81,28 @@ export async function saveNews(access: AccessView, id: number | null, body: unkn
         await assertRoles(query, input.roleIds);
         if (id === null) {
             const inserted = await query<{ id: number }>(
-                `INSERT INTO news_posts (title, body, published_at, author) VALUES ($1, $2, $3, $4) RETURNING id`,
-                [input.title, input.body, input.publishedAt, access.username]
+                `INSERT INTO news_posts (title, body, published_at, author, document, status)
+                 VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id`,
+                [input.title, input.body, input.publishedAt, access.username, JSON.stringify(input.document), input.status]
             );
             await replaceNewsRoles(query, inserted[0].id, input.roleIds);
+            await linkNewsAssets(query, inserted[0].id, input.document);
             return inserted[0].id;
         }
         const updated = await query<{ id: number }>(
-            `UPDATE news_posts SET title = $2, body = $3, published_at = $4, updated_at = NOW() WHERE id = $1 RETURNING id`,
-            [id, input.title, input.body, input.publishedAt]
+            `UPDATE news_posts
+             SET title = $2, body = $3, published_at = $4, document = $5::jsonb, status = $6, updated_at = NOW()
+             WHERE id = $1 RETURNING id`,
+            [id, input.title, input.body, input.publishedAt, JSON.stringify(input.document), input.status]
         );
         if (updated.length === 0) {
             throw new ContentError("Новость не найдена");
         }
         await replaceNewsRoles(query, id, input.roleIds);
+        await linkNewsAssets(query, id, input.document);
         return id;
     });
-    const posts = await listNews(access);
-    const post = posts.find((item) => item.id === savedId);
+    const post = await getNews(access, savedId);
     if (!post) {
         throw new ContentError("Новость не найдена");
     }
@@ -80,25 +116,67 @@ export async function deleteNews(id: number): Promise<void> {
     }
 }
 
-function readNews(body: unknown): { title: string; body: string; publishedAt: string; roleIds: number[] } {
+function readNews(body: unknown): { title: string; body: string; document: NewsNode; publishedAt: string; roleIds: number[]; status: NewsStatus } {
     if (!body || typeof body !== "object") {
         throw new ContentError("Проверьте заголовок, текст, дату и роли");
     }
     const record = body as Record<string, unknown>;
+    const status: NewsStatus | null = record.status === "draft" || record.status === "published" ? record.status : null;
     const title = boundedText(record.title, NEWS_TITLE_MAX, "Заголовок");
-    const text = boundedText(record.body, NEWS_BODY_MAX, "Текст");
-    const roles = roleIds(record.roleIds);
+    const parsed = readNewsDocument(record.document);
+    const roles = readRoleIds(record.roleIds, status === "published");
     const published = typeof record.publishedAt === "string" ? new Date(record.publishedAt) : null;
-    if (typeof title !== "string" || typeof text !== "string" || !roles || !published || Number.isNaN(published.getTime())) {
-        throw new ContentError(typeof title !== "string" ? title.error : typeof text !== "string" ? text.error : "Укажите дату и хотя бы одну роль");
+    if (!status || typeof title !== "string" || "error" in parsed || "error" in roles || !published || Number.isNaN(published.getTime())) {
+        throw new ContentError(fieldError(title, parsed, roles, status, published));
     }
-    return { title, body: text, publishedAt: published.toISOString(), roleIds: roles };
+    const text = newsPlainText(parsed.document);
+    if (status === "published" && text.length === 0) {
+        throw new ContentError("Текст не заполнен");
+    }
+    if (text.length > NEWS_BODY_MAX) {
+        throw new ContentError(`Текст длиннее ${NEWS_BODY_MAX} символов`);
+    }
+    if (JSON.stringify(parsed.document).length > DOCUMENT_LIMIT) {
+        throw new ContentError("Текст новости слишком большой");
+    }
+    return { title, body: text, document: parsed.document, publishedAt: published.toISOString(), roleIds: roles, status };
+}
+
+function fieldError(
+    title: string | { error: string },
+    parsed: { document: NewsNode } | { error: string },
+    roles: number[] | { error: string },
+    status: NewsStatus | null,
+    published: Date | null
+): string {
+    if (typeof title !== "string") return title.error;
+    if ("error" in parsed) return parsed.error;
+    if (!status || !published || Number.isNaN(published.getTime())) return "Укажите дату публикации";
+    if ("error" in roles) return roles.error;
+    return "Проверьте заголовок, текст, дату и роли";
+}
+
+function readRoleIds(value: unknown, required: boolean): number[] | { error: string } {
+    if (!Array.isArray(value)) {
+        return { error: "Выберите хотя бы одну роль" };
+    }
+    if (value.length === 0) {
+        return required ? { error: "Выберите хотя бы одну роль" } : [];
+    }
+    const ids = value.filter((item): item is number => typeof item === "number" && Number.isInteger(item) && item > 0);
+    if (ids.length !== value.length) {
+        return { error: "Выберите хотя бы одну роль" };
+    }
+    return [...new Set(ids)];
 }
 
 async function assertRoles(
     query: <T extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<T[]>,
     ids: number[]
 ): Promise<void> {
+    if (ids.length === 0) {
+        return;
+    }
     const rows = await query<{ id: number }>("SELECT id FROM roles WHERE id = ANY($1::int[])", [ids]);
     if (rows.length !== ids.length) {
         throw new ContentError("Одна из ролей больше не существует");
@@ -116,13 +194,116 @@ async function replaceNewsRoles(
     }
 }
 
-function toNews(row: NewsRow): NewsPost {
+function toNews(row: NewsRow, includeDocument: boolean): NewsPost {
     return {
         id: row.id,
         title: row.title,
         body: row.body,
+        document: includeDocument ? storedDocument(row.document) : null,
+        status: row.status === "draft" ? "draft" : "published",
         publishedAt: new Date(row.published_at).toISOString(),
         author: row.author,
+        authorName: row.author_name?.trim() || null,
+        authorTitle: row.author_title?.trim() || null,
         roleIds: row.role_ids.map(Number),
     };
+}
+
+function storedDocument(value: unknown): NewsNode | null {
+    if (typeof value === "string") {
+        try {
+            return storedDocument(JSON.parse(value) as unknown);
+        } catch {
+            return null;
+        }
+    }
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    const result = readNewsDocument(value);
+    return "error" in result ? null : result.document;
+}
+
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+const FILE_TYPES = new Set([
+    ...IMAGE_TYPES,
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "application/zip",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+
+export async function storeNewsAsset(access: AccessView, file: File, kind: "image" | "file"): Promise<string> {
+    const allowed = kind === "image" ? IMAGE_TYPES : FILE_TYPES;
+    if (!allowed.has(file.type)) {
+        throw new ContentError(kind === "image" ? "Нужен снимок в PNG, JPEG, WEBP или GIF" : "Этот тип файла не поддерживается");
+    }
+    if (file.size <= 0) {
+        throw new ContentError("Файл пустой");
+    }
+    const limit = kind === "image" ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (file.size > limit) {
+        throw new ContentError(kind === "image" ? "Снимок больше 5 МБ" : "Файл больше 10 МБ");
+    }
+    const filename = file.name.split(/[/\\]/).pop()?.slice(0, 255) || (kind === "image" ? "image" : "file");
+    const content = Buffer.from(await file.arrayBuffer());
+    const rows = await db.query<{ id: string }>(
+        "INSERT INTO news_assets (mime, filename, content, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
+        [file.type, filename, content, access.username]
+    );
+    return rows[0].id;
+}
+
+export async function readNewsAsset(
+    access: AccessView,
+    id: string
+): Promise<{ mime: string; filename: string; content: Buffer } | null> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return null;
+    }
+    const rows = await db.query<{ mime: string; filename: string; content: Buffer; post_id: number | null }>(
+        "SELECT mime, filename, content, post_id FROM news_assets WHERE id = $1",
+        [id]
+    );
+    const asset = rows[0];
+    if (!asset) {
+        return null;
+    }
+    const payload = { mime: asset.mime, filename: asset.filename, content: asset.content };
+    if (can(access, "news:write")) {
+        return payload;
+    }
+    if (asset.post_id == null) {
+        return null;
+    }
+    const post = await getNews(access, Number(asset.post_id));
+    if (!post?.document || !newsAssetIds(post.document).includes(id.toLowerCase())) {
+        return null;
+    }
+    return payload;
+}
+
+async function linkNewsAssets(
+    query: <T extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<T[]>,
+    postId: number,
+    document: NewsNode
+): Promise<void> {
+    const ids = newsAssetIds(document);
+    if (ids.length === 0) {
+        return;
+    }
+    await query(
+        `UPDATE news_assets
+         SET post_id = $1
+         WHERE id = ANY($2::uuid[])
+           AND (post_id IS NULL OR post_id = $1)`,
+        [postId, ids]
+    );
 }

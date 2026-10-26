@@ -3,6 +3,7 @@ import { can } from "@/lib/access";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { ContentError } from "@/services/content-error";
 import { ensureVersionArticle, wikiVersionHint } from "@/services/wiki";
+import { HubColumn } from "../../../_components/HubColumn";
 
 export default async function WikiVersionPage({ params }: { params: Promise<{ versionId: string }> }) {
     const access = await getRequestAccess();
@@ -25,7 +26,7 @@ export default async function WikiVersionPage({ params }: { params: Promise<{ ve
         redirect(`/wiki/${articleId}/edit`);
     } catch (error) {
         if (error instanceof ContentError) {
-            return <p className="text-sm text-muted-foreground">{error.message}</p>;
+            return <HubColumn><p className="text-sm text-muted-foreground">{error.message}</p></HubColumn>;
         }
         throw error;
     }

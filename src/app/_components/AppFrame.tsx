@@ -24,7 +24,7 @@ export function AppFrame({
         <SidebarProvider defaultOpen={false}>
             {signedIn ? <AppSideBar /> : null}
             <PageHeadingProvider>
-                <main className="w-full">
+                <main className="flex min-w-0 flex-1 flex-col">
                     {notice}
                     {signedIn ? <AccessBanner /> : null}
                     {signedIn ? <Header /> : null}

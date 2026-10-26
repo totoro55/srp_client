@@ -7,5 +7,5 @@ export default async function HubLayout({ children }: { children: React.ReactNod
         redirect("/login");
     }
 
-    return <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 md:px-8 md:py-6">{children}</div>;
+    return <div className="flex min-h-0 w-full flex-1 flex-col">{children}</div>;
 }
