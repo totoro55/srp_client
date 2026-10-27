@@ -194,7 +194,7 @@ function highlight(text: string, query: string): ReactNode {
             parts.push(text.slice(cursor, index));
         }
         parts.push(
-            <mark key={key} className="rounded-sm bg-primary/15 text-inherit">
+            <mark key={key} className="tech-doc-hit">
                 {text.slice(index, index + needle.length)}
             </mark>,
         );
