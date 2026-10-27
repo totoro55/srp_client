@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, Map, MessageSquareText, FileText } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -52,7 +52,6 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         items: [
             { name: "Новости", href: "/news", icon: Newspaper, title: "Новости", description: "Сообщения для выбранных ролей" },
             { name: "База знаний", href: "/wiki", icon: BookOpen, title: "База знаний", description: "Описания работы и версии корзин" },
-            { name: "Дорожная карта", href: "/roadmap", icon: Map, title: "Дорожная карта", description: "Что уже сделано и что дальше" },
             { name: "Обратная связь", href: "/feedback", icon: MessageSquareText, title: "Обратная связь", description: "Обращения и ответы поддержки" },
         ],
     },
@@ -206,6 +205,7 @@ const EXTRA_PAGE_HEADINGS: Record<string, PageHeading> = {
     "/login": { title: "Авторизация" },
     "/forbidden": { title: "Доступ ограничен" },
     "/maintenance": { title: "Обслуживание" },
+    "/roadmap": { title: "Дорожная карта", description: "Что уже сделано и что дальше" },
 };
 
 export function isRouteActive(pathname: string, href: string): boolean {

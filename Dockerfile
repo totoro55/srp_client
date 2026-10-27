@@ -21,5 +21,7 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 COPY --from=build /app/src/services/migrations ./src/services/migrations
+COPY --from=build /app/docs ./docs
+COPY --from=build /app/src/app/api ./src/app/api
 EXPOSE 3000
 CMD ["node", "server.js"]
