@@ -1,4 +1,7 @@
+import { formulaColor, storedFormulaGap } from "@/lib/formula-style";
 import { newsBorderWidth, newsColor, newsFontSize, newsImageAlign, newsImageFrame } from "@/lib/news-format";
+import { storedBlockGap } from "@/lib/block-gap";
+import { storedTextLineHeight, storedTextTracking } from "@/lib/text-spacing";
 
 export interface NewsMark {
     type: string;
@@ -31,6 +34,8 @@ const BLOCKS = new Set([
 const MARKS = new Set(["bold", "italic", "underline", "strike", "code", "link", "textStyle", "highlight"]);
 
 const FILLABLE = new Set(["paragraph", "heading", "blockquote", "listItem", "tableCell", "tableHeader", "codeBlock"]);
+
+const BLOCK_GAP_NODES = new Set(["paragraph", "heading", "bulletList", "orderedList", "blockquote", "codeBlock", "table"]);
 
 export const NEWS_ASSET_SRC = /^\/api\/news\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
@@ -112,7 +117,11 @@ function sanitizeAnchor(node: NewsNode, depth: number, rules: DocumentRules): Ne
     const content = Array.isArray(node.content) ? node.content : [];
     return {
         type: "wikiAnchor",
-        attrs: { id: typeof node.attrs?.id === "string" ? node.attrs.id : "" },
+        attrs: {
+            id: typeof node.attrs?.id === "string" ? node.attrs.id : "",
+            ...spacingAttrs(node),
+            ...blockGapAttrs(node),
+        },
         content: content.map((child) => {
             if (child.type !== "text" && child.type !== "hardBreak") {
                 throw new Error("В статье есть недопустимый блок");
@@ -136,11 +145,24 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number, rules: Docum
         return { type: "hardBreak" };
     }
     if (node.type === "horizontalRule") {
-        return { type: "horizontalRule" };
+        const attrs = blockGapAttrs(node);
+        return Object.keys(attrs).length > 0 ? { type: "horizontalRule", attrs } : { type: "horizontalRule" };
     }
     if (node.type === "blockMath" || node.type === "inlineMath") {
         const latex = typeof node.attrs?.latex === "string" ? node.attrs.latex.slice(0, 2000) : "";
-        return { type: node.type, attrs: { latex } };
+        const fontSize = newsFontSize(node.attrs?.fontSize);
+        const color = formulaColor(node.attrs?.color);
+        const gap = storedFormulaGap(node.attrs?.gap);
+        return {
+            type: node.type,
+            attrs: {
+                latex,
+                ...(fontSize ? { fontSize } : {}),
+                ...(color ? { color } : {}),
+                ...(gap !== undefined ? { gap } : {}),
+                ...(node.type === "blockMath" ? blockGapAttrs(node) : {}),
+            },
+        };
     }
     if (node.type === "image") {
         const width = pixel(node.attrs?.width, 1, 4000);
@@ -159,6 +181,7 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number, rules: Docum
                 ...(borderColor ? { borderColor, borderWidth: borderWidth ?? 2 } : {}),
                 ...(align ? { align } : {}),
                 ...(frame ? { frame } : {}),
+                ...blockGapAttrs(node),
             },
         };
     }
@@ -172,6 +195,7 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number, rules: Docum
                 src: assetSrc(node.attrs?.src, "Вложение ведёт на недопустимый адрес", rules),
                 title: typeof node.attrs?.title === "string" ? node.attrs.title.slice(0, 255) : "",
                 mime,
+                ...blockGapAttrs(node),
             },
         };
     }
@@ -225,6 +249,8 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number, rules: Docum
         next.content = node.content.map((child) => sanitizeNode(child, false, depth + 1, rules));
     }
     mergeFill(next, node);
+    mergeSpacing(next, node);
+    mergeBlockGap(next, node);
     return next;
 }
 
@@ -266,7 +292,11 @@ function sanitizeDetails(node: NewsNode, depth: number, rules: DocumentRules): N
         if (content.some((child) => child.type !== "text")) {
             throw new Error("Раскрывающийся блок повреждён");
         }
-        return content.length > 0 ? { type: "detailsSummary", content } : { type: "detailsSummary" };
+        const attrs = spacingAttrs(node);
+        if (content.length === 0) {
+            return Object.keys(attrs).length > 0 ? { type: "detailsSummary", attrs } : { type: "detailsSummary" };
+        }
+        return Object.keys(attrs).length > 0 ? { type: "detailsSummary", attrs, content } : { type: "detailsSummary", content };
     }
     if (node.type === "detailsContent") {
         if (content.length === 0 || content.some((child) => !DETAILS_CONTENT.has(child.type))) {
@@ -279,7 +309,7 @@ function sanitizeDetails(node: NewsNode, depth: number, rules: DocumentRules): N
     }
     return {
         type: "details",
-        attrs: { open: node.attrs?.open === true },
+        attrs: { open: node.attrs?.open === true, ...blockGapAttrs(node) },
         content,
     };
 }
@@ -310,6 +340,42 @@ function mentionLabel(value: unknown): string | undefined {
     return label;
 }
 
+function blockGapAttrs(source: NewsNode): { blockGap?: number } {
+    const gap = storedBlockGap(source.attrs?.blockGap);
+    return gap === undefined ? {} : { blockGap: gap };
+}
+
+function mergeBlockGap(next: NewsNode, source: NewsNode) {
+    if (!BLOCK_GAP_NODES.has(next.type)) {
+        return;
+    }
+    const attrs = blockGapAttrs(source);
+    if (Object.keys(attrs).length === 0) {
+        return;
+    }
+    next.attrs = { ...(next.attrs ?? {}), ...attrs };
+}
+
+function spacingAttrs(source: NewsNode): Record<string, number> {
+    const lineHeight = storedTextLineHeight(source.attrs?.lineHeight);
+    const letterSpacing = storedTextTracking(source.attrs?.letterSpacing);
+    return {
+        ...(lineHeight !== undefined ? { lineHeight } : {}),
+        ...(letterSpacing !== undefined ? { letterSpacing } : {}),
+    };
+}
+
+function mergeSpacing(next: NewsNode, source: NewsNode) {
+    if (!FILLABLE.has(next.type)) {
+        return;
+    }
+    const attrs = spacingAttrs(source);
+    if (Object.keys(attrs).length === 0) {
+        return;
+    }
+    next.attrs = { ...(next.attrs ?? {}), ...attrs };
+}
+
 function mergeFill(next: NewsNode, source: NewsNode) {
     if (!FILLABLE.has(next.type)) {
         return;
@@ -338,10 +404,16 @@ function sanitizeMark(mark: NewsMark, rules: DocumentRules): NewsMark | undefine
     }
     if (mark.type === "link") {
         const href = mark.attrs?.href ?? "";
-        if (!rules.allowHref(href)) {
+        if (typeof href !== "string" || !rules.allowHref(href)) {
             throw new Error("Ссылка ведёт на недопустимый адрес");
         }
-        return { type: "link", attrs: { href: href.slice(0, 2000) } };
+        const blank = mark.attrs?.target === "_blank";
+        return {
+            type: "link",
+            attrs: blank
+                ? { href: href.slice(0, 2000), target: "_blank", rel: "noopener noreferrer" }
+                : { href: href.slice(0, 2000) },
+        };
     }
     if (mark.type === "textStyle") {
         const color = newsColor(mark.attrs?.color);

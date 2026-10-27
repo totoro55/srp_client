@@ -1,26 +1,30 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { Node, mergeAttributes } from "@tiptap/core";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { Extension, getMarkRange, Node, mergeAttributes } from "@tiptap/core";
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor, type ReactNodeViewProps } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Heading from "@tiptap/extension-heading";
 import { Details, DetailsContent, DetailsSummary } from "@tiptap/extension-details";
 import Highlight from "@tiptap/extension-highlight";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
-import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
+import { ArticleBlockMath, ArticleInlineMath } from "./formula-node";
 import Mention from "@tiptap/extension-mention";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Table, TableRow } from "@tiptap/extension-table";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import "katex/dist/katex.min.css";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
-import type { EditorView, ViewMutationRecord } from "@tiptap/pm/view";
+import { AllSelection, NodeSelection, Plugin, TextSelection, type Selection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView, type ViewMutationRecord } from "@tiptap/pm/view";
 import {
     AlignCenter,
+    AlignHorizontalSpaceAround,
     AlignLeft,
     AlignRight,
+    AlignVerticalSpaceAround,
+    AlignVerticalSpaceBetween,
+    ALargeSmall,
     AtSign,
     BetweenHorizontalEnd,
     BetweenHorizontalStart,
@@ -29,14 +33,19 @@ import {
     Bold,
     Bookmark,
     Check,
-    ChevronDown,
     Circle,
     CircleOff,
     Copy,
     Download,
     Code,
     CornerDownLeft,
+    File,
+    FileArchive,
     FileCode,
+    FileImage,
+    FileSpreadsheet,
+    FileText,
+    FileType,
     Frame,
     Heading2,
     Heading3,
@@ -51,8 +60,10 @@ import {
     PaintBucket,
     Palette,
     Paperclip,
+    Pencil,
     Pilcrow,
     Plus,
+    Presentation,
     Quote,
     Radius,
     Radical,
@@ -100,6 +111,8 @@ import {
     MenubarTrigger,
 } from "@/components/ui/menubar";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { FormAlert } from "@/components/form-alert";
 import { StackSkeleton } from "@/components/loading-state";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -117,7 +130,6 @@ import { type NewsNode } from "@/lib/news-document";
 import { wikiAnchorSlug } from "@/lib/wiki-document";
 import { mentionSuggestion } from "./mention";
 import {
-    NEWS_BORDER_COLORS,
     NEWS_BORDER_WIDTHS,
     NEWS_IMAGE_FRAMES,
     NEWS_FILL_COLORS,
@@ -126,9 +138,9 @@ import {
     NEWS_FONT_SIZE_MIN,
     NEWS_FONT_SIZES,
     NEWS_HIGHLIGHT_COLORS,
-    NEWS_TEXT_COLORS,
-    newsBorderColorFromAttribute,
-    newsBorderToken,
+    NEWS_POPULAR_COLORS,
+    newsBorderColorFromElement,
+    newsBorderMarkup,
     newsBorderWidth,
     newsBorderWidthFromAttribute,
     newsBorderWidthToken,
@@ -139,29 +151,23 @@ import {
 import { ElementFill } from "./element-fill";
 import { NewsTableCell, NewsTableHeader, NewsTableView, replaceCellAttributes, TableGesture } from "./table-node";
 import { applyRowHeight, TableRowResize } from "./table-row-resize";
+import { fileExtension, fileGlyph, fileGlyphLabel, normalizeUpload, uploadAccept, uploadRejectMessage, type FileGlyph } from "@/lib/content-file";
 import { notifyError } from "@/lib/notify";
 import { copyWikiAnchorLink, followAnchorLink } from "@/lib/wiki-anchor";
+import { ColorPicker, ColorSubmenu, documentPalette } from "./color-picker";
+import { FormulaDialog } from "./FormulaDialog";
+import { BlockGap, selectedBlockGap } from "./block-gap";
+import { EditorHelpButton } from "./EditorHelpDialog";
+import { MouseNodeSelection } from "./mouse-selection";
+import { TextMetrics, TEXT_METRIC_TYPES } from "./text-spacing";
+import { FORMULA_FONT_DEFAULT, FORMULA_GAP_DEFAULT, FORMULA_GAP_MAX, FORMULA_GAP_MIN, FORMULA_GAP_STEP, formulaColor, formulaFontSize, formulaGap } from "@/lib/formula-style";
+import { BLOCK_GAP_MAX, BLOCK_GAP_MIN, BLOCK_GAP_STEP, storedBlockGap } from "@/lib/block-gap";
+import { TEXT_LINE_MAX, TEXT_LINE_MIN, TEXT_LINE_STEP, TEXT_TRACKING_MAX, TEXT_TRACKING_MIN, TEXT_TRACKING_STEP, storedTextLineHeight, storedTextTracking, textLineHeight, textTracking } from "@/lib/text-spacing";
 import type { ApiResponse } from "@/types/api";
 
 const popupClass = "w-max! min-w-72 max-h-[70vh]! overflow-x-visible! overflow-y-auto! whitespace-nowrap";
 
-const prose = "max-w-none wrap-break-word focus:outline-none [&_h2]:mt-6 [&_h2]:scroll-mt-24 [&_h2]:text-xl [&_h2]:font-semibold [&_h2[data-anchor]]:before:mr-2 [&_h2[data-anchor]]:before:font-normal [&_h2[data-anchor]]:before:text-muted-foreground [&_h2[data-anchor]]:before:content-['#'] [&_h3]:mt-4 [&_h3]:scroll-mt-24 [&_h3]:text-lg [&_h3]:font-medium [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_.tableWrapper]:my-3 [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:overflow-y-clip [&_table]:w-full [&_table]:border-collapse [&_td]:relative [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:relative [&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_tr[data-row-height]>td]:h-(--row-height) [&_tr[data-row-height]>th]:h-(--row-height) [&_.row-resize-handle]:absolute [&_.row-resize-handle]:right-3 [&_.row-resize-handle]:bottom-0 [&_.row-resize-handle]:left-1 [&_.row-resize-handle]:z-30 [&_.row-resize-handle]:h-2 [&_.row-resize-handle]:cursor-row-resize [&_.row-resize-handle:hover]:bg-primary/60 [&_.column-resize-handle]:pointer-events-none [&_.column-resize-handle]:absolute [&_.column-resize-handle]:-right-0.5 [&_.column-resize-handle]:top-0 [&_.column-resize-handle]:bottom-0 [&_.column-resize-handle]:z-20 [&_.column-resize-handle]:w-1 [&_.column-resize-handle]:bg-primary/50 [&.resize-cursor]:cursor-col-resize [&.row-resize]:cursor-row-resize [&_[data-resize-container]]:my-3 [&_[data-resize-container]]:w-fit [&_[data-resize-container]]:max-w-full [&_[data-resize-wrapper]]:w-fit [&_[data-resize-wrapper]]:max-w-full [&_img]:max-w-full [&_img]:rounded-md [&_[data-resize-handle]]:z-30 [&[contenteditable=false]_[data-resize-handle]]:hidden [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-sm [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_.ProseMirror-selectednode]:rounded-md [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-ring [&_mark]:rounded-sm [&_mark]:px-0.5 [&_mark]:text-inherit [&_a]:text-primary [&_a]:underline-offset-4 [&_a]:hover:underline [&_p.is-editor-empty:first-child]:before:pointer-events-none [&_p.is-editor-empty:first-child]:before:float-left [&_p.is-editor-empty:first-child]:before:h-0 [&_p.is-editor-empty:first-child]:before:text-muted-foreground [&_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]";
-
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
-
-const FILE_TYPES = new Set([
-    ...IMAGE_TYPES,
-    "application/pdf",
-    "text/plain",
-    "text/csv",
-    "application/zip",
-    "application/msword",
-    "application/vnd.ms-excel",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-]);
+const prose = "max-w-none pt-2 wrap-break-word focus:outline-none [&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:scroll-mt-24 [&_h2]:text-xl [&_h2]:font-semibold [&_h2[data-anchor]]:before:mr-2 [&_h2[data-anchor]]:before:font-normal [&_h2[data-anchor]]:before:text-muted-foreground [&_h2[data-anchor]]:before:content-['#'] [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:scroll-mt-24 [&_h3]:text-lg [&_h3]:font-medium [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:mb-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_.tableWrapper]:mb-3 [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:overflow-y-clip [&_table]:w-full [&_table]:border-collapse [&_td]:relative [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:relative [&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_tr[data-row-height]>td]:h-(--row-height) [&_tr[data-row-height]>th]:h-(--row-height) [&_.row-resize-handle]:absolute [&_.row-resize-handle]:right-3 [&_.row-resize-handle]:bottom-0 [&_.row-resize-handle]:left-1 [&_.row-resize-handle]:z-30 [&_.row-resize-handle]:h-2 [&_.row-resize-handle]:cursor-row-resize [&_.row-resize-handle:hover]:bg-primary/60 [&_.column-resize-handle]:pointer-events-none [&_.column-resize-handle]:absolute [&_.column-resize-handle]:-right-0.5 [&_.column-resize-handle]:top-0 [&_.column-resize-handle]:bottom-0 [&_.column-resize-handle]:z-20 [&_.column-resize-handle]:w-1 [&_.column-resize-handle]:bg-primary/50 [&.resize-cursor]:cursor-col-resize [&.row-resize]:cursor-row-resize [&_[data-resize-container]]:mb-3 [&_[data-resize-container]]:w-fit [&_[data-resize-container]]:max-w-full [&_[data-resize-wrapper]]:w-fit [&_[data-resize-wrapper]]:max-w-full [&_img]:max-w-full [&_img]:rounded-md [&_[data-resize-handle]]:z-30 [&[contenteditable=false]_[data-resize-handle]]:hidden [&_hr]:mb-4 [&_hr]:border-border [&_pre]:mb-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-sm [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_.ProseMirror-selectednode]:rounded-md [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-ring [&_.range-selected]:rounded-md [&_.range-selected]:ring-2 [&_.range-selected]:ring-ring [&_mark]:rounded-sm [&_mark]:px-0.5 [&_mark]:text-inherit [&_a]:text-primary [&_a]:underline-offset-4 [&_a]:hover:underline [&_p.is-editor-empty:first-child]:before:pointer-events-none [&_p.is-editor-empty:first-child]:before:float-left [&_p.is-editor-empty:first-child]:before:h-0 [&_p.is-editor-empty:first-child]:before:text-muted-foreground [&_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] [&_a[data-attachment]]:flex [&_a[data-attachment]]:w-fit [&_a[data-attachment]]:max-w-full [&_a[data-attachment]]:items-center [&_a[data-attachment]]:gap-2 [&_a[data-attachment]]:rounded-md [&_a[data-attachment]]:border [&_a[data-attachment]]:bg-background [&_a[data-attachment]]:px-3 [&_a[data-attachment]]:py-2 [&_a[data-attachment]]:text-sm [&_a[data-attachment]]:text-foreground [&_a[data-attachment]]:no-underline [&_a[data-attachment]]:hover:no-underline";
 
 const ATOM_NODES = new Set(["image", "fileAttachment", "horizontalRule", "blockMath", "inlineMath", "mention"]);
 
@@ -226,6 +232,7 @@ const WikiAnchor = Node.create({
                 void copyWikiAnchorLink(pagePath, id);
             });
             writeAnchorId(dom, current);
+            writeAnchorMetrics(dom, current);
             dom.append(contentDOM, button);
             return {
                 dom,
@@ -239,6 +246,7 @@ const WikiAnchor = Node.create({
                     }
                     current = updated;
                     writeAnchorId(dom, updated);
+                    writeAnchorMetrics(dom, updated);
                     return true;
                 },
             };
@@ -253,6 +261,15 @@ function writeAnchorId(dom: HTMLElement, node: { attrs: Record<string, unknown> 
     } else {
         dom.removeAttribute("id");
     }
+}
+
+function writeAnchorMetrics(dom: HTMLElement, node: { attrs: Record<string, unknown> }) {
+    const line = storedTextLineHeight(node.attrs.lineHeight);
+    const tracking = storedTextTracking(node.attrs.letterSpacing);
+    dom.style.lineHeight = line === undefined ? "" : String(line);
+    dom.style.letterSpacing = tracking === undefined ? "" : `${tracking}px`;
+    const gap = storedBlockGap(node.attrs.blockGap);
+    dom.style.marginBottom = gap === undefined ? "" : `${gap}px`;
 }
 
 function anchorPagePath(storage: object): string {
@@ -327,24 +344,18 @@ const NewsImage = Image.extend({
             ...this.parent?.(),
             borderColor: {
                 default: null,
-                parseHTML: (element) => newsBorderColorFromAttribute(element.getAttribute("data-border-color")) ?? null,
-                renderHTML: (attributes) => {
-                    const token = newsBorderToken(attributes.borderColor);
-                    if (!token) {
-                        return {};
-                    }
-                    return {
-                        "data-border-color": token,
-                        "data-border-width": newsBorderWidthToken(attributes.borderWidth) ?? "regular",
-                    };
+                parseHTML: (element) => {
+                    const color = element instanceof HTMLElement ? newsBorderColorFromElement(element) : null;
+                    return color === "none" ? null : color;
                 },
+                renderHTML: (attributes) => newsColor(attributes.borderColor) ? newsBorderMarkup(attributes.borderColor, attributes.borderWidth) : {},
             },
             borderWidth: {
                 default: null,
                 parseHTML: (element) => newsBorderWidthFromAttribute(element.getAttribute("data-border-width")) ?? null,
                 renderHTML: (attributes) => {
                     const token = newsBorderWidthToken(attributes.borderWidth);
-                    if (!token || !newsBorderToken(attributes.borderColor)) {
+                    if (!token || !newsColor(attributes.borderColor)) {
                         return {};
                     }
                     return { "data-border-width": token };
@@ -394,12 +405,88 @@ const NewsImage = Image.extend({
     },
 });
 
+const FILE_GLYPH_ICON: Record<FileGlyph, LucideIcon> = {
+    image: FileImage,
+    pdf: FileText,
+    sheet: FileSpreadsheet,
+    slides: Presentation,
+    archive: FileArchive,
+    text: FileText,
+    word: FileType,
+    file: File,
+};
+
+function FileAttachmentView({ node, editor, getPos }: ReactNodeViewProps) {
+    const title = typeof node.attrs.title === "string" && node.attrs.title ? node.attrs.title : "Вложение";
+    const mime = typeof node.attrs.mime === "string" ? node.attrs.mime : "";
+    const src = typeof node.attrs.src === "string" ? node.attrs.src : "";
+    const glyph = fileGlyph(mime, title);
+    const Icon = FILE_GLYPH_ICON[glyph];
+    const openRename = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
+        if (!editor.isEditable) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const pos = getPos();
+        if (typeof pos !== "number") {
+            return;
+        }
+        const storage = editor.storage as { fileAttachment?: { rename?: ((pos: number) => void) | null } };
+        storage.fileAttachment?.rename?.(pos);
+    };
+    const body = (
+        <>
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="truncate">{title}</span>
+        </>
+    );
+    if (!editor.isEditable) {
+        return (
+            <NodeViewWrapper className="mb-2 max-w-full" style={gapStyle(node.attrs.blockGap)}>
+                <a
+                    data-attachment=""
+                    data-title={title}
+                    {...(mime ? { "data-mime": mime } : {})}
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    draggable={false}
+                    aria-label={`${fileGlyphLabel(glyph)}, ${title}`}
+                    className="flex w-fit max-w-full items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-foreground no-underline"
+                >
+                    {body}
+                </a>
+            </NodeViewWrapper>
+        );
+    }
+    return (
+        <NodeViewWrapper className="mb-2 max-w-full cursor-grab active:cursor-grabbing" style={gapStyle(node.attrs.blockGap)} data-drag-handle="">
+            <div
+                data-attachment=""
+                data-title={title}
+                {...(mime ? { "data-mime": mime } : {})}
+                aria-label={`${fileGlyphLabel(glyph)}, ${title}`}
+                className="flex w-fit max-w-full items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                onDoubleClick={openRename}
+            >
+                {body}
+            </div>
+        </NodeViewWrapper>
+    );
+}
+
 const FileAttachment = Node.create({
     name: "fileAttachment",
     group: "block",
     atom: true,
     selectable: true,
     draggable: true,
+    addStorage() {
+        return {
+            rename: null as ((pos: number) => void) | null,
+        };
+    },
     addAttributes() {
         return {
             src: { default: null },
@@ -418,9 +505,10 @@ const FileAttachment = Node.create({
                 if (!EDITOR_ASSET_SRC.test(href)) {
                     return false;
                 }
+                const name = element.getAttribute("data-title") || element.querySelector("span")?.textContent || element.textContent || "";
                 return {
                     src: href,
-                    title: (element.textContent ?? "").slice(0, 255),
+                    title: name.trim().slice(0, 255),
                     mime: (element.getAttribute("data-mime") ?? "").slice(0, 100),
                 };
             },
@@ -435,10 +523,48 @@ const FileAttachment = Node.create({
             href: node.attrs.src,
             target: "_blank",
             rel: "noopener noreferrer",
-            class: "my-2 inline-flex items-center rounded-md bg-muted px-3 py-2 text-sm no-underline",
+            class: "mb-2 flex w-fit max-w-full items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-foreground no-underline",
         }), title];
     },
+    addNodeView() {
+        return ReactNodeViewRenderer(FileAttachmentView);
+    },
 });
+
+function splitAttachmentName(title: string): { base: string; ext: string } {
+    const ext = fileExtension(title);
+    if (!ext) {
+        return { base: title, ext: "" };
+    }
+    const suffix = `.${ext}`;
+    if (title.toLowerCase().endsWith(suffix)) {
+        return { base: title.slice(0, -suffix.length), ext };
+    }
+    return { base: title, ext: "" };
+}
+
+function insertFileAttachment(editor: Editor, attrs: { src: string; title: string; mime: string }) {
+    const content = [
+        { type: "fileAttachment", attrs },
+        { type: "paragraph" },
+    ];
+    const { selection } = editor.state;
+    if (selection instanceof NodeSelection && selection.node.type.name === "fileAttachment") {
+        editor.chain().focus().insertContentAt(selection.to, content).run();
+        return;
+    }
+    const { $from } = selection;
+    const inEmptyParagraph = $from.parent.type.name === "paragraph" && $from.parent.content.size === 0;
+    if (inEmptyParagraph && $from.depth >= 1) {
+        const index = $from.index($from.depth - 1);
+        const previous = index > 0 ? $from.node($from.depth - 1).child(index - 1) : null;
+        if (previous?.type.name === "fileAttachment") {
+            editor.chain().focus().insertContentAt($from.after(), content).run();
+            return;
+        }
+    }
+    editor.chain().focus().insertContent(content).run();
+}
 
 export type EditorMenuAction = {
     label: string;
@@ -454,6 +580,34 @@ type Command = EditorMenuAction & {
     swatch?: string;
     active?: boolean;
 };
+
+function gapStyle(value: unknown): { marginBottom: string } | undefined {
+    const gap = storedBlockGap(value);
+    return gap === undefined ? undefined : { marginBottom: `${gap}px` };
+}
+
+function scrollBox(node: HTMLElement): HTMLElement | null {
+    let current = node.parentElement;
+    while (current) {
+        const overflow = getComputedStyle(current).overflowY;
+        if (overflow === "auto" || overflow === "scroll") {
+            return current;
+        }
+        current = current.parentElement;
+    }
+    return null;
+}
+
+function restoreScroll(box: HTMLElement | null, top: number) {
+    const apply = () => {
+        if (box && box.scrollTop !== top) {
+            box.scrollTop = top;
+        }
+    };
+    apply();
+    requestAnimationFrame(apply);
+    window.setTimeout(apply, 50);
+}
 
 function hold(event: { preventDefault: () => void }) {
     event.preventDefault();
@@ -565,19 +719,148 @@ function renderGroups(groups: Command[][], kind: "menu" | "context") {
     ));
 }
 
+function steppedValues(min: number, max: number, step: number): number[] {
+    const count = Math.round((max - min) / step);
+    return Array.from({ length: count + 1 }, (_, index) => Math.round((min + index * step) * 1000) / 1000);
+}
+
+const LINE_HEIGHT_OPTIONS = steppedValues(TEXT_LINE_MIN, TEXT_LINE_MAX, TEXT_LINE_STEP);
+const LETTER_SPACING_OPTIONS = steppedValues(TEXT_TRACKING_MIN, TEXT_TRACKING_MAX, TEXT_TRACKING_STEP);
+const BLOCK_GAP_OPTIONS = steppedValues(BLOCK_GAP_MIN, BLOCK_GAP_MAX, BLOCK_GAP_STEP);
+const FORMULA_GAP_OPTIONS = steppedValues(FORMULA_GAP_MIN, FORMULA_GAP_MAX, FORMULA_GAP_STEP);
+const RANGE_SELECTED = new Set(["image", "fileAttachment", "blockMath", "inlineMath", "codeBlock", "horizontalRule", "table"]);
+
+const RangeSelection = Extension.create({
+    name: "rangeSelection",
+    addProseMirrorPlugins() {
+        return [
+            new Plugin({
+                props: {
+                    decorations(state) {
+                        const { selection } = state;
+                        if (selection.empty || selection instanceof NodeSelection) {
+                            return null;
+                        }
+                        const marks: ReturnType<typeof Decoration.node>[] = [];
+                        const seen = new Set<number>();
+                        for (const range of selection.ranges) {
+                            state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
+                                if (!RANGE_SELECTED.has(node.type.name) || seen.has(pos)) {
+                                    return;
+                                }
+                                if (pos < range.$from.pos || pos + node.nodeSize > range.$to.pos) {
+                                    return;
+                                }
+                                seen.add(pos);
+                                marks.push(Decoration.node(pos, pos + node.nodeSize, { class: "range-selected" }));
+                            });
+                        }
+                        return marks.length > 0 ? DecorationSet.create(state.doc, marks) : null;
+                    },
+                },
+            }),
+        ];
+    },
+});
+
+function ValueMenu({
+    open,
+    value,
+    options,
+    format,
+    onSelect,
+}: {
+    open: boolean;
+    value: number;
+    options: readonly number[];
+    format: (value: number) => string;
+    onSelect: (value: number) => void;
+}) {
+    const selected = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        if (open) {
+            selected.current?.scrollIntoView({ block: "nearest" });
+        }
+    }, [open]);
+    return (
+        <PopoverContent align="start" className="max-h-60 w-32 gap-0.5 overflow-y-auto p-1">
+            {options.map((option) => {
+                const active = Math.abs(option - value) < 0.001;
+                return (
+                    <button
+                        key={option}
+                        ref={active ? selected : undefined}
+                        type="button"
+                        className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm tabular-nums hover:bg-accent"
+                        onMouseDown={hold}
+                        onClick={() => onSelect(option)}
+                    >
+                        <span>{format(option)}</span>
+                        {active ? <Check className="ml-auto size-4" /> : null}
+                    </button>
+                );
+            })}
+        </PopoverContent>
+    );
+}
+
+const menuValueClass = "h-8 w-14 shrink-0 rounded-none border-x-0 px-1 text-center text-sm tabular-nums shadow-none focus-visible:z-10";
+
+function readStepped(raw: string, options: readonly number[]): number | null {
+    const normalized = raw.trim().replace(",", ".");
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized) || options.length === 0) {
+        return null;
+    }
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+    const min = options[0];
+    const max = options[options.length - 1];
+    const step = options.length > 1 ? options[1] - options[0] : 1;
+    const snapped = min + Math.round((parsed - min) / step) * step;
+    const rounded = Math.round(snapped * 1000) / 1000;
+    return Math.min(max, Math.max(min, rounded));
+}
+
+function metricDraft(raw: string, options: readonly number[]): string {
+    const allowNegative = options[0] < 0;
+    const allowDecimal = options.some((option) => !Number.isInteger(option));
+    let next = "";
+    let dot = false;
+    for (const char of raw.replace(",", ".")) {
+        if (char >= "0" && char <= "9") {
+            next += char;
+        } else if (allowNegative && char === "-" && next.length === 0) {
+            next = "-";
+        } else if (allowDecimal && char === "." && !dot) {
+            dot = true;
+            next += ".";
+        }
+    }
+    if (dot) {
+        const [head, fraction = ""] = next.split(".");
+        next = `${head}.${fraction.slice(0, 1)}`;
+    }
+    return next.slice(0, 5);
+}
+
 function FontSizeField({
     value,
+    plain,
     disabled,
     onPrepare,
     onChange,
 }: {
     value: number;
+    plain?: boolean;
     disabled?: boolean;
     onPrepare: () => void;
     onChange: (size: number) => void;
 }) {
     const [draft, setDraft] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
+    const chosen = useRef(false);
     const shown = draft ?? String(value);
 
     function commit(raw = shown) {
@@ -590,7 +873,7 @@ function FontSizeField({
     }
 
     return (
-        <div data-font-size="" className="flex items-center" onPointerDown={onPrepare}>
+        <div data-font-size="" data-metric-field="" className="flex shrink-0 items-center" onPointerDown={onPrepare}>
             <button
                 type="button"
                 aria-label="Уменьшить шрифт"
@@ -600,67 +883,84 @@ function FontSizeField({
             >
                 <Minus />
             </button>
-            <Popover open={open} onOpenChange={setOpen}>
+            <Popover
+                open={open}
+                onOpenChange={(next, details) => {
+                    if (chosen.current) {
+                        if (next) {
+                            details.cancel();
+                        }
+                        return;
+                    }
+                    if (!next && details.reason === "trigger-press") {
+                        details.cancel();
+                        setOpen(true);
+                        return;
+                    }
+                    setOpen(next);
+                }}
+            >
                 <div className="relative">
-                    <Input
-                        value={shown}
-                        inputMode="numeric"
-                        aria-label="Размер шрифта"
+                    {plain ? null : <ALargeSmall className="pointer-events-none absolute top-1/2 left-1.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />}
+                    <PopoverTrigger
+                        nativeButton={false}
                         disabled={disabled}
-                        className="h-8 w-14 rounded-none border-x-0 px-1 text-center text-sm shadow-none focus-visible:z-10"
-                        onFocus={() => setOpen(true)}
-                        onChange={(event) => setDraft(event.target.value.replace(/\D/g, "").slice(0, 2))}
-                        onBlur={(event) => {
-                            const next = event.relatedTarget;
-                            if (next instanceof Element && next.closest("[data-font-size-list]")) {
-                                return;
-                            }
-                            commit();
-                        }}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                                event.preventDefault();
-                                commit();
-                            } else if (event.key === "Escape") {
-                                setDraft(null);
-                                setOpen(false);
-                            } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-                                event.preventDefault();
-                                const current = Number.parseInt(shown, 10);
-                                const base = Number.isFinite(current) ? current : value;
-                                const next = event.key === "ArrowUp" ? base + 1 : base - 1;
-                                const clamped = Math.min(NEWS_FONT_SIZE_MAX, Math.max(NEWS_FONT_SIZE_MIN, next));
-                                setDraft(String(clamped));
-                            }
-                        }}
+                        render={
+                            <Input
+                                value={shown}
+                                inputMode="numeric"
+                                aria-label="Размер шрифта"
+                                disabled={disabled}
+                                className={plain
+                                    ? menuValueClass
+                                    : "h-8 w-16 rounded-none border-x-0 pr-1 pl-6 text-center text-sm tabular-nums shadow-none focus-visible:z-10"}
+                                onChange={(event) => setDraft(event.target.value.replace(/\D/g, "").slice(0, 2))}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={(event) => {
+                                    const next = event.relatedTarget;
+                                    if (next instanceof Element && next.closest("[data-slot=popover-content]")) {
+                                        return;
+                                    }
+                                    commit(event.currentTarget.value);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key !== "Escape") {
+                                        event.stopPropagation();
+                                    }
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        commit(event.currentTarget.value);
+                                    } else if (event.key === "Escape") {
+                                        setDraft(null);
+                                        setOpen(false);
+                                    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                                        event.preventDefault();
+                                        const current = Number.parseInt(shown, 10);
+                                        const base = Number.isFinite(current) ? current : value;
+                                        const next = event.key === "ArrowUp" ? base + 1 : base - 1;
+                                        const clamped = Math.min(NEWS_FONT_SIZE_MAX, Math.max(NEWS_FONT_SIZE_MIN, next));
+                                        setDraft(String(clamped));
+                                    }
+                                }}
+                            />
+                        }
                     />
                 </div>
-                <PopoverTrigger
-                    type="button"
-                    aria-label="Список размеров"
-                    disabled={disabled}
-                    className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-none border-r-0" })}
-                >
-                    <ChevronDown />
-                </PopoverTrigger>
-                <PopoverContent data-font-size-list="" align="start" className="w-32 gap-0.5 p-1">
-                    {NEWS_FONT_SIZES.map((size) => (
-                        <button
-                            key={size}
-                            type="button"
-                            className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-                            onMouseDown={hold}
-                            onClick={() => {
-                                onChange(size);
-                                setDraft(null);
-                                setOpen(false);
-                            }}
-                        >
-                            <span>{size} px</span>
-                            {size === value ? <Check className="ml-auto size-4" /> : null}
-                        </button>
-                    ))}
-                </PopoverContent>
+                <ValueMenu
+                    open={open}
+                    value={value}
+                    options={NEWS_FONT_SIZES}
+                    format={(size) => `${size} px`}
+                    onSelect={(size) => {
+                        chosen.current = true;
+                        onChange(size);
+                        setDraft(null);
+                        setOpen(false);
+                        window.setTimeout(() => {
+                            chosen.current = false;
+                        }, 200);
+                    }}
+                />
             </Popover>
             <button
                 type="button"
@@ -672,6 +972,276 @@ function FontSizeField({
                 <Plus />
             </button>
         </div>
+    );
+}
+
+function SpacingStepper({
+    label,
+    decrease,
+    increase,
+    value,
+    options,
+    format,
+    icon: Icon,
+    plain,
+    disabled,
+    canDecrease,
+    canIncrease,
+    onDecrease,
+    onIncrease,
+    onSelect,
+    onPrepare,
+}: {
+    label: string;
+    decrease: string;
+    increase: string;
+    value: number;
+    options: readonly number[];
+    format: (value: number) => string;
+    icon?: LucideIcon;
+    plain?: boolean;
+    disabled?: boolean;
+    canDecrease: boolean;
+    canIncrease: boolean;
+    onDecrease: () => void;
+    onIncrease: () => void;
+    onSelect: (value: number) => void;
+    onPrepare?: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [draft, setDraft] = useState<string | null>(null);
+    const chosen = useRef(false);
+    const shown = draft ?? format(value);
+
+    function commit(raw = shown) {
+        const next = readStepped(raw, options);
+        if (next !== null) {
+            onSelect(next);
+        }
+        setDraft(null);
+        setOpen(false);
+    }
+
+    function choose(next: number) {
+        chosen.current = true;
+        onSelect(next);
+        setDraft(null);
+        setOpen(false);
+        window.setTimeout(() => {
+            chosen.current = false;
+        }, 200);
+    }
+
+    return (
+        <div data-metric-field="" className="flex shrink-0 items-center" role="group" aria-label={label} onPointerDown={onPrepare}>
+            <button
+                type="button"
+                aria-label={decrease}
+                disabled={disabled || !canDecrease}
+                className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-r-none" })}
+                onClick={onDecrease}
+            >
+                <Minus />
+            </button>
+            <Popover
+                open={open}
+                onOpenChange={(next, details) => {
+                    if (chosen.current) {
+                        if (next) {
+                            details.cancel();
+                        }
+                        return;
+                    }
+                    if (!next && details.reason === "trigger-press") {
+                        details.cancel();
+                        setOpen(true);
+                        return;
+                    }
+                    setOpen(next);
+                }}
+            >
+                <div className="relative">
+                    {plain || !Icon ? null : <Icon className="pointer-events-none absolute top-1/2 left-1.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />}
+                    <PopoverTrigger
+                        nativeButton={false}
+                        disabled={disabled}
+                        render={
+                            <Input
+                                value={shown}
+                                inputMode="decimal"
+                                aria-label={label}
+                                disabled={disabled}
+                                className={plain || !Icon
+                                    ? menuValueClass
+                                    : "h-8 w-16 rounded-none border-x-0 pr-1 pl-6 text-center text-sm tabular-nums shadow-none focus-visible:z-10"}
+                                onChange={(event) => setDraft(metricDraft(event.target.value, options))}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={(event) => {
+                                    const next = event.relatedTarget;
+                                    if (next instanceof Element && next.closest("[data-slot=popover-content]")) {
+                                        return;
+                                    }
+                                    commit(event.currentTarget.value);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key !== "Escape") {
+                                        event.stopPropagation();
+                                    }
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        commit(event.currentTarget.value);
+                                    } else if (event.key === "Escape") {
+                                        setDraft(null);
+                                        setOpen(false);
+                                    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                                        event.preventDefault();
+                                        const current = readStepped(shown, options) ?? value;
+                                        const index = options.findIndex((option) => Math.abs(option - current) < 0.001);
+                                        const start = index === -1 ? 0 : index;
+                                        const nextIndex = event.key === "ArrowUp"
+                                            ? Math.min(options.length - 1, start + 1)
+                                            : Math.max(0, start - 1);
+                                        setDraft(format(options[nextIndex]));
+                                    }
+                                }}
+                            />
+                        }
+                    />
+                </div>
+                <ValueMenu
+                    open={open}
+                    value={value}
+                    options={options}
+                    format={format}
+                    onSelect={choose}
+                />
+            </Popover>
+            <button
+                type="button"
+                aria-label={increase}
+                disabled={disabled || !canIncrease}
+                className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-l-none" })}
+                onClick={onIncrease}
+            >
+                <Plus />
+            </button>
+        </div>
+    );
+}
+
+function MenuMetric({ icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
+    return (
+        <div className="flex items-center gap-2 px-2 py-1">
+            <MenuIcon icon={icon} />
+            <span className="min-w-0 flex-1 text-sm whitespace-nowrap">{label}</span>
+            {children}
+        </div>
+    );
+}
+
+function TextSpacingFields({
+    lineHeight,
+    letterSpacing,
+    blockGap,
+    plain,
+    disabled,
+    onLineHeight,
+    onLetterSpacing,
+    onBlockGap,
+    onPrepare,
+}: {
+    lineHeight: number;
+    letterSpacing: number;
+    blockGap: number;
+    plain?: boolean;
+    disabled?: boolean;
+    onLineHeight: (value: number) => void;
+    onLetterSpacing: (value: number) => void;
+    onBlockGap: (value: number) => void;
+    onPrepare?: () => void;
+}) {
+    const line = (
+        <SpacingStepper
+            label="Межстрочный интервал"
+            decrease="Уменьшить межстрочный интервал"
+            increase="Увеличить межстрочный интервал"
+            value={lineHeight}
+            options={LINE_HEIGHT_OPTIONS}
+            format={(next) => next.toFixed(1)}
+            icon={plain ? undefined : AlignVerticalSpaceAround}
+            plain={plain}
+            disabled={disabled}
+            canDecrease={lineHeight > TEXT_LINE_MIN}
+            canIncrease={lineHeight < TEXT_LINE_MAX}
+            onDecrease={() => onLineHeight(lineHeight - TEXT_LINE_STEP)}
+            onIncrease={() => onLineHeight(lineHeight + TEXT_LINE_STEP)}
+            onSelect={onLineHeight}
+            onPrepare={onPrepare}
+        />
+    );
+    const tracking = (
+        <SpacingStepper
+            label="Межсимвольный интервал"
+            decrease="Уменьшить межсимвольный интервал"
+            increase="Увеличить межсимвольный интервал"
+            value={letterSpacing}
+            options={LETTER_SPACING_OPTIONS}
+            format={(next) => String(next)}
+            icon={plain ? undefined : AlignHorizontalSpaceAround}
+            plain={plain}
+            disabled={disabled}
+            canDecrease={letterSpacing > TEXT_TRACKING_MIN}
+            canIncrease={letterSpacing < TEXT_TRACKING_MAX}
+            onDecrease={() => onLetterSpacing(letterSpacing - TEXT_TRACKING_STEP)}
+            onIncrease={() => onLetterSpacing(letterSpacing + TEXT_TRACKING_STEP)}
+            onSelect={onLetterSpacing}
+            onPrepare={onPrepare}
+        />
+    );
+    const gap = <BlockGapField value={blockGap} plain={plain} disabled={disabled} onChange={onBlockGap} onPrepare={onPrepare} />;
+    if (!plain) {
+        return <>{line}{tracking}{gap}</>;
+    }
+    return (
+        <>
+            <MenuMetric icon={AlignVerticalSpaceAround} label="Межстрочный интервал">{line}</MenuMetric>
+            <MenuMetric icon={AlignHorizontalSpaceAround} label="Межсимвольный интервал">{tracking}</MenuMetric>
+            <MenuMetric icon={AlignVerticalSpaceBetween} label="Интервал между элементами">{gap}</MenuMetric>
+        </>
+    );
+}
+
+function BlockGapField({
+    value,
+    plain,
+    disabled,
+    onChange,
+    onPrepare,
+}: {
+    value: number;
+    plain?: boolean;
+    disabled?: boolean;
+    onChange: (value: number) => void;
+    onPrepare?: () => void;
+}) {
+    return (
+        <SpacingStepper
+            label="Интервал между элементами"
+            decrease="Уменьшить интервал между элементами"
+            increase="Увеличить интервал между элементами"
+            value={value}
+            options={BLOCK_GAP_OPTIONS}
+            format={(next) => String(next)}
+            icon={plain ? undefined : AlignVerticalSpaceBetween}
+            plain={plain}
+            disabled={disabled}
+            canDecrease={value > BLOCK_GAP_MIN}
+            canIncrease={value < BLOCK_GAP_MAX}
+            onDecrease={() => onChange(value - BLOCK_GAP_STEP)}
+            onIncrease={() => onChange(value + BLOCK_GAP_STEP)}
+            onSelect={onChange}
+            onPrepare={onPrepare}
+        />
     );
 }
 
@@ -826,13 +1396,35 @@ export function NewsEditor({
     const [sectionName, setSectionName] = useState("");
     const [sectionLinkOpen, setSectionLinkOpen] = useState(false);
     const [readingMedia, setReadingMedia] = useState<ReadingMedia | null>(null);
+    const [renameOpen, setRenameOpen] = useState(false);
+    const [renameValue, setRenameValue] = useState("");
+    const [renameExt, setRenameExt] = useState("");
+    const [renamePos, setRenamePos] = useState<number | null>(null);
+    const [linkOpen, setLinkOpen] = useState(false);
+    const [linkEditing, setLinkEditing] = useState(false);
+    const [linkText, setLinkText] = useState("");
+    const [linkHref, setLinkHref] = useState("");
+    const [linkBlank, setLinkBlank] = useState(false);
+    const [linkError, setLinkError] = useState<string | null>(null);
+    const [linkRange, setLinkRange] = useState({ from: 0, to: 0 });
+    const [mathOpen, setMathOpen] = useState(false);
+    const [mathKind, setMathKind] = useState<"block" | "inline">("block");
+    const [mathEditing, setMathEditing] = useState(false);
+    const [mathValue, setMathValue] = useState("");
+    const [mathPos, setMathPos] = useState<number | null>(null);
+    const [mathSize, setMathSize] = useState(FORMULA_FONT_DEFAULT);
+    const [mathColor, setMathColor] = useState<string | null>(null);
+    const [mathGap, setMathGap] = useState(FORMULA_GAP_DEFAULT);
     const contentRef = useRef(content);
     const ready = useRef(false);
     contentRef.current = content;
     const imageInput = useRef<HTMLInputElement>(null);
     const fileInput = useRef<HTMLInputElement>(null);
-    const fontSelection = useRef<{ from: number; to: number } | null>(null);
+    const metricSelection = useRef<Selection | null>(null);
+    const colorSelection = useRef<Selection | null>(null);
     const uploadRef = useRef<(kind: "image" | "file", file: File) => Promise<void>>(async () => undefined);
+    const openRenameRef = useRef<(pos: number) => void>(() => undefined);
+    const openMathRef = useRef<(kind: "block" | "inline", pos: number) => void>(() => undefined);
     const editor = useEditor({
         immediatelyRender: false,
         editable,
@@ -846,14 +1438,19 @@ export function NewsEditor({
             Link.configure({
                 openOnClick: false,
                 autolink: false,
+                HTMLAttributes: { target: null, rel: null, class: null },
                 isAllowedUri: (url) => allowedHref(url, anchorLinks),
             }),
             NewsImage,
-            BlockMath.configure({ katexOptions: { throwOnError: false } }),
-            InlineMath.configure({ katexOptions: { throwOnError: false } }),
+            ArticleBlockMath.configure({ katexOptions: { throwOnError: false } }),
+            ArticleInlineMath.configure({ katexOptions: { throwOnError: false } }),
             TextStyle,
             Color,
             FontSize,
+            TextMetrics,
+            BlockGap,
+            RangeSelection,
+            MouseNodeSelection,
             Highlight.configure({ multicolor: true }),
             ElementFill,
             Table.configure({
@@ -892,18 +1489,54 @@ export function NewsEditor({
                     return false;
                 },
             },
+            handleKeyDown(view, event) {
+                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !event.altKey) {
+                    event.preventDefault();
+                    const box = scrollBox(view.dom);
+                    const top = box?.scrollTop ?? 0;
+                    view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)));
+                    restoreScroll(box, top);
+                    return true;
+                }
+                return false;
+            },
+            handleDoubleClick(view, _pos, event) {
+                if (!view.editable) {
+                    return false;
+                }
+                const target = event.target instanceof Element ? event.target : null;
+                const math = target?.closest("[data-type='block-math'], [data-type='inline-math']");
+                if (!(math instanceof HTMLElement) || !view.dom.contains(math)) {
+                    return false;
+                }
+                const found = view.posAtDOM(math, 0);
+                const node = view.state.doc.nodeAt(found);
+                const kind = node?.type.name === "blockMath" ? "block" : node?.type.name === "inlineMath" ? "inline" : null;
+                if (!kind) {
+                    return false;
+                }
+                openMathRef.current(kind, found);
+                return true;
+            },
             handlePaste(_view, event) {
                 const file = event.clipboardData?.files?.[0];
-                if (!file || !IMAGE_TYPES.includes(file.type)) {
+                if (!file || !normalizeUpload(file, "image")) {
                     return false;
                 }
                 void uploadRef.current("image", file);
                 return true;
             },
             handleDrop(view, event) {
-                const file = event.dataTransfer?.files?.[0];
-                if (!file || !FILE_TYPES.has(file.type)) {
+                if (view.dragging) {
                     return false;
+                }
+                const files = [...(event.dataTransfer?.files ?? [])];
+                const accepted = files.filter((file) => normalizeUpload(file, "file"));
+                if (accepted.length === 0) {
+                    return false;
+                }
+                if (accepted.length < files.length) {
+                    notifyError(uploadRejectMessage("file"));
                 }
                 const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
                 if (hit) {
@@ -913,7 +1546,11 @@ export function NewsEditor({
                         // Insert at the current caret.
                     }
                 }
-                void uploadRef.current(IMAGE_TYPES.includes(file.type) ? "image" : "file", file);
+                void (async () => {
+                    for (const file of accepted) {
+                        await uploadRef.current(normalizeUpload(file, "image") ? "image" : "file", file);
+                    }
+                })();
                 return true;
             },
         },
@@ -955,11 +1592,97 @@ export function NewsEditor({
         }
     }, [editor, anchorPage]);
 
+    useEffect(() => {
+        if (!editor) {
+            return;
+        }
+        const storage = editor.storage as { fileAttachment?: { rename: ((pos: number) => void) | null } };
+        const attachment = storage.fileAttachment;
+        if (!attachment) {
+            return;
+        }
+        attachment.rename = (pos) => openRenameRef.current(pos);
+        return () => {
+            attachment.rename = null;
+        };
+    }, [editor]);
+
+    openMathRef.current = (kind, pos) => {
+        if (!editor) {
+            return;
+        }
+        const node = editor.state.doc.nodeAt(pos);
+        const expected = kind === "block" ? "blockMath" : "inlineMath";
+        if (!node || node.type.name !== expected) {
+            return;
+        }
+        setMathKind(kind);
+        setMathEditing(true);
+        setMathPos(pos);
+        rememberFormula(node.attrs);
+        setMathOpen(true);
+    };
+
+    openRenameRef.current = (pos) => {
+        if (!editor) {
+            return;
+        }
+        const node = editor.state.doc.nodeAt(pos);
+        if (!node || node.type.name !== "fileAttachment") {
+            return;
+        }
+        const title = typeof node.attrs.title === "string" ? node.attrs.title : "";
+        const parts = splitAttachmentName(title);
+        editor.chain().setNodeSelection(pos).run();
+        setRenamePos(pos);
+        setRenameValue(parts.base);
+        setRenameExt(parts.ext);
+        setRenameOpen(true);
+    };
+
+    function openAttachmentRename() {
+        if (!editor) {
+            return;
+        }
+        const { selection } = editor.state;
+        if (!(selection instanceof NodeSelection) || selection.node.type.name !== "fileAttachment") {
+            return;
+        }
+        openRenameRef.current(selection.from);
+    }
+
+    function applyAttachmentRename() {
+        if (!editor || renamePos === null) {
+            return;
+        }
+        const node = editor.state.doc.nodeAt(renamePos);
+        if (!node || node.type.name !== "fileAttachment") {
+            setRenameOpen(false);
+            return;
+        }
+        let base = renameValue.trim().replace(/[/\\]/g, "").replace(/\s+/g, " ");
+        if (renameExt && base.toLowerCase().endsWith(`.${renameExt}`)) {
+            base = base.slice(0, -(renameExt.length + 1)).trim();
+        }
+        if (base.length === 0) {
+            return;
+        }
+        const room = renameExt ? 255 - renameExt.length - 1 : 255;
+        const title = renameExt ? `${base.slice(0, room)}.${renameExt}` : base.slice(0, 255);
+        editor.chain().setNodeSelection(renamePos).updateAttributes("fileAttachment", { title }).focus().run();
+        setRenameOpen(false);
+    }
+
     uploadRef.current = async (kind, file) => {
         if (!editable || !editor) {
             return;
         }
         try {
+            const mime = normalizeUpload(file, kind);
+            if (!mime) {
+                notifyError(uploadRejectMessage(kind));
+                return;
+            }
             const form = new FormData();
             form.set("file", file);
             form.set("kind", kind);
@@ -973,10 +1696,7 @@ export function NewsEditor({
                 editor.chain().focus().setImage({ src: json.data.src, alt: file.name }).run();
                 return;
             }
-            editor.chain().focus().insertContent({
-                type: "fileAttachment",
-                attrs: { src: json.data.src, title: file.name, mime: file.type },
-            }).run();
+            insertFileAttachment(editor, { src: json.data.src, title: file.name, mime });
         } catch {
             notifyError("Не удалось загрузить файл");
         }
@@ -1000,19 +1720,30 @@ export function NewsEditor({
     }
 
     function editLink() {
-        if (!editor) return;
-        const current = editor.getAttributes("link").href;
-        const href = window.prompt("Адрес ссылки", typeof current === "string" ? current : "https://");
-        if (href === null) return;
-        if (href.trim() === "") {
-            editor.chain().focus().unsetLink().run();
+        if (!editor) {
             return;
         }
-        if (!allowedHref(href.trim(), anchorLinks)) {
-            notifyError(anchorLinks ? "Можно указать http, https, mailto, якорь #раздел или страницу /wiki/…" : "Можно указать адрес http, https или mailto");
-            return;
+        const { state } = editor;
+        const { from, to, empty, $from } = state.selection;
+        const type = state.schema.marks.link;
+        const active = editor.isActive("link");
+        let start = from;
+        let end = to;
+        if (active && type) {
+            const range = getMarkRange($from, type);
+            if (range && (empty || (from >= range.from && to <= range.to))) {
+                start = range.from;
+                end = range.to;
+            }
         }
-        editor.chain().focus().setLink({ href: href.trim() }).run();
+        const attrs = active ? editor.getAttributes("link") : {};
+        setLinkEditing(active);
+        setLinkRange({ from: start, to: end });
+        setLinkText(state.doc.textBetween(start, end, " "));
+        setLinkHref(typeof attrs.href === "string" && attrs.href ? attrs.href : "https://");
+        setLinkBlank(attrs.target === "_blank");
+        setLinkError(null);
+        setLinkOpen(true);
     }
 
     function editImageAlt() {
@@ -1099,12 +1830,33 @@ export function NewsEditor({
         editor?.chain().focus().updateAttributes("image", { frame }).run();
     }
 
-    function prepareFontSize() {
+    function prepareMetricSelection() {
         if (!editor || !editor.view.hasFocus()) {
             return;
         }
-        const { from, to } = editor.state.selection;
-        fontSelection.current = { from, to };
+        metricSelection.current = editor.state.selection;
+    }
+
+    function restoreMetricSelection() {
+        if (!editor || !metricSelection.current) {
+            return;
+        }
+        const saved = metricSelection.current;
+        try {
+            if (editor.state.selection.eq(saved)) {
+                return;
+            }
+            editor.view.dispatch(editor.state.tr.setSelection(saved).setMeta("addToHistory", false));
+        } catch {
+            metricSelection.current = null;
+        }
+    }
+
+    function keepScroll(run: () => void) {
+        const box = editor ? scrollBox(editor.view.dom) : null;
+        const top = box?.scrollTop ?? 0;
+        run();
+        restoreScroll(box, top);
     }
 
     function applyFontSize(size: number) {
@@ -1112,18 +1864,112 @@ export function NewsEditor({
             return;
         }
         const next = Math.min(NEWS_FONT_SIZE_MAX, Math.max(NEWS_FONT_SIZE_MIN, Math.round(size)));
-        const range = fontSelection.current;
-        const chain = editor.chain();
-        if (range) {
-            chain.setTextSelection(range);
+        keepScroll(() => {
+            restoreMetricSelection();
+            const chain = editor.chain();
+            if (next === NEWS_FONT_SIZE_DEFAULT) {
+                chain.unsetFontSize();
+            } else {
+                chain.setFontSize(`${next}px`);
+            }
+            chain.run();
+        });
+    }
+
+    function rememberColorSelection() {
+        if (!editor) {
+            return;
         }
-        chain.focus();
-        if (next === NEWS_FONT_SIZE_DEFAULT) {
-            chain.unsetFontSize();
-        } else {
-            chain.setFontSize(`${next}px`);
+        colorSelection.current = editor.state.selection;
+    }
+
+    function restoreColorSelection() {
+        if (!editor || !colorSelection.current) {
+            return;
         }
-        chain.run();
+        try {
+            if (editor.state.selection.eq(colorSelection.current)) {
+                return;
+            }
+            editor.view.dispatch(editor.state.tr.setSelection(colorSelection.current).setMeta("addToHistory", false));
+        } catch {
+            colorSelection.current = null;
+        }
+    }
+
+    function paintText(color: string) {
+        restoreColorSelection();
+        editor?.chain().focus().setColor(color).run();
+    }
+
+    function clearText() {
+        restoreColorSelection();
+        editor?.chain().focus().unsetColor().run();
+    }
+
+    function paintHighlight(color: string) {
+        restoreColorSelection();
+        editor?.chain().focus().setHighlight({ color }).run();
+    }
+
+    function clearHighlight() {
+        restoreColorSelection();
+        editor?.chain().focus().unsetHighlight().run();
+    }
+
+    function paintFill(color: string) {
+        restoreColorSelection();
+        editor?.chain().focus().setElementFill(color).run();
+    }
+
+    function clearFill() {
+        restoreColorSelection();
+        editor?.chain().focus().unsetElementFill().run();
+    }
+
+    function paintImageBorder(color: string | null) {
+        restoreColorSelection();
+        setImageBorder(color);
+    }
+
+    function paintCellBorder(color: string | null) {
+        restoreColorSelection();
+        setCellBorder(color);
+    }
+
+    function paintFormula(color: string | null) {
+        restoreColorSelection();
+        applyFormulaStyle({ color });
+    }
+
+    function applyLineHeight(next: number) {
+        if (!editor) {
+            return;
+        }
+        keepScroll(() => {
+            restoreMetricSelection();
+            editor.chain().setTextLineHeight(next).run();
+        });
+    }
+
+    function applyBlockGap(next: number) {
+        if (!editor) {
+            return;
+        }
+        keepScroll(() => {
+            restoreMetricSelection();
+            editor.chain().setBlockGap(next).run();
+        });
+    }
+
+    function applyLetterSpacing(next: number) {
+        if (!editor) {
+            return;
+        }
+        keepScroll(() => {
+            restoreMetricSelection();
+            editor.chain().setTextLetterSpacing(next).run();
+        });
     }
 
     function editMath(kind: "block" | "inline") {
@@ -1131,34 +1977,31 @@ export function NewsEditor({
             return;
         }
         const name = kind === "block" ? "blockMath" : "inlineMath";
+        const { selection } = editor.state;
         const active = editor.isActive(name);
-        const current = active ? editor.getAttributes(name).latex : "";
-        const latex = window.prompt(kind === "block" ? "Формула" : "Формула в строке", typeof current === "string" ? current : "");
-        if (latex === null) {
-            return;
-        }
-        const value = latex.trim();
-        if (value === "") {
-            if (kind === "block" && active) {
-                editor.chain().focus().deleteBlockMath().run();
-            } else if (kind === "inline" && active) {
-                editor.chain().focus().deleteInlineMath().run();
-            }
-            return;
-        }
-        if (kind === "block") {
-            if (active) {
-                editor.chain().focus().updateBlockMath({ latex: value }).run();
-            } else {
-                editor.chain().focus().insertBlockMath({ latex: value }).run();
-            }
-            return;
-        }
+        let pos: number | null = null;
         if (active) {
-            editor.chain().focus().updateInlineMath({ latex: value }).run();
-        } else {
-            editor.chain().focus().insertInlineMath({ latex: value }).run();
+            if (selection instanceof NodeSelection && selection.node.type.name === name) {
+                pos = selection.from;
+            } else if (selection.$from.nodeAfter?.type.name === name) {
+                pos = selection.from;
+            } else if (selection.$from.nodeBefore?.type.name === name) {
+                pos = selection.from - selection.$from.nodeBefore.nodeSize;
+            }
         }
+        const current = pos !== null ? editor.state.doc.nodeAt(pos)?.attrs : null;
+        setMathKind(kind);
+        setMathEditing(active && pos !== null);
+        setMathPos(pos);
+        rememberFormula(current ?? {});
+        setMathOpen(true);
+    }
+
+    function rememberFormula(attrs: Record<string, unknown>) {
+        setMathValue(typeof attrs.latex === "string" ? attrs.latex : "");
+        setMathSize(formulaFontSize(attrs.fontSize));
+        setMathColor(formulaColor(attrs.color));
+        setMathGap(formulaGap(attrs.gap));
     }
 
     const heading = editor?.isActive("heading", { level: 2 })
@@ -1185,10 +2028,15 @@ export function NewsEditor({
     }
 
     function takeFile(kind: "image" | "file", list: FileList | null) {
-        const file = list?.[0];
+        const files = [...(list ?? [])];
         if (kind === "image" && imageInput.current) imageInput.current.value = "";
         if (kind === "file" && fileInput.current) fileInput.current.value = "";
-        if (file) void uploadRef.current(kind, file);
+        const batch = kind === "image" ? files.slice(0, 1) : files;
+        void (async () => {
+            for (const file of batch) {
+                await uploadRef.current(kind, file);
+            }
+        })();
     }
 
     const history: Command[] = [
@@ -1196,7 +2044,7 @@ export function NewsEditor({
         { label: "Повторить", icon: Redo2, shortcut: "Ctrl+Y", disabled: !editor?.can().redo(), run: () => editor?.chain().focus().redo().run() },
     ];
     const selectionCommands: Command[] = [
-        { label: "Выделить всё", icon: TextSelect, shortcut: "Ctrl+A", run: () => editor?.chain().focus().selectAll().run() },
+        { label: "Выделить всё", icon: TextSelect, shortcut: "Ctrl+A", run: () => keepScroll(() => { editor?.chain().selectAll().run(); }) },
     ];
     const styles: Command[] = [
         { label: "Абзац", icon: Pilcrow, active: heading === "text" && list === "" && !editor?.isActive("blockquote") && !editor?.isActive("codeBlock"), run: () => setHeading("text") },
@@ -1231,51 +2079,27 @@ export function NewsEditor({
         { label: "Очистить оформление", icon: RemoveFormatting, run: clearFormatting },
     ];
     const textStyle = editor?.getAttributes("textStyle") ?? {};
-    const textColor = typeof textStyle.color === "string" ? textStyle.color : "";
+    const textColor = newsColor(textStyle.color) ?? "";
     const fontSize = typeof textStyle.fontSize === "string" ? textStyle.fontSize : "";
     const highlightValue = editor?.getAttributes("highlight")?.color;
-    const highlightColor = editor?.isActive("highlight") && typeof highlightValue === "string" ? highlightValue : "";
+    const highlightColor = editor?.isActive("highlight") ? newsColor(highlightValue) ?? "" : "";
     const fill = (() => {
         if (!editor) return "";
         for (const name of ["tableCell", "tableHeader", "codeBlock", "heading", "blockquote", "listItem", "paragraph"]) {
             if (!editor.isActive(name)) continue;
             const value = editor.getAttributes(name).backgroundColor;
-            return typeof value === "string" ? value : "";
+            return newsColor(value) ?? "";
         }
         return "";
     })();
-    const textColors: Command[] = [
-        { label: "По умолчанию", icon: CircleOff, active: textColor === "", run: () => editor?.chain().focus().unsetColor().run() },
-        ...NEWS_TEXT_COLORS.map((color) => ({
-            label: color.label,
-            icon: Palette,
-            swatch: color.value,
-            active: textColor === color.value,
-            run: () => editor?.chain().focus().setColor(color.value).run(),
-        })),
-    ];
-    const highlights: Command[] = [
-        { label: "Без выделения", icon: CircleOff, active: highlightColor === "", run: () => editor?.chain().focus().unsetHighlight().run() },
-        ...NEWS_HIGHLIGHT_COLORS.map((color) => ({
-            label: color.label,
-            icon: Highlighter,
-            swatch: color.value,
-            active: highlightColor === color.value,
-            run: () => editor?.chain().focus().setHighlight({ color: color.value }).run(),
-        })),
-    ];
-    const fills: Command[] = [
-        { label: "Без заливки", icon: CircleOff, active: fill === "", run: () => editor?.chain().focus().unsetElementFill().run() },
-        ...NEWS_FILL_COLORS.map((color) => ({
-            label: color.label,
-            icon: PaintBucket,
-            swatch: color.value,
-            active: fill === color.value,
-            run: () => editor?.chain().focus().setElementFill(color.value).run(),
-        })),
-    ];
+    const usedColors = editor ? documentPalette(editor.getJSON(), [...NEWS_POPULAR_COLORS, ...NEWS_FILL_COLORS, ...NEWS_HIGHLIGHT_COLORS]) : [];
     const fontPx = Number.parseInt(fontSize, 10);
     const fontValue = Number.isFinite(fontPx) ? fontPx : NEWS_FONT_SIZE_DEFAULT;
+    const metricName = TEXT_METRIC_TYPES.find((name) => editor?.isActive(name)) ?? "paragraph";
+    const metricAttrs = editor?.getAttributes(metricName) ?? {};
+    const lineHeight = textLineHeight(metricAttrs.lineHeight);
+    const letterSpacing = textTracking(metricAttrs.letterSpacing);
+    const blockGap = selectedBlockGap(editor?.state ?? null).value;
     const links: Command[] = [
         { label: editor?.isActive("link") ? "Изменить ссылку" : "Ссылка", icon: Link2, run: editLink },
         ...(editor?.isActive("link")
@@ -1358,16 +2182,6 @@ export function NewsEditor({
         { label: "По центру", icon: AlignCenter, active: imageAlign === "center", run: () => setImageAlign("center") },
         { label: "Справа", icon: AlignRight, active: imageAlign === "right", run: () => setImageAlign("right") },
     ];
-    const imageBorders: Command[] = [
-        { label: "Без обводки", icon: CircleOff, active: imageBorder === "", run: () => setImageBorder(null) },
-        ...NEWS_BORDER_COLORS.map((color) => ({
-            label: color.label,
-            icon: Frame,
-            swatch: color.value,
-            active: imageBorder === color.value,
-            run: () => setImageBorder(color.value),
-        })),
-    ];
     const imageFrames: Command[] = NEWS_IMAGE_FRAMES.map((frame) => ({
         label: frame.label,
         icon: FRAME_ICON[frame.token],
@@ -1394,17 +2208,6 @@ export function NewsEditor({
         : {};
     const cellBorder = cellAttrs.borderColor === "none" ? "none" : newsColor(cellAttrs.borderColor) ?? "";
     const cellBorderWidth = newsBorderWidth(cellAttrs.borderWidth);
-    const cellBorders: Command[] = [
-        { label: "По умолчанию", icon: CircleOff, active: cellBorder === "", run: () => setCellBorder(null) },
-        { label: "Без обводки", icon: CircleOff, active: cellBorder === "none", run: () => setCellBorder("none") },
-        ...NEWS_BORDER_COLORS.map((color) => ({
-            label: color.label,
-            icon: Frame,
-            swatch: color.value,
-            active: cellBorder === color.value,
-            run: () => setCellBorder(color.value),
-        })),
-    ];
     const cellWidths: Command[] = [
         { label: "По умолчанию", icon: CircleOff, active: cellBorderWidth === undefined && cellBorder !== "none", run: () => setCellBorderWidth(null) },
         ...NEWS_BORDER_WIDTHS.map((width) => ({
@@ -1425,7 +2228,10 @@ export function NewsEditor({
                     ? "Формула в строке"
                     : null;
     const specific: Command[] | null = onFile
-            ? [{ label: "Удалить вложение", icon: Trash2, destructive: true, run: () => editor?.chain().focus().deleteSelection().run() }]
+            ? [
+                { label: "Переименовать", icon: Pencil, run: openAttachmentRename },
+                { label: "Удалить вложение", icon: Trash2, destructive: true, run: () => editor?.chain().focus().deleteSelection().run() },
+            ]
             : onRule
                 ? [{ label: "Удалить линию", icon: Trash2, destructive: true, run: () => editor?.chain().focus().deleteSelection().run() }]
                 : onBlockMath
@@ -1450,11 +2256,47 @@ export function NewsEditor({
                     : editor?.isActive("listItem")
                         ? "Заливка пункта"
                         : "Заливка абзаца";
+    const textMetricsMenu = (
+        <ContextMenuSub>
+            <ContextMenuSubTrigger className="whitespace-nowrap" onMouseDown={hold}>
+                <MenuIcon icon={ALargeSmall} />
+                Шрифт и интервалы
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent
+                className={popupClass}
+                onMouseDown={(event) => {
+                    if (event.target instanceof Element && event.target.closest("[data-metric-field]")) {
+                        return;
+                    }
+                    hold(event);
+                }}
+            >
+                <div className="flex flex-col py-1">
+                    {!inCode ? (
+                        <MenuMetric icon={ALargeSmall} label="Размер шрифта">
+                            <FontSizeField plain value={fontValue} disabled={!editor} onPrepare={prepareMetricSelection} onChange={applyFontSize} />
+                        </MenuMetric>
+                    ) : null}
+                    <TextSpacingFields
+                        plain
+                        lineHeight={lineHeight}
+                        letterSpacing={letterSpacing}
+                        blockGap={blockGap}
+                        disabled={!editor}
+                        onLineHeight={applyLineHeight}
+                        onLetterSpacing={applyLetterSpacing}
+                        onBlockGap={applyBlockGap}
+                        onPrepare={prepareMetricSelection}
+                    />
+                </div>
+            </ContextMenuSubContent>
+        </ContextMenuSub>
+    );
 
     return (
         <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex h-10 shrink-0 items-center border-b bg-background px-2">
-                <Menubar className="h-9 w-full border-0 bg-transparent p-0 shadow-none">
+            <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
+                <Menubar className="h-9 min-w-0 flex-1 border-0 bg-transparent p-0 shadow-none">
                     {newsMenu && newsMenu.length > 0 ? (
                         <MenubarMenu open={menu === "news"} onOpenChange={(next) => setMenu((current) => next ? "news" : current === "news" ? null : current)}>
                             <MenubarTrigger className="whitespace-nowrap">{menuLabel}</MenubarTrigger>
@@ -1471,14 +2313,27 @@ export function NewsEditor({
                             {renderSubmenu("menu", "Абзац", Pilcrow, [styles, blocks])}
                             {renderSubmenu("menu", "Начертание", Bold, marks)}
                             <MenubarSeparator />
-                            {renderSubmenu("menu", "Цвет текста", Palette, textColors)}
-                            {renderSubmenu("menu", fillLabel, PaintBucket, fills)}
-                            {renderSubmenu("menu", "Выделение текста", Highlighter, highlights)}
-                            {!inCode ? (
-                                <div className="px-2 py-1.5">
-                                    <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
-                                </div>
-                            ) : null}
+                            <ColorSubmenu kind="menu" label="Цвет текста" icon={Palette} value={textColor || null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintText} onClear={clearText} />
+                            <ColorSubmenu kind="menu" label={fillLabel} icon={PaintBucket} value={fill || null} presets={NEWS_FILL_COLORS} clearLabel="Без заливки" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintFill} onClear={clearFill} />
+                            {!inCode ? <ColorSubmenu kind="menu" label="Выделение текста" icon={Highlighter} value={highlightColor || null} presets={NEWS_HIGHLIGHT_COLORS} clearLabel="Без выделения" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintHighlight} onClear={clearHighlight} /> : null}
+                            <div className="flex flex-col py-1">
+                                {!inCode ? (
+                                    <MenuMetric icon={ALargeSmall} label="Размер шрифта">
+                                        <FontSizeField plain value={fontValue} disabled={!editor} onPrepare={prepareMetricSelection} onChange={applyFontSize} />
+                                    </MenuMetric>
+                                ) : null}
+                                <TextSpacingFields
+                                    plain
+                                    lineHeight={lineHeight}
+                                    letterSpacing={letterSpacing}
+                                    blockGap={blockGap}
+                                    disabled={!editor}
+                                    onLineHeight={applyLineHeight}
+                                    onLetterSpacing={applyLetterSpacing}
+                                    onBlockGap={applyBlockGap}
+                        onPrepare={prepareMetricSelection}
+                                />
+                            </div>
                             <MenubarSeparator />
                             {renderCommands(clearing, "menu")}
                         </MenubarContent>
@@ -1492,21 +2347,28 @@ export function NewsEditor({
                         <MenubarContent className={popupClass}>
                             {renderGroups([tableRows, tableColumns, tableCells], "menu")}
                             <MenubarSeparator />
-                            {renderSubmenu("menu", "Граница ячейки", Frame, cellBorders)}
+                            <ColorSubmenu kind="menu" label="Граница ячейки" icon={Frame} value={cellBorder && cellBorder !== "none" ? cellBorder : null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" noneLabel="Без обводки" noneActive={cellBorder === "none"} documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={(color) => paintCellBorder(color)} onClear={() => paintCellBorder(null)} onNone={() => paintCellBorder("none")} />
                             {renderSubmenu("menu", "Толщина границы", WIDTH_ICON[cellBorderWidth ?? 2], cellWidths)}
                             <MenubarSeparator />
                             {renderGroups([tableRemove], "menu")}
                         </MenubarContent>
                     </MenubarMenu>
                 </Menubar>
+                <EditorHelpButton anchors={anchorLinks} />
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1" onMouseDown={(event) => {
-                if (event.target instanceof Element && event.target.closest("[data-font-size]")) {
+                if (event.target instanceof Element && event.target.closest("[data-metric-field]")) {
                     return;
                 }
                 hold(event);
             }}>
-                {onImage ? (
+                {onFile ? (
+                    <>
+                        <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Переименовать" disabled={!editor} onPressedChange={openAttachmentRename}><Pencil /></Toggle>
+                        <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Удалить вложение" disabled={!editor} onPressedChange={() => editor?.chain().focus().deleteSelection().run()}><Trash2 /></Toggle>
+                        <BlockGapField value={blockGap} disabled={!editor} onChange={applyBlockGap} onPrepare={prepareMetricSelection} />
+                    </>
+                ) : onImage ? (
                     <>
                         <ToggleGroup
                             variant="outline"
@@ -1526,11 +2388,46 @@ export function NewsEditor({
                             <ToggleGroupItem value="right" aria-label="Справа"><AlignRight /></ToggleGroupItem>
                         </ToggleGroup>
                         <ToolbarRule />
-                        <SwatchMenu label="Обводка" icon={Frame} mark={imageBorder || undefined} disabled={!editor} items={imageBorders} />
+                        <ColorPicker label="Обводка" icon={Frame} value={imageBorder || null} presets={NEWS_POPULAR_COLORS} clearLabel="Без обводки" documentColors={usedColors} disabled={!editor} onPrepare={rememberColorSelection} onSelect={(color) => paintImageBorder(color)} onClear={() => paintImageBorder(null)} />
                         <SwatchMenu label="Толщина обводки" icon={WIDTH_ICON[imageBorderWidth ?? 2]} disabled={!editor} items={imageWidths} />
                         <SwatchMenu label="Форма рамки" icon={frameIcon} disabled={!editor} items={imageFrames} />
                         <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Подпись" disabled={!editor} onPressedChange={editImageAlt}><TextCursorInput /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Удалить снимок" disabled={!editor} onPressedChange={() => editor?.chain().focus().deleteSelection().run()}><Trash2 /></Toggle>
+                        <BlockGapField value={blockGap} disabled={!editor} onChange={applyBlockGap} onPrepare={prepareMetricSelection} />
+                    </>
+                ) : onBlockMath || onInlineMath ? (
+                    <>
+                        <FontSizeField
+                            value={formulaFontSize(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").fontSize)}
+                            disabled={!editor}
+                            onPrepare={prepareMetricSelection}
+                            onChange={(size) => applyFormulaStyle({ fontSize: `${formulaFontSize(size)}px` })}
+                        />
+                        <ColorPicker label="Цвет формулы" icon={Palette} value={formulaColor(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").color)} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" documentColors={usedColors} disabled={!editor} onPrepare={rememberColorSelection} onSelect={(color) => paintFormula(color)} onClear={() => paintFormula(null)} />
+                        <SpacingStepper
+                            label="Интервал формулы"
+                            decrease="Уменьшить интервал"
+                            increase="Увеличить интервал"
+                            value={formulaGap(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").gap)}
+                            options={FORMULA_GAP_OPTIONS}
+                            format={(next) => String(next)}
+                            disabled={!editor}
+                            canDecrease={formulaGap(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").gap) > FORMULA_GAP_MIN}
+                            canIncrease={formulaGap(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").gap) < FORMULA_GAP_MAX}
+                            onDecrease={() => applyFormulaStyle({ gap: Math.max(FORMULA_GAP_MIN, formulaGap(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").gap) - FORMULA_GAP_STEP) })}
+                            onIncrease={() => applyFormulaStyle({ gap: Math.min(FORMULA_GAP_MAX, formulaGap(editor?.getAttributes(onBlockMath ? "blockMath" : "inlineMath").gap) + FORMULA_GAP_STEP) })}
+                            onSelect={(gap) => applyFormulaStyle({ gap })}
+                            onPrepare={prepareMetricSelection}
+                        />
+                        {onBlockMath ? <BlockGapField value={blockGap} disabled={!editor} onChange={applyBlockGap} onPrepare={prepareMetricSelection} /> : null}
+                        <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Изменить формулу" disabled={!editor} onPressedChange={() => editMath(onBlockMath ? "block" : "inline")}><Pencil /></Toggle>
+                        <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Удалить формулу" disabled={!editor} onPressedChange={() => {
+                            if (onBlockMath) {
+                                editor?.chain().focus().deleteBlockMath().run();
+                                return;
+                            }
+                            editor?.chain().focus().deleteInlineMath().run();
+                        }}><Trash2 /></Toggle>
                     </>
                 ) : (
                     <>
@@ -1570,14 +2467,24 @@ export function NewsEditor({
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("details") ?? false} aria-label="Раскрывающийся блок" disabled={!editor || inCode} onPressedChange={toggleDetails}><ListCollapse /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Упоминание" disabled={!editor || inCode} onPressedChange={insertMention}><AtSign /></Toggle>
                         <ToolbarRule />
-                        <SwatchMenu label="Цвет текста" icon={Palette} mark={textColor || undefined} disabled={!editor || inCode} items={textColors} />
-                        <SwatchMenu label={fillLabel} icon={PaintBucket} mark={fill || undefined} disabled={!editor} items={fills} />
-                        <SwatchMenu label="Выделение текста" icon={Highlighter} mark={highlightColor || undefined} disabled={!editor || inCode} items={highlights} />
-                        <FontSizeField value={fontValue} disabled={!editor || inCode} onPrepare={prepareFontSize} onChange={applyFontSize} />
+                        <ColorPicker label="Цвет текста" icon={Palette} value={textColor || null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" documentColors={usedColors} disabled={!editor || inCode} onPrepare={rememberColorSelection} onSelect={paintText} onClear={clearText} />
+                        <ColorPicker label={fillLabel} icon={PaintBucket} value={fill || null} presets={NEWS_FILL_COLORS} clearLabel="Без заливки" documentColors={usedColors} disabled={!editor} onPrepare={rememberColorSelection} onSelect={paintFill} onClear={clearFill} />
+                        <ColorPicker label="Выделение текста" icon={Highlighter} value={highlightColor || null} presets={NEWS_HIGHLIGHT_COLORS} clearLabel="Без выделения" documentColors={usedColors} disabled={!editor || inCode} onPrepare={rememberColorSelection} onSelect={paintHighlight} onClear={clearHighlight} />
+                        <FontSizeField value={fontValue} disabled={!editor || inCode} onPrepare={prepareMetricSelection} onChange={applyFontSize} />
+                        <TextSpacingFields
+                            lineHeight={lineHeight}
+                            letterSpacing={letterSpacing}
+                            blockGap={blockGap}
+                            disabled={!editor}
+                            onLineHeight={applyLineHeight}
+                            onLetterSpacing={applyLetterSpacing}
+                            onBlockGap={applyBlockGap}
+                        onPrepare={prepareMetricSelection}
+                        />
                         {inTable ? (
                             <>
                                 <ToolbarRule />
-                                <SwatchMenu label="Граница ячейки" icon={Frame} mark={cellBorder && cellBorder !== "none" ? cellBorder : undefined} disabled={!editor} items={cellBorders} />
+                                <ColorPicker label="Граница ячейки" icon={Frame} value={cellBorder && cellBorder !== "none" ? cellBorder : null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" noneLabel="Без обводки" noneActive={cellBorder === "none"} documentColors={usedColors} disabled={!editor} onPrepare={rememberColorSelection} onSelect={(color) => paintCellBorder(color)} onClear={() => paintCellBorder(null)} onNone={() => paintCellBorder("none")} />
                                 <SwatchMenu label="Толщина границы" icon={WIDTH_ICON[cellBorderWidth ?? 2]} disabled={!editor} items={cellWidths} />
                             </>
                         ) : null}
@@ -1608,9 +2515,14 @@ export function NewsEditor({
                                 ], "context")}
                             </ContextMenuGroup>
                             {renderSubmenu("context", "Выравнивание", AlignLeft, imageAligns)}
-                            {renderSubmenu("context", "Обводка", Frame, imageBorders)}
+                            <ColorSubmenu kind="context" label="Обводка" icon={Frame} value={imageBorder || null} presets={NEWS_POPULAR_COLORS} clearLabel="Без обводки" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={(color) => paintImageBorder(color)} onClear={() => paintImageBorder(null)} />
                             {renderSubmenu("context", "Толщина обводки", WIDTH_ICON[imageBorderWidth ?? 2], imageWidths)}
                             {renderSubmenu("context", "Форма рамки", frameIcon, imageFrames)}
+                            <div className="py-1">
+                                <MenuMetric icon={AlignVerticalSpaceBetween} label="Интервал между элементами">
+                                    <BlockGapField plain value={blockGap} disabled={!editor} onChange={applyBlockGap} onPrepare={prepareMetricSelection} />
+                                </MenuMetric>
+                            </div>
                         </>
                     ) : onMention ? (
                         <>
@@ -1622,20 +2534,27 @@ export function NewsEditor({
                                 ], "context")}
                             </ContextMenuGroup>
                             <ContextMenuSeparator />
-                            <ContextMenuGroup>{renderCommands(marks.filter((item) => item.label !== "Код"), "context")}</ContextMenuGroup>
-                            {renderSubmenu("context", "Цвет текста", Palette, textColors)}
-                            {renderSubmenu("context", "Выделение текста", Highlighter, highlights)}
-                            <div className="px-2 py-1.5">
-                                <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
-                            </div>
+                            {renderSubmenu("context", "Начертание", Bold, marks.filter((item) => item.label !== "Код"))}
+                            <ColorSubmenu kind="context" label="Цвет текста" icon={Palette} value={textColor || null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintText} onClear={clearText} />
+                            <ColorSubmenu kind="context" label="Выделение текста" icon={Highlighter} value={highlightColor || null} presets={NEWS_HIGHLIGHT_COLORS} clearLabel="Без выделения" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintHighlight} onClear={clearHighlight} />
+                            {textMetricsMenu}
                             <ContextMenuSeparator />
                             <ContextMenuGroup>{renderCommands(clearing, "context")}</ContextMenuGroup>
                         </>
                     ) : specific ? (
-                        <ContextMenuGroup>
-                            {specificTitle ? <ContextMenuLabel className="whitespace-nowrap">{specificTitle}</ContextMenuLabel> : null}
-                            {renderCommands(specific, "context")}
-                        </ContextMenuGroup>
+                        <>
+                            <ContextMenuGroup>
+                                {specificTitle ? <ContextMenuLabel className="whitespace-nowrap">{specificTitle}</ContextMenuLabel> : null}
+                                {renderCommands(specific, "context")}
+                            </ContextMenuGroup>
+                            {onInlineMath ? null : (
+                                <div className="py-1">
+                                    <MenuMetric icon={AlignVerticalSpaceBetween} label="Интервал между элементами">
+                                        <BlockGapField plain value={blockGap} disabled={!editor} onChange={applyBlockGap} onPrepare={prepareMetricSelection} />
+                                    </MenuMetric>
+                                </div>
+                            )}
+                        </>
                     ) : (
                         <>
                             {onAnchor ? (
@@ -1646,23 +2565,15 @@ export function NewsEditor({
                                     ], "context")}
                                 </ContextMenuGroup>
                             ) : null}
-                            <ContextMenuGroup>
-                                <ContextMenuLabel className="whitespace-nowrap">Текст</ContextMenuLabel>
-                                {renderCommands(marks, "context")}
-                            </ContextMenuGroup>
-                            <ContextMenuSeparator />
+                            {renderSubmenu("context", "Начертание", Bold, marks)}
                             <ContextMenuGroup>{renderCommands(links, "context")}</ContextMenuGroup>
                             {renderSubmenu("context", "Абзац", Pilcrow, [styles, blocks])}
-                            {!inCode ? renderSubmenu("context", "Цвет текста", Palette, textColors) : null}
-                            {renderSubmenu("context", fillLabel, PaintBucket, fills)}
-                            {!inCode ? renderSubmenu("context", "Выделение текста", Highlighter, highlights) : null}
-                            {!inCode ? (
-                                <div className="px-2 py-1.5">
-                                    <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
-                                </div>
-                            ) : null}
+                            {!inCode ? <ColorSubmenu kind="context" label="Цвет текста" icon={Palette} value={textColor || null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintText} onClear={clearText} /> : null}
+                            <ColorSubmenu kind="context" label={fillLabel} icon={PaintBucket} value={fill || null} presets={NEWS_FILL_COLORS} clearLabel="Без заливки" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintFill} onClear={clearFill} />
+                            {!inCode ? <ColorSubmenu kind="context" label="Выделение текста" icon={Highlighter} value={highlightColor || null} presets={NEWS_HIGHLIGHT_COLORS} clearLabel="Без выделения" documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={paintHighlight} onClear={clearHighlight} /> : null}
+                            {textMetricsMenu}
                             {!inCode || inTable ? <ContextMenuSeparator /> : null}
-                            {inTable ? renderSubmenu("context", "Граница ячейки", Frame, cellBorders) : null}
+                            {inTable ? <ColorSubmenu kind="context" label="Граница ячейки" icon={Frame} value={cellBorder && cellBorder !== "none" ? cellBorder : null} presets={NEWS_POPULAR_COLORS} clearLabel="По умолчанию" noneLabel="Без обводки" noneActive={cellBorder === "none"} documentColors={usedColors} onPrepare={rememberColorSelection} onSelect={(color) => paintCellBorder(color)} onClear={() => paintCellBorder(null)} onNone={() => paintCellBorder("none")} /> : null}
                             {inTable ? renderSubmenu("context", "Толщина границы", WIDTH_ICON[cellBorderWidth ?? 2], cellWidths) : null}
                             {inTable ? renderSubmenu("context", "Таблица", TableIcon, tableGroups) : null}
                             {!inCode ? renderSubmenu("context", "Вставка", Plus, [insertMedia, insertBlocks, insertMath]) : null}
@@ -1675,14 +2586,15 @@ export function NewsEditor({
             <input
                 ref={imageInput}
                 type="file"
-                accept={IMAGE_TYPES.join(",")}
+                accept={uploadAccept("image")}
                 className="hidden"
                 onChange={(event) => takeFile("image", event.target.files)}
             />
             <input
                 ref={fileInput}
                 type="file"
-                accept={[...FILE_TYPES].join(",")}
+                accept={uploadAccept("file")}
+                multiple
                 className="hidden"
                 onChange={(event) => takeFile("file", event.target.files)}
             />
@@ -1727,8 +2639,200 @@ export function NewsEditor({
                     )}
                 </DialogContent>
             </Dialog>
+            <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+                <DialogContent>
+                    <form
+                        className="grid gap-4"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            applyAttachmentRename();
+                        }}
+                    >
+                        <DialogHeader>
+                            <DialogTitle>Переименовать вложение</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-1.5">
+                            <Label htmlFor="attachment-name">Имя файла</Label>
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    id="attachment-name"
+                                    value={renameValue}
+                                    autoFocus
+                                    maxLength={renameExt ? 255 - renameExt.length - 1 : 255}
+                                    onFocus={(event) => event.currentTarget.select()}
+                                    onChange={(event) => setRenameValue(event.target.value)}
+                                />
+                                {renameExt ? <span className="shrink-0 text-sm text-muted-foreground">.{renameExt}</span> : null}
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setRenameOpen(false)}>Отмена</Button>
+                            <Button type="submit" disabled={renameValue.trim().length === 0}>Сохранить</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+                <DialogContent>
+                    <form
+                        className="grid gap-4"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            applyLink();
+                        }}
+                    >
+                        <DialogHeader>
+                            <DialogTitle>{linkEditing ? "Изменить ссылку" : "Ссылка"}</DialogTitle>
+                        </DialogHeader>
+                        <FormAlert message={linkError} />
+                        <div className="flex flex-col gap-1.5">
+                            <Label htmlFor="link-text">Текст</Label>
+                            <Input
+                                id="link-text"
+                                value={linkText}
+                                autoFocus
+                                maxLength={500}
+                                onChange={(event) => setLinkText(event.target.value)}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <Label htmlFor="link-href">Адрес</Label>
+                            <Input
+                                id="link-href"
+                                value={linkHref}
+                                maxLength={2000}
+                                spellCheck={false}
+                                onChange={(event) => setLinkHref(event.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                {anchorLinks
+                                    ? "Адрес http, https, mailto, якорь вида #раздел или страница /wiki/…"
+                                    : "Адрес http, https или mailto"}
+                            </p>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                                checked={linkBlank}
+                                aria-label="Открывать в новом окне"
+                                onCheckedChange={(value) => setLinkBlank(value === true)}
+                            />
+                            Открывать в новом окне
+                        </label>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setLinkOpen(false)}>Отмена</Button>
+                            <Button type="submit" disabled={linkText.trim().length === 0 || linkHref.trim().length === 0}>
+                                {linkEditing ? "Сохранить" : "Вставить"}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+            <FormulaDialog
+                open={mathOpen}
+                kind={mathKind}
+                editing={mathEditing}
+                value={mathValue}
+                fontSize={mathSize}
+                color={mathColor}
+                gap={mathGap}
+                onOpenChange={setMathOpen}
+                onSubmit={applyMath}
+            />
         </div>
     );
+
+    function applyLink() {
+        if (!editor) {
+            return;
+        }
+        const href = linkHref.trim();
+        const text = linkText.replace(/\s+/g, " ").trim().slice(0, 500);
+        if (!text || !href) {
+            return;
+        }
+        if (!allowedHref(href, anchorLinks)) {
+            setLinkError(anchorLinks
+                ? "Можно указать http, https, mailto, якорь #раздел или страницу /wiki/…"
+                : "Можно указать адрес http, https или mailto");
+            return;
+        }
+        const { from, to } = linkRange;
+        const doc = editor.state.doc;
+        if (from < 0 || to > doc.content.size || from > to) {
+            setLinkError("Не удалось вставить ссылку");
+            return;
+        }
+        const $from = doc.resolve(from);
+        const $to = doc.resolve(to);
+        if ($from.parent !== $to.parent || !$from.parent.inlineContent) {
+            setLinkError("Ссылка должна быть внутри одного абзаца");
+            return;
+        }
+        const attrs = {
+            href,
+            target: linkBlank ? "_blank" : null,
+            rel: linkBlank ? "noopener noreferrer" : null,
+        };
+        const applied = editor.chain().focus().command(({ state, tr, dispatch }) => {
+            const type = state.schema.marks.link;
+            if (!type) {
+                return false;
+            }
+            const source = from < to ? state.doc.resolve(Math.min(from + 1, to)) : state.doc.resolve(from);
+            const inherited = source.marks().filter((mark) => mark.type !== type);
+            const node = state.schema.text(text, [...inherited, type.create(attrs)]);
+            if (dispatch) {
+                tr.replaceWith(from, to, node);
+            }
+            return true;
+        }).run();
+        if (!applied) {
+            setLinkError("Не удалось вставить ссылку");
+            return;
+        }
+        setLinkOpen(false);
+    }
+
+    function applyFormulaStyle(patch: { fontSize?: string | null; color?: string | null; gap?: number }) {
+        if (!editor) {
+            return;
+        }
+        keepScroll(() => {
+            restoreMetricSelection();
+            const name = editor.isActive("blockMath") ? "blockMath" : editor.isActive("inlineMath") ? "inlineMath" : null;
+            if (!name) {
+                return;
+            }
+            editor.chain().updateAttributes(name, patch).run();
+        });
+    }
+
+    function applyMath(next: { latex: string; fontSize: number; color: string | null; gap: number }) {
+        if (!editor) {
+            return;
+        }
+        const latex = next.latex.trim().slice(0, 2000);
+        if (!latex) {
+            return;
+        }
+        const attrs = {
+            latex,
+            fontSize: `${formulaFontSize(next.fontSize)}px`,
+            color: next.color,
+            gap: formulaGap(next.gap),
+        };
+        const name = mathKind === "block" ? "blockMath" : "inlineMath";
+        const chain = editor.chain();
+        if (mathEditing && mathPos !== null) {
+            chain.setNodeSelection(mathPos).updateAttributes(name, attrs);
+        } else {
+            chain.insertContent({ type: name, attrs });
+        }
+        chain.focus();
+        if (chain.run()) {
+            setMathOpen(false);
+        }
+    }
 
     function placeAnchor() {
         const label = sectionName.trim().slice(0, 120);
@@ -1820,7 +2924,7 @@ function openReadingMedia(event: { target: EventTarget | null; preventDefault: (
     event.preventDefault();
     open({
         src,
-        title: (link.textContent ?? "").trim() || "Вложение",
+        title: link.getAttribute("data-title") || (link.textContent ?? "").trim() || "Вложение",
         mime: link.getAttribute("data-mime") ?? "",
     });
 }
@@ -1869,36 +2973,89 @@ function ReadingMediaDialog({ item, onClose }: { item: ReadingMedia | null; onCl
         return () => controller.abort();
     }, [item, kind]);
 
-    if (item && kind === "image") {
+    if (!item) {
+        return null;
+    }
+    if (kind === "image") {
         return <PhotoLightbox key={item.src} src={item.src} title={item.title} download={`${item.src}?download=1`} onClose={onClose} />;
     }
 
-    const preview = item ? `${item.src}?inline=1` : "";
-    const download = item ? `${item.src}?download=1` : "";
+    const download = `${item.src}?download=1`;
+    return (
+        <ReadingStage title={item.title} download={download} onClose={onClose}>
+            {kind === "pdf" ? (
+                <iframe src={`${item.src}?inline=1`} title={item.title} className="h-[calc(100dvh-5rem)] w-full rounded-md bg-white" />
+            ) : null}
+            {kind === "text" ? (
+                <div className="h-[calc(100dvh-5rem)] w-full max-w-3xl overflow-auto rounded-md bg-background p-4 text-foreground">
+                    {text === null && !failed ? <StackSkeleton rows={3} /> : null}
+                    {text !== null ? <pre className="font-mono text-sm whitespace-pre-wrap">{text}</pre> : null}
+                    {failed ? (
+                        <div className="flex flex-col items-center gap-4 text-center">
+                            <p className="text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
+                            <a href={download} download={item.title} className={buttonVariants()}>
+                                <Download />
+                                Скачать
+                            </a>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+            {kind === "none" ? (
+                <div className="flex w-full max-w-md flex-col items-center rounded-md bg-background px-6 py-5 text-center text-foreground">
+                    <p className="text-sm font-medium">{item.title}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
+                    <a href={download} download={item.title} className={buttonVariants({ className: "mt-4" })}>
+                        <Download />
+                        Скачать
+                    </a>
+                </div>
+            ) : null}
+        </ReadingStage>
+    );
+}
+
+function MediaControls({ title, download, onClose }: { title: string; download: string; onClose: () => void }) {
+    return (
+        <div className="absolute top-3 right-3 z-10 flex gap-2" onClick={(event) => event.stopPropagation()}>
+            <a
+                href={download}
+                download={title}
+                aria-label="Скачать"
+                className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
+            >
+                <Download />
+            </a>
+            <button
+                type="button"
+                aria-label="Закрыть"
+                className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
+                onClick={onClose}
+            >
+                <X />
+            </button>
+        </div>
+    );
+}
+
+function ReadingStage({ title, download, onClose, children }: { title: string; download: string; onClose: () => void; children: ReactNode }) {
+    useEffect(() => {
+        function onKey(event: KeyboardEvent) {
+            if (event.key === "Escape") {
+                onClose();
+            }
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onClose]);
 
     return (
-        <Dialog open={item !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-            <DialogContent className="max-h-[min(48rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-3xl">
-                <DialogHeader>
-                    <DialogTitle className="truncate pr-8">{item?.title || "Файл"}</DialogTitle>
-                </DialogHeader>
-                {item && kind === "pdf" ? (
-                    <iframe src={preview} title={item.title} className="h-[70dvh] w-full rounded-md border" />
-                ) : null}
-                {item && kind === "text" && text === null && !failed ? <StackSkeleton rows={3} /> : null}
-                {item && kind === "text" && text !== null ? (
-                    <pre className="max-h-[70dvh] overflow-auto rounded-md bg-muted p-3 text-sm whitespace-pre-wrap">{text}</pre>
-                ) : null}
-                {item && (kind === "none" || failed) ? (
-                    <p className="text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
-                ) : null}
-                <DialogFooter>
-                    {item ? (
-                        <a href={download} download={item.title} className={buttonVariants({ variant: "outline" })}>Скачать</a>
-                    ) : null}
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+            <MediaControls title={title} download={download} onClose={onClose} />
+            <div className="flex max-h-[calc(100dvh-5rem)] w-full max-w-5xl items-center justify-center" onClick={(event) => event.stopPropagation()}>
+                {children}
+            </div>
+        </div>
     );
 }
 
@@ -1947,25 +3104,8 @@ function PhotoLightbox({ src, title, download, onClose }: { src: string; title: 
     }
 
     return (
-        <div ref={frame} className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/80" onClick={onClose}>
-            <div className="absolute top-3 right-3 z-10 flex gap-2" onClick={(event) => event.stopPropagation()}>
-                <a
-                    href={download}
-                    download={title}
-                    aria-label="Скачать"
-                    className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
-                >
-                    <Download />
-                </a>
-                <button
-                    type="button"
-                    aria-label="Закрыть"
-                    className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
-                    onClick={onClose}
-                >
-                    <X />
-                </button>
-            </div>
+        <div ref={frame} role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/80" onClick={onClose}>
+            <MediaControls title={title} download={download} onClose={onClose} />
             <div
                 className="relative"
                 style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}

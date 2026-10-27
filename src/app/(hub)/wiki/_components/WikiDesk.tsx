@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Calendar, ChevronsDownUp, ChevronsUpDown, ChevronRight, Clock, CornerUpLeft, FilePlus, FileText, Folder, FolderOpen, FolderPlus, GripVertical, House, List, PanelLeftClose, PanelLeftOpen, Pencil, Search, Tags, Trash2, UserRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Calendar, ChevronsDownUp, ChevronsUpDown, ChevronRight, Clock, CornerUpLeft, FilePlus, FileText, Folder, FolderOpen, FolderPlus, GripVertical, House, Info, List, PanelLeftClose, PanelLeftOpen, Pencil, Search, Send, Star, Trash2, UserRound, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
     Breadcrumb,
@@ -45,6 +45,7 @@ import { notifySuccess } from "@/lib/notify";
 import { ApiResponse } from "@/types/api";
 import { currentWikiHash, scrollToWikiAnchor } from "@/lib/wiki-anchor";
 import { NewsEditor } from "../../news/_components/NewsEditor";
+import { ArticleBrief } from "./ArticleBrief";
 import { WikiToc } from "./WikiEditor";
 import { WikiSearchDialog } from "./WikiSearchDialog";
 import type { WikiHeading, WikiNode } from "@/lib/wiki-document";
@@ -52,6 +53,7 @@ import type { WikiHeading, WikiNode } from "@/lib/wiki-document";
 const TREE_WIDTH_KEY = "wiki.tree.width";
 const TREE_CLOSED_KEY = "wiki.tree.closed";
 const TREE_COLLAPSED_KEY = "wiki.tree.collapsed";
+const FAVORITES_CLOSED_KEY = "wiki.favorites.closed";
 const TREE_DEFAULT = 272;
 const TREE_MIN = 200;
 const TREE_MAX = 480;
@@ -81,6 +83,7 @@ interface WikiArticle extends WikiArticleSummary {
     author: string;
     authorName: string | null;
     authorTitle: string | null;
+    summary: string;
 }
 
 interface WikiOrderPayload {
@@ -103,6 +106,9 @@ export function WikiDesk() {
     const [query, setQuery] = useState(urlQuery);
     const [groups, setGroups] = useState<WikiGroup[]>([]);
     const [articles, setArticles] = useState<WikiArticleSummary[]>([]);
+    const [favorites, setFavorites] = useState<WikiArticleSummary[]>([]);
+    const [favoriteBusy, setFavoriteBusy] = useState<number | null>(null);
+    const [favoritesClosed, setFavoritesClosed] = useState(false);
     const [tags, setTags] = useState<string[]>([]);
     const [article, setArticle] = useState<WikiArticle | null>(null);
     const [closed, setClosed] = useState<Set<number>>(new Set());
@@ -116,7 +122,6 @@ export function WikiDesk() {
     const [groupParent, setGroupParent] = useState<number | null>(null);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [tocOpen, setTocOpen] = useState(false);
-    const [tagsOpen, setTagsOpen] = useState(false);
     const [confirm, setConfirm] = useState<null | "archive" | "restore" | "delete">(null);
     const [pending, setPending] = useState(false);
     const [sorting, setSorting] = useState(false);
@@ -128,8 +133,6 @@ export function WikiDesk() {
     const crumbTitle = showing?.title ?? listed?.title ?? null;
     const crumbGroupId = showing?.groupId ?? listed?.groupId ?? null;
     const browseGroup = browseGroupId === null ? null : groups.find((group) => group.id === browseGroupId) ?? null;
-    const stickyTitle = crumbTitle ?? browseGroup?.title ?? "База знаний";
-
     useEffect(() => {
         const storedWidth = window.localStorage.getItem(TREE_WIDTH_KEY);
         const width = storedWidth === null ? Number.NaN : Number(storedWidth);
@@ -137,6 +140,7 @@ export function WikiDesk() {
             setTreeWidth(clampWidth(width));
         }
         setTreeCollapsed(window.localStorage.getItem(TREE_COLLAPSED_KEY) === "1");
+        setFavoritesClosed(window.localStorage.getItem(FAVORITES_CLOSED_KEY) === "1");
         const storedClosed = window.localStorage.getItem(TREE_CLOSED_KEY);
         if (storedClosed) {
             try {
@@ -158,7 +162,8 @@ export function WikiDesk() {
         window.localStorage.setItem(TREE_WIDTH_KEY, String(treeWidth));
         window.localStorage.setItem(TREE_COLLAPSED_KEY, treeCollapsed ? "1" : "0");
         window.localStorage.setItem(TREE_CLOSED_KEY, JSON.stringify([...closed]));
-    }, [prefsReady, treeWidth, treeCollapsed, closed]);
+        window.localStorage.setItem(FAVORITES_CLOSED_KEY, favoritesClosed ? "1" : "0");
+    }, [prefsReady, treeWidth, treeCollapsed, closed, favoritesClosed]);
 
     useEffect(() => {
         setQuery(urlQuery);
@@ -219,7 +224,6 @@ export function WikiDesk() {
     useEffect(() => {
         setMobileOpen(false);
         setTocOpen(false);
-        setTagsOpen(false);
     }, [articleId]);
 
     useEffect(() => {
@@ -228,7 +232,6 @@ export function WikiDesk() {
             if (media.matches) {
                 setMobileOpen(false);
                 setTocOpen(false);
-                setTagsOpen(false);
             }
         }
         media.addEventListener("change", onChange);
@@ -353,17 +356,44 @@ export function WikiDesk() {
         replaceFilter(query, next.toLowerCase() === tag.toLowerCase() ? "" : next);
     }
 
+    async function toggleFavorite(item: WikiArticleSummary) {
+        const next = !favorites.some((entry) => entry.id === item.id);
+        const previous = favorites;
+        setFavoriteBusy(item.id);
+        setError(null);
+        setFavorites(next ? [item, ...previous.filter((entry) => entry.id !== item.id)] : previous.filter((entry) => entry.id !== item.id));
+        try {
+            const response = await fetch(`/api/wiki/articles/${item.id}/favorite`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ favorite: next }),
+            });
+            const json = (await response.json()) as ApiResponse<{ favorite: boolean }>;
+            if (!json.success || json.data.favorite !== next) {
+                setFavorites(previous);
+                setError(json.success ? "Не удалось изменить избранное" : json.error.message);
+                return;
+            }
+        } catch {
+            setFavorites(previous);
+            setError("Не удалось изменить избранное");
+        } finally {
+            setFavoriteBusy(null);
+        }
+    }
+
     async function load(search: string, selectedTag: string) {
         setError(null);
         try {
             const response = await fetch(`/api/wiki?q=${encodeURIComponent(search)}&tag=${encodeURIComponent(selectedTag)}`);
-            const json = (await response.json()) as ApiResponse<{ groups: WikiGroup[]; articles: WikiArticleSummary[]; tags: string[] }>;
+            const json = (await response.json()) as ApiResponse<{ groups: WikiGroup[]; articles: WikiArticleSummary[]; tags: string[]; favorites: WikiArticleSummary[] }>;
             if (!json.success) {
                 setError(json.error.message);
                 return;
             }
             setGroups(json.data.groups);
             setArticles(json.data.articles);
+            setFavorites(json.data.favorites);
             setTags(json.data.tags);
         } catch {
             setError("Не удалось загрузить базу знаний");
@@ -473,6 +503,7 @@ export function WikiDesk() {
     }
 
     const roots = groups.filter((group) => group.parentId === null && (!filtering || branchHasArticles(group, groups, articles)));
+    const favoriteIds = new Set(favorites.map((item) => item.id));
     function deskHref(groupId: number | null, article: number | null) {
         const next = new URLSearchParams(searchParams.toString());
         next.delete("group");
@@ -590,7 +621,46 @@ export function WikiDesk() {
                     </div>
                 </div>
                 {!loaded ? <StackSkeleton rows={6} /> : null}
-                {loaded && articles.length === 0 && groups.length === 0 && !filtering ? <p className="text-sm text-muted-foreground">Статей пока нет.</p> : null}
+                {loaded && favorites.length > 0 ? (
+                    <div className="flex flex-col text-sm">
+                        <button
+                            type="button"
+                            className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 text-left hover:bg-muted"
+                            aria-expanded={!favoritesClosed}
+                            onClick={() => setFavoritesClosed((value) => !value)}
+                        >
+                            <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !favoritesClosed && "rotate-90")} />
+                            <Star className="size-4 shrink-0 fill-current text-amber-600" aria-hidden />
+                            <span className="truncate">Избранное</span>
+                        </button>
+                        {favoritesClosed ? null : (
+                            <ul className="ml-3 flex flex-col border-l pl-1">
+                                {favorites.map((item) => (
+                                    <li key={item.id} className="flex items-center">
+                                        <Link
+                                            href={articleHref(item.id)}
+                                            onClick={() => setMobileOpen(false)}
+                                            className={cn(
+                                                "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 hover:bg-muted",
+                                                item.id === articleId && "bg-muted font-medium",
+                                            )}
+                                        >
+                                            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{articleLabel(item)}</span>
+                                        </Link>
+                                        <FavoriteButton
+                                            active
+                                            pending={favoriteBusy === item.id}
+                                            size="icon-xs"
+                                            onClick={() => void toggleFavorite(item)}
+                                        />
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                ) : null}
+                {loaded && articles.length === 0 && groups.length === 0 && favorites.length === 0 && !filtering ? <p className="text-sm text-muted-foreground">Статей пока нет.</p> : null}
                 {loaded && filtering && articles.length === 0 ? <p className="text-sm text-muted-foreground">Ничего не найдено.</p> : null}
                 <ul className="flex flex-col gap-0.5 text-sm">
                     {roots.map((group) => (
@@ -610,6 +680,9 @@ export function WikiDesk() {
                             onCollapseAll={collapseAll}
                             onExpandAll={expandAll}
                             onNavigate={() => setMobileOpen(false)}
+                            favoriteIds={favoriteIds}
+                            favoriteBusy={favoriteBusy}
+                            onFavorite={(item) => void toggleFavorite(item)}
                         />
                     ))}
                 </ul>
@@ -632,26 +705,31 @@ export function WikiDesk() {
                         <PanelLeftOpen />
                         Статьи
                     </Button>
-                    <p className="min-w-0 flex-1 truncate text-sm font-medium">{stickyTitle}</p>
-                    {tags.length > 0 ? (
-                        <Button type="button" variant="ghost" size="icon-sm" aria-label="Теги" onClick={() => setTagsOpen(true)}>
-                            <Tags />
-                        </Button>
-                    ) : null}
-                    {showing && showing.headings.length > 0 ? (
-                        <Button type="button" variant="ghost" size="icon-sm" aria-label="Содержание" onClick={() => setTocOpen(true)}>
-                            <List />
-                        </Button>
-                    ) : null}
-                    {canWrite && showing ? (
-                        <ArticleActions
-                            archived={showing.archived}
-                            pending={pending}
-                            onEdit={() => router.push(`/wiki/${showing.id}/edit`)}
-                            onArchive={() => setConfirm(showing.archived ? "restore" : "archive")}
-                            onDelete={() => setConfirm("delete")}
-                        />
-                    ) : null}
+                    <div className="ml-auto flex items-center">
+                        {showing && showing.headings.length > 0 ? (
+                            <Button type="button" variant="ghost" size="icon-sm" aria-label="Содержание" onClick={() => setTocOpen(true)}>
+                                <List />
+                            </Button>
+                        ) : null}
+                        {showing ? (
+                            <FavoriteButton
+                                active={favoriteIds.has(showing.id)}
+                                pending={favoriteBusy === showing.id}
+                                onClick={() => void toggleFavorite(showing)}
+                            />
+                        ) : null}
+                        {canWrite && showing ? (
+                            <ArticleActions
+                                draft={showing.status === "draft"}
+                                archived={showing.archived}
+                                pending={pending}
+                                onPublish={() => router.push(`/wiki/${showing.id}/edit?publish=1`)}
+                                onEdit={() => router.push(`/wiki/${showing.id}/edit`)}
+                                onArchive={() => setConfirm(showing.archived ? "restore" : "archive")}
+                                onDelete={() => setConfirm("delete")}
+                            />
+                        ) : null}
+                    </div>
                 </div>
                 <div className="flex flex-col gap-3 p-3 lg:p-4">
                 <FormAlert message={error} />
@@ -685,24 +763,20 @@ export function WikiDesk() {
                                     </div>
                                 ) : null}
                             </div>
-                            {canWrite ? (
-                                <div className="hidden lg:flex">
-                                    <ArticleActions
-                                        archived={showing.archived}
-                                        pending={pending}
-                                        onEdit={() => router.push(`/wiki/${showing.id}/edit`)}
-                                        onArchive={() => setConfirm(showing.archived ? "restore" : "archive")}
-                                        onDelete={() => setConfirm("delete")}
-                                    />
-                                </div>
-                            ) : null}
                         </div>
+                        {showing.status === "draft" ? (
+                            <p role="note" className="flex w-full items-start gap-2 rounded-md border border-sky-600/40 bg-sky-500/15 px-3 py-2 text-sm font-medium text-sky-950 dark:border-sky-400/40 dark:bg-sky-400/15 dark:text-sky-50">
+                                <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+                                Статья не опубликована. Пользователи не увидят её, пока она не будет опубликована.
+                            </p>
+                        ) : null}
                         {showing.archived ? (
                             <p role="note" className="flex w-full items-start gap-2 rounded-md border border-amber-600/50 bg-amber-500/20 px-3 py-2 text-sm font-medium text-amber-950 dark:border-amber-400/50 dark:bg-amber-400/15 dark:text-amber-50">
                                 <Archive className="mt-0.5 size-4 shrink-0" aria-hidden />
                                 Статья находится в архиве. Информация может быть неактуальной.
                             </p>
                         ) : null}
+                        <ArticleBrief text={showing.summary ?? ""} />
                         <NewsEditor
                             content={showing.document}
                             loadKey={`${showing.id}:${showing.updatedAt}`}
@@ -733,6 +807,28 @@ export function WikiDesk() {
                 <ScrollTop targetRef={articleScrollRef} />
             </div>
             <aside className="hidden flex-col gap-2 border-t p-3 lg:flex lg:min-h-0 lg:w-60 lg:shrink-0 lg:gap-3 lg:overflow-y-auto lg:border-t-0 lg:border-l">
+                {showing ? (
+                    <div className="flex flex-col gap-0.5">
+                        <FavoriteButton
+                            labelled
+                            active={favoriteIds.has(showing.id)}
+                            pending={favoriteBusy === showing.id}
+                            onClick={() => void toggleFavorite(showing)}
+                        />
+                        {canWrite ? (
+                            <ArticleActions
+                                labelled
+                                draft={showing.status === "draft"}
+                                archived={showing.archived}
+                                pending={pending}
+                                onPublish={() => router.push(`/wiki/${showing.id}/edit?publish=1`)}
+                                onEdit={() => router.push(`/wiki/${showing.id}/edit`)}
+                                onArchive={() => setConfirm(showing.archived ? "restore" : "archive")}
+                                onDelete={() => setConfirm("delete")}
+                            />
+                        ) : null}
+                    </div>
+                ) : null}
                 <p className="text-xs font-medium text-muted-foreground">Содержание</p>
                 {articleId !== null && !articleReady ? <StackSkeleton rows={4} /> : null}
                 {showing && showing.headings.length > 0 ? <WikiToc articleId={showing.id} headings={showing.headings} /> : null}
@@ -747,27 +843,6 @@ export function WikiDesk() {
                         </SheetHeader>
                         <div className="overflow-y-auto px-2 pb-4">
                             <WikiToc articleId={showing.id} headings={showing.headings} onNavigate={() => setTocOpen(false)} />
-                        </div>
-                    </SheetContent>
-                </Sheet>
-            ) : null}
-            {tags.length > 0 ? (
-                <Sheet open={tagsOpen} onOpenChange={setTagsOpen}>
-                    <SheetContent side="bottom" className="max-h-[70dvh] gap-2 lg:hidden">
-                        <SheetHeader className="pr-10">
-                            <SheetTitle>Теги</SheetTitle>
-                        </SheetHeader>
-                        <div className="overflow-y-auto px-4 pb-4">
-                            <TagCloud
-                                tags={tags}
-                                active={tag}
-                                labelled={false}
-                                onSelect={(item) => {
-                                    selectTag(item);
-                                    setTagsOpen(false);
-                                    setMobileOpen(true);
-                                }}
-                            />
                         </div>
                     </SheetContent>
                 </Sheet>
@@ -971,6 +1046,43 @@ function ArticlePath({
 
 function articleLabel(item: WikiArticleSummary): string {
     return `${item.title}${item.status === "draft" ? " · Черновик" : ""}${item.archived ? " · Архив" : ""}`;
+}
+
+function FavoriteButton({
+    active,
+    pending,
+    onClick,
+    className,
+    size = "icon-sm",
+    labelled = false,
+}: {
+    active: boolean;
+    pending: boolean;
+    onClick: () => void;
+    className?: string;
+    size?: "icon-sm" | "icon-xs";
+    labelled?: boolean;
+}) {
+    const label = active ? "Убрать из избранного" : "В избранное";
+    return (
+        <Button
+            type="button"
+            variant="ghost"
+            size={labelled ? "sm" : size}
+            className={cn(labelled ? "w-full justify-start" : "shrink-0", active && "text-amber-600", className)}
+            aria-pressed={active}
+            aria-label={label}
+            disabled={pending}
+            onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onClick();
+            }}
+        >
+            {pending ? <ButtonSpinner /> : <Star className={cn(active && "fill-current")} />}
+            {labelled ? <span className="truncate">{label}</span> : null}
+        </Button>
+    );
 }
 
 interface SortDrag {
@@ -1791,6 +1903,9 @@ function GroupBranch({
     onCollapseAll,
     onExpandAll,
     onNavigate,
+    favoriteIds,
+    favoriteBusy,
+    onFavorite,
 }: {
     group: WikiGroup;
     groups: WikiGroup[];
@@ -1806,6 +1921,9 @@ function GroupBranch({
     onCollapseAll: () => void;
     onExpandAll: () => void;
     onNavigate: () => void;
+    favoriteIds: Set<number>;
+    favoriteBusy: number | null;
+    onFavorite: (item: WikiArticleSummary) => void;
 }) {
     const children = groups.filter((item) => item.parentId === group.id && (!filtering || branchHasArticles(item, groups, articles)));
     const own = articles.filter((item) => item.groupId === group.id);
@@ -1874,7 +1992,7 @@ function GroupBranch({
             {open ? (
                 <ul className="ml-3 flex flex-col border-l pl-1">
                     {own.map((item) => (
-                        <li key={item.id}>
+                        <li key={item.id} className="group/article flex items-center">
                             <Link
                                 id={`wiki-article-${item.id}`}
                                 href={hrefFor(item.id)}
@@ -1887,6 +2005,16 @@ function GroupBranch({
                                 <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                                 <span className="truncate">{articleLabel(item)}</span>
                             </Link>
+                            <FavoriteButton
+                                active={favoriteIds.has(item.id)}
+                                pending={favoriteBusy === item.id}
+                                size="icon-xs"
+                                className={cn(
+                                    "opacity-0 group-hover/article:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+                                    (favoriteIds.has(item.id) || favoriteBusy === item.id) && "opacity-100",
+                                )}
+                                onClick={() => onFavorite(item)}
+                            />
                         </li>
                     ))}
                     {canWrite && !filtering && own.length === 0 && children.length === 0 ? (
@@ -1918,6 +2046,9 @@ function GroupBranch({
                             onCollapseAll={onCollapseAll}
                             onExpandAll={onExpandAll}
                             onNavigate={onNavigate}
+                            favoriteIds={favoriteIds}
+                            favoriteBusy={favoriteBusy}
+                            onFavorite={onFavorite}
                         />
                     ))}
                 </ul>
@@ -2038,24 +2169,60 @@ function GroupDialog({
 }
 
 function ArticleActions({
+    draft,
     archived,
     pending,
+    onPublish,
     onEdit,
     onArchive,
     onDelete,
+    labelled = false,
 }: {
+    draft: boolean;
     archived: boolean;
     pending: boolean;
+    onPublish: () => void;
     onEdit: () => void;
     onArchive: () => void;
     onDelete: () => void;
+    labelled?: boolean;
 }) {
+    const archiveLabel = archived ? "Вернуть из архива" : "В архив";
+    if (labelled) {
+        return (
+            <>
+                {draft ? (
+                    <Button type="button" variant="ghost" size="sm" className="w-full justify-start" disabled={pending} onClick={onPublish}>
+                        <Send />
+                        <span className="truncate">Опубликовать</span>
+                    </Button>
+                ) : null}
+                <Button type="button" variant="ghost" size="sm" className="w-full justify-start" disabled={pending} onClick={onEdit}>
+                    <Pencil />
+                    <span className="truncate">Редактировать</span>
+                </Button>
+                <Button type="button" variant="ghost" size="sm" className="w-full justify-start" disabled={pending} onClick={onArchive}>
+                    {archived ? <ArchiveRestore /> : <Archive />}
+                    <span className="truncate">{archiveLabel}</span>
+                </Button>
+                <Button type="button" variant="ghost" size="sm" className="w-full justify-start text-destructive hover:text-destructive" disabled={pending} onClick={onDelete}>
+                    <Trash2 />
+                    <span className="truncate">Удалить</span>
+                </Button>
+            </>
+        );
+    }
     return (
         <div className="flex shrink-0 items-center">
+            {draft ? (
+                <TreeAction label="Опубликовать" disabled={pending} onClick={onPublish}>
+                    <Send />
+                </TreeAction>
+            ) : null}
             <TreeAction label="Редактировать" disabled={pending} onClick={onEdit}>
                 <Pencil />
             </TreeAction>
-            <TreeAction label={archived ? "Вернуть из архива" : "В архив"} disabled={pending} onClick={onArchive}>
+            <TreeAction label={archiveLabel} disabled={pending} onClick={onArchive}>
                 {archived ? <ArchiveRestore /> : <Archive />}
             </TreeAction>
             <TreeAction label="Удалить" variant="destructive" disabled={pending} onClick={onDelete}>
@@ -2095,42 +2262,6 @@ function ArticleStatus({ article }: { article: WikiArticle }) {
             {scheduled ? <span>Отложена</span> : null}
             {article.archived ? <span>Архив</span> : null}
         </p>
-    );
-}
-
-function TagCloud({
-    tags,
-    active,
-    labelled = true,
-    onSelect,
-}: {
-    tags: string[];
-    active: string;
-    labelled?: boolean;
-    onSelect: (tag: string) => void;
-}) {
-    if (tags.length === 0) {
-        return null;
-    }
-    return (
-        <div className="flex flex-col gap-2">
-            {labelled ? <p className="text-xs font-medium text-muted-foreground">Теги</p> : null}
-            <div className="flex flex-wrap gap-1">
-                {tags.map((item) => (
-                    <button
-                        key={item}
-                        type="button"
-                        className={cn(
-                            "rounded-full border px-2 py-0.5 text-xs hover:bg-muted",
-                            item.toLowerCase() === active.toLowerCase() && "bg-muted font-medium",
-                        )}
-                        onClick={() => onSelect(item)}
-                    >
-                        {item}
-                    </button>
-                ))}
-            </div>
-        </div>
     );
 }
 

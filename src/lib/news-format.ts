@@ -32,14 +32,67 @@ export const NEWS_FONT_SIZE_DEFAULT = 16;
 
 export const NEWS_FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72, 96] as const;
 
-const COLORS = new Set<string>([
-    ...NEWS_TEXT_COLORS.map((item) => item.value),
-    ...NEWS_HIGHLIGHT_COLORS.map((item) => item.value),
-    ...NEWS_FILL_COLORS.map((item) => item.value),
-]);
+export const NEWS_POPULAR_COLORS = [
+    { label: "Чёрный", value: "#111827" },
+    { label: "Серый", value: "#6b7280" },
+    { label: "Белый", value: "#ffffff" },
+    { label: "Красный", value: "#dc2626" },
+    { label: "Оранжевый", value: "#ea580c" },
+    { label: "Жёлтый", value: "#eab308" },
+    { label: "Зелёный", value: "#16a34a" },
+    { label: "Бирюзовый", value: "#0d9488" },
+    { label: "Голубой", value: "#0284c7" },
+    { label: "Синий", value: "#2563eb" },
+    { label: "Фиолетовый", value: "#7c3aed" },
+    { label: "Розовый", value: "#db2777" },
+    { label: "Коричневый", value: "#92400e" },
+    { label: "Лайм", value: "#65a30d" },
+    { label: "Индиго", value: "#4f46e5" },
+    { label: "Тёплый серый", value: "#78716c" },
+] as const;
 
 export function newsColor(value: unknown): string | undefined {
-    return typeof value === "string" && COLORS.has(value.toLowerCase()) ? value.toLowerCase() : undefined;
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const hex = value.trim().toLowerCase();
+    const short = /^#([0-9a-f]{3})$/.exec(hex);
+    if (short) {
+        const [red, green, blue] = short[1].split("");
+        return `#${red}${red}${green}${green}${blue}${blue}`;
+    }
+    return /^#[0-9a-f]{6}$/.test(hex) ? hex : undefined;
+}
+
+export function newsBorderMarkup(color: unknown, width: unknown): Record<string, string> {
+    if (color === "none") {
+        return { "data-border-color": "none" };
+    }
+    const hex = newsColor(color);
+    if (!hex) {
+        return {};
+    }
+    const widthToken = newsBorderWidthToken(width) ?? "regular";
+    const token = newsBorderToken(hex);
+    return {
+        "data-border-color": token ?? "custom",
+        "data-border-width": widthToken,
+        ...(token ? {} : { style: `--border-color: ${hex}` }),
+    };
+}
+
+export function newsBorderColorFromElement(element: HTMLElement): string | "none" | null {
+    const raw = element.getAttribute("data-border-color");
+    if (!raw) {
+        return null;
+    }
+    if (raw === "none") {
+        return "none";
+    }
+    if (raw === "custom") {
+        return newsColor(element.style.getPropertyValue("--border-color")) ?? null;
+    }
+    return newsBorderColorFromAttribute(raw) ?? null;
 }
 
 export function newsFontSize(value: unknown): string | undefined {

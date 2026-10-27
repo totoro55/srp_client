@@ -4,7 +4,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import type { EditorView } from "@tiptap/pm/view";
-import { newsBorderColorFromAttribute, newsBorderToken, newsBorderWidthFromAttribute, newsBorderWidthToken } from "@/lib/news-format";
+import { newsBorderColorFromElement, newsBorderMarkup, newsBorderWidthFromAttribute } from "@/lib/news-format";
 
 const HANDLE_MARKUP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="10" aria-hidden="true"><circle cx="4" cy="6" r="1.4" fill="currentColor"/><circle cx="10" cy="6" r="1.4" fill="currentColor"/><circle cx="16" cy="6" r="1.4" fill="currentColor"/><circle cx="22" cy="6" r="1.4" fill="currentColor"/></svg>`;
 
@@ -12,26 +12,8 @@ function cellBorderAttributes() {
     return {
         borderColor: {
             default: null,
-            parseHTML: (element: HTMLElement) => {
-                const raw = element.getAttribute("data-border-color");
-                if (raw === "none") {
-                    return "none";
-                }
-                return newsBorderColorFromAttribute(raw) ?? null;
-            },
-            renderHTML: (attributes: { borderColor?: unknown; borderWidth?: unknown }) => {
-                if (attributes.borderColor === "none") {
-                    return { "data-border-color": "none" };
-                }
-                const token = newsBorderToken(attributes.borderColor);
-                if (!token) {
-                    return {};
-                }
-                return {
-                    "data-border-color": token,
-                    "data-border-width": newsBorderWidthToken(attributes.borderWidth) ?? "regular",
-                };
-            },
+            parseHTML: (element: HTMLElement) => newsBorderColorFromElement(element),
+            renderHTML: (attributes: { borderColor?: unknown; borderWidth?: unknown }) => newsBorderMarkup(attributes.borderColor, attributes.borderWidth),
         },
         borderWidth: {
             default: null,
@@ -112,8 +94,7 @@ export class NewsTableView extends TableView {
     }
 }
 
-function cellsInSelection(state: EditorState): { pos: number; node: ProseMirrorNode }[] {
-    const selection = state.selection;
+function cellsInSelection(selection: EditorState["selection"]): { pos: number; node: ProseMirrorNode }[] {
     if (selection instanceof CellSelection) {
         const cells: { pos: number; node: ProseMirrorNode }[] = [];
         selection.forEachCell((node, pos) => {
@@ -132,8 +113,8 @@ function cellsInSelection(state: EditorState): { pos: number; node: ProseMirrorN
     return [];
 }
 
-export function replaceCellAttributes(state: EditorState, tr: Transaction, attrs: Record<string, string | number | null>): boolean {
-    const cells = cellsInSelection(state);
+export function replaceCellAttributes(_state: EditorState, tr: Transaction, attrs: Record<string, string | number | null>): boolean {
+    const cells = cellsInSelection(tr.selection);
     if (cells.length === 0) {
         return false;
     }

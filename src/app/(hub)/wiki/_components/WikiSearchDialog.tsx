@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ComponentProps } from "react";
 import { AlignLeft, ChevronDown, FileText, Folder, Search, Tags, TextQuote, Type, UserRound, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -152,7 +152,7 @@ export function WikiSearchDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-h-[min(44rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-xl">
+            <DialogContent className="max-h-[min(44rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader className="sr-only">
                     <DialogTitle>Поиск статей</DialogTitle>
                 </DialogHeader>
@@ -179,47 +179,35 @@ export function WikiSearchDialog({
                             <X />
                         </Button>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
                         <FilterChip pressed={mode === "articles"} label="Поиск только по статьям" icon={FileText} onClick={() => chooseMode("articles")}>Статьи</FilterChip>
                         <FilterChip pressed={mode === "groups"} label="Поиск только по категориям" icon={Folder} onClick={() => chooseMode("groups")}>Категории</FilterChip>
-                        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                         {FIELD_OPTIONS.map((option) => (
                             <FilterChip key={option.id} pressed={fields.has(option.id)} label={option.title} icon={option.icon} onClick={() => toggleField(option.id)}>
                                 {option.label}
                             </FilterChip>
                         ))}
-                        <Popover>
-                            <PopoverTrigger
-                                render={(
-                                    <Button type="button" size="sm" variant="outline" aria-label="Фильтрация по тегам" className={cn(selectedTags.length > 0 && "bg-muted font-medium")}>
-                                        <Tags />
-                                        Теги
-                                        {selectedTags.length > 0 ? (
-                                            <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full border bg-background px-1.5 text-xs tabular-nums">
-                                                {selectedTags.length}
-                                            </span>
-                                        ) : null}
-                                        <ChevronDown />
-                                    </Button>
-                                )}
-                            />
-                            <PopoverContent align="start" className="w-64 gap-2 p-2">
-                                <Input
-                                    value={tagQuery}
-                                    placeholder="Найти тег"
-                                    aria-label="Найти тег"
-                                    className="h-8"
-                                    onChange={(event) => setTagQuery(event.target.value)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                            event.preventDefault();
-                                        }
-                                    }}
-                                />
-                                <TagList tags={tags} query={tagQuery} selected={selectedTags} onToggle={toggleTag} />
-                            </PopoverContent>
-                        </Popover>
                     </div>
+                    <Popover>
+                        <PopoverTrigger render={<TagFilterButton count={selectedTags.length} />} />
+                        <PopoverContent align="start" className="w-64 gap-2 p-2">
+                            <Input
+                                value={tagQuery}
+                                placeholder="Найти тег"
+                                aria-label="Найти тег"
+                                className="h-8"
+                                onChange={(event) => setTagQuery(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                    }
+                                }}
+                            />
+                            <TagList tags={tags} query={tagQuery} selected={selectedTags} onToggle={toggleTag} />
+                        </PopoverContent>
+                    </Popover>
                 </form>
                 {error ? <FormAlert message={error} /> : null}
                 {pending && hits === null ? <StackSkeleton rows={4} /> : null}
@@ -252,6 +240,21 @@ export function WikiSearchDialog({
     );
 }
 
+function TagFilterButton({ count, className, ...props }: { count: number } & ComponentProps<typeof Button>) {
+    return (
+        <Button {...props} type="button" size="sm" variant="outline" aria-label="Фильтрация по тегам" className={cn("w-full", count > 0 && "bg-muted font-medium", className)}>
+            <Tags />
+            Теги
+            {count > 0 ? (
+                <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full border bg-background px-1.5 text-xs tabular-nums">
+                    {count}
+                </span>
+            ) : null}
+            <ChevronDown />
+        </Button>
+    );
+}
+
 function FilterChip({
     pressed,
     label,
@@ -266,7 +269,7 @@ function FilterChip({
     children: string;
 }) {
     return (
-        <Button type="button" size="sm" variant="outline" aria-pressed={pressed} aria-label={label} className={cn(pressed && "bg-muted font-medium")} onClick={onClick}>
+        <Button type="button" size="sm" variant="outline" aria-pressed={pressed} aria-label={label} className={cn("w-full", pressed && "bg-muted font-medium")} onClick={onClick}>
             <Icon />
             {children}
         </Button>

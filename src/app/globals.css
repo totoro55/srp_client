@@ -145,6 +145,16 @@ select {
     padding-inline-end: 2.25rem;
 }
 
+.news-prose {
+    line-height: 1.5;
+}
+
+/* Ширина снимка ограничена колонкой, а высота задана в пикселях.
+   Без auto картинка сжимается по ширине и растягивается по высоте. */
+.news-prose [data-resize-container] img {
+    height: auto !important;
+}
+
 .news-prose .ProseMirror-selectednode[data-resize-container] {
     box-shadow: none;
 }
@@ -213,6 +223,7 @@ select {
 .news-prose img[data-border-color="green"] { border-color: #16a34a; }
 .news-prose img[data-border-color="blue"] { border-color: #2563eb; }
 .news-prose img[data-border-color="violet"] { border-color: #7c3aed; }
+.news-prose img[data-border-color="custom"] { border-color: var(--border-color); }
 .news-prose img[data-border-width="thin"] { border-width: 1px; }
 .news-prose img[data-border-width="regular"] { border-width: 2px; }
 .news-prose img[data-border-width="thick"] { border-width: 4px; }
@@ -280,6 +291,7 @@ select {
 .news-prose :is(td, th)[data-border-color="green"] { border-color: #16a34a !important; }
 .news-prose :is(td, th)[data-border-color="blue"] { border-color: #2563eb !important; }
 .news-prose :is(td, th)[data-border-color="violet"] { border-color: #7c3aed !important; }
+.news-prose :is(td, th)[data-border-color="custom"] { border-color: var(--border-color) !important; }
 .news-prose :is(td, th)[data-border-width="thin"] { border-width: 1px !important; }
 .news-prose :is(td, th)[data-border-width="regular"] { border-width: 2px !important; }
 .news-prose :is(td, th)[data-border-width="thick"] { border-width: 4px !important; }
@@ -297,7 +309,8 @@ select {
     grid-template-columns: 1.25rem minmax(0, 1fr);
     align-items: start;
     column-gap: 0.25rem;
-    margin-block: 0.75rem;
+    margin-top: 0;
+    margin-bottom: 0.75rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     padding: 0.35rem 0.65rem 0.5rem;
@@ -386,4 +399,22 @@ select {
 
 .news-prose [style*="color"] span[data-type="mention"] {
     color: inherit;
+}
+
+.katex .mord.text {
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-style: normal;
+}
+
+.formula-layout .katex {
+    font-size: 1em;
+    color: inherit;
+}
+
+.formula-layout .katex-html > .katex-base > .mspace {
+    margin-right: var(--formula-gap, 8px) !important;
+}
+
+.formula-layout .katex-html > .katex-base > :is(.mord, .mbin, .mrel, .mopen, .mclose, .mpunct, .minner, .mop) + :is(.mord, .mbin, .mrel, .mopen, .mclose, .mpunct, .minner, .mop) {
+    margin-left: var(--formula-gap, 8px) !important;
 }

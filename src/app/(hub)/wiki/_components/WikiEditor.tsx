@@ -16,7 +16,7 @@ export function WikiToc({
             {headings.map((headingItem) => {
                 const text = headingItem.text || "Раздел";
                 return (
-                    <div key={headingItem.id} className="flex items-center gap-0.5">
+                    <div key={headingItem.id} className="group/toc flex items-center gap-0.5">
                         <a
                             href={wikiAnchorPath(articleId, headingItem.id)}
                             className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-muted-foreground underline-offset-4 hover:bg-muted hover:text-foreground hover:underline"
@@ -29,7 +29,7 @@ export function WikiToc({
                         </a>
                         <button
                             type="button"
-                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/toc:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                             aria-label={`Скопировать ссылку на раздел «${text}»`}
                             onClick={() => void copyWikiAnchorLink(`/wiki/${articleId}`, headingItem.id)}
                         >

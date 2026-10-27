@@ -6,6 +6,7 @@ import {
     WIKI_TEXT_MAX,
     WIKI_TITLE_MAX,
     boundedText,
+    optionalText,
     roleIds,
 } from "@/lib/content";
 import {
@@ -21,6 +22,8 @@ import type { AccessView } from "@/server/authz/resolve-access";
 import { deleteContentFiles, readContentFile, storeContentFile } from "@/services/content-files";
 import { ContentError } from "@/services/content-error";
 import { db } from "@/services/db";
+
+const WIKI_SUMMARY_MAX = 2000;
 
 type Query = <T extends QueryResultRow>(text: string, params?: unknown[]) => Promise<T[]>;
 
@@ -51,6 +54,7 @@ export interface WikiArticle extends WikiArticleSummary {
     author: string;
     authorName: string | null;
     authorTitle: string | null;
+    summary: string;
 }
 
 export interface WikiVersionHint {
@@ -76,6 +80,7 @@ interface ArticleRow {
     inherit_roles: boolean;
     basket_version_id: number | null;
     hint: string;
+    summary: string;
     sources: string;
     formula: string;
     rules: string;
@@ -95,7 +100,7 @@ export async function listWiki(
     access: AccessView,
     search: string,
     tag = "",
-): Promise<{ groups: WikiGroup[]; articles: WikiArticleSummary[]; tags: string[] }> {
+): Promise<{ groups: WikiGroup[]; articles: WikiArticleSummary[]; tags: string[]; favorites: WikiArticleSummary[] }> {
     const groups = await loadGroups();
     const articles = await loadArticles(search);
     const connected = await connectedVersionIds(access);
@@ -119,11 +124,51 @@ export async function listWiki(
             }
         }
     }
+    const saved = await db.query<{ article_id: number }>(
+        `SELECT article_id
+         FROM wiki_favorites
+         WHERE username = $1
+         ORDER BY created_at DESC, article_id DESC`,
+        [access.username.toLowerCase()],
+    );
+    const favoriteRows = saved.length === 0
+        ? []
+        : await db.query<ArticleRow>(
+            `${articleSql("WHERE article.id = ANY($1::int[])")}`,
+            [saved.map((row) => row.article_id)],
+        );
+    const favoriteById = new Map(favoriteRows.map((article) => [article.id, article]));
     return {
         groups: groups.filter((group) => groupIds.has(group.id)).map(toGroup),
         articles: listed.map(toSummary),
         tags: [...new Set(visible.flatMap((article) => article.tags))].sort((left, right) => left.localeCompare(right, "ru")),
+        favorites: saved.flatMap((row) => {
+            const article = favoriteById.get(row.article_id);
+            if (!article || !canSee(access, article, groups, connected)) {
+                return [];
+            }
+            return [toSummary(article)];
+        }),
     };
+}
+
+export async function setWikiFavorite(access: AccessView, id: number, favorite: boolean): Promise<{ favorite: boolean }> {
+    const article = await articleById(id);
+    if (!article || !(await visible(access, article))) {
+        throw new ContentError("Статья не найдена");
+    }
+    const username = access.username.toLowerCase();
+    if (favorite) {
+        await db.query(
+            `INSERT INTO wiki_favorites (username, article_id)
+             VALUES ($1, $2)
+             ON CONFLICT (username, article_id) DO NOTHING`,
+            [username, id],
+        );
+        return { favorite: true };
+    }
+    await db.query("DELETE FROM wiki_favorites WHERE username = $1 AND article_id = $2", [username, id]);
+    return { favorite: false };
 }
 
 export interface WikiSearchHit {
@@ -323,15 +368,17 @@ export async function saveWikiArticle(access: AccessView, id: number | null, bod
             const rows = await query<{ id: number }>(
                 `INSERT INTO wiki_articles (
                     group_id, title, document, plain_text, inherit_roles, basket_version_id,
-                    status, published_at, updated_by, created_by, sort_order
+                    status, published_at, updated_by, created_by, sort_order, summary
                  ) VALUES (
                     $1, $2, $3::jsonb, $4, FALSE, $5, $6, $7, $8, $8,
-                    COALESCE((SELECT MAX(other.sort_order) FROM wiki_articles other WHERE other.group_id = $1), 0) + 10
+                    COALESCE((SELECT MAX(other.sort_order) FROM wiki_articles other WHERE other.group_id = $1), 0) + 10,
+                    $9
                  )
                  RETURNING id`,
                 [
                     input.groupId, input.title, JSON.stringify(input.document), plain,
                     input.basketVersionId ?? null, input.status, input.publishedAt, access.username,
+                    input.summary,
                 ]
             );
             articleId = rows[0].id;
@@ -340,6 +387,7 @@ export async function saveWikiArticle(access: AccessView, id: number | null, bod
                 `UPDATE wiki_articles
                  SET group_id = $2, title = $3, document = $4::jsonb, plain_text = $5, inherit_roles = FALSE,
                      status = $6, published_at = $7, updated_at = NOW(), updated_by = $8,
+                     summary = $11,
                      basket_version_id = CASE WHEN $9 THEN $10 ELSE basket_version_id END,
                      sort_order = CASE
                         WHEN group_id IS DISTINCT FROM $2 THEN COALESCE((
@@ -353,6 +401,7 @@ export async function saveWikiArticle(access: AccessView, id: number | null, bod
                     articleId, input.groupId, input.title, JSON.stringify(input.document), plain,
                     input.status, input.publishedAt, access.username,
                     input.basketVersionId !== undefined, input.basketVersionId ?? null,
+                    input.summary,
                 ]
             );
             if (rows.length === 0) {
@@ -730,7 +779,7 @@ interface SearchArticle {
     group_id: number;
     title: string;
     plain_text: string;
-    hint: string;
+    summary: string;
     inherit_roles: boolean;
     basket_version_id: number | null;
     status: string;
@@ -744,7 +793,7 @@ interface SearchArticle {
 
 async function loadSearchArticles(): Promise<SearchArticle[]> {
     const rows = await db.query<SearchArticle>(`
-        SELECT article.id, article.group_id, article.title, article.plain_text, article.hint,
+        SELECT article.id, article.group_id, article.title, article.plain_text, article.summary,
                article.inherit_roles, article.basket_version_id, article.status, article.archived,
                article.published_at, article.created_by,
                (SELECT employee.name FROM employees employee WHERE lower(employee.login) = lower(article.created_by) LIMIT 1) AS author_name,
@@ -779,7 +828,7 @@ function articleMatches(
     if (fields.content && article.plain_text.toLowerCase().includes(needle)) {
         return true;
     }
-    if (fields.brief && `${article.hint} ${article.plain_text.slice(0, 300)}`.toLowerCase().includes(needle)) {
+    if (fields.brief && article.summary.toLowerCase().includes(needle)) {
         return true;
     }
     return false;
@@ -849,7 +898,7 @@ async function articleById(id: number): Promise<ArticleRow | null> {
 function articleSql(where: string): string {
     return `
         SELECT article.id, article.group_id, article.title, article.document, article.inherit_roles,
-               article.basket_version_id, article.hint, article.sources, article.formula, article.rules,
+               article.basket_version_id, article.hint, article.summary, article.sources, article.formula, article.rules,
                article.status, article.archived, article.published_at, article.updated_at, article.updated_by,
                article.created_by,
                (SELECT employee.name FROM employees employee WHERE lower(employee.login) = lower(article.created_by) LIMIT 1) AS author_name,
@@ -911,6 +960,7 @@ function toArticle(row: ArticleRow): WikiArticle {
         author: row.created_by,
         authorName: row.author_name?.trim() || null,
         authorTitle: row.author_title?.trim() || null,
+        summary: row.summary,
     };
 }
 
@@ -940,6 +990,7 @@ function readArticle(body: unknown): {
     publishedAt: string;
     basketVersionId: number | null | undefined;
     assetIds: string[];
+    summary: string;
 } {
     if (!body || typeof body !== "object") {
         throw new ContentError("Проверьте заголовок, группу, дату и роли");
@@ -952,16 +1003,20 @@ function readArticle(body: unknown): {
     const roles = readArticleRoles(record.roleIds, status === "published");
     const tags = readTags(record.tags);
     const published = typeof record.publishedAt === "string" ? new Date(record.publishedAt) : null;
+    const summary = status === "published"
+        ? boundedText(record.summary, WIKI_SUMMARY_MAX, "Краткое содержание")
+        : optionalText(record.summary, WIKI_SUMMARY_MAX, "Краткое содержание");
     const basketVersionId = Object.prototype.hasOwnProperty.call(record, "basketVersionId")
         ? typeof record.basketVersionId === "number" && Number.isInteger(record.basketVersionId) ? record.basketVersionId : null
         : undefined;
-    if (typeof title !== "string" || "error" in document || groupId === null || "error" in roles || "error" in tags || !status || !published || Number.isNaN(published.getTime())) {
+    if (typeof title !== "string" || "error" in document || groupId === null || "error" in roles || "error" in tags || typeof summary !== "string" || !status || !published || Number.isNaN(published.getTime())) {
         const message = typeof title !== "string" ? title.error
             : "error" in document ? document.error
                 : groupId === null ? "Выберите группу"
                     : "error" in roles ? roles.error
                         : "error" in tags ? tags.error
-                            : "Укажите дату публикации";
+                            : typeof summary !== "string" ? summary.error
+                                : "Укажите дату публикации";
         throw new ContentError(message);
     }
     const text = wikiPlainText(document.document, []);
@@ -978,6 +1033,7 @@ function readArticle(body: unknown): {
         publishedAt: published.toISOString(),
         basketVersionId,
         assetIds: wikiAssetIds(document.document),
+        summary,
     };
 }
 

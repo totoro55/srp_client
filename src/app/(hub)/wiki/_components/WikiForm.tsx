@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { FormAlert } from "@/components/form-alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Menubar,
     MenubarContent,
@@ -26,6 +27,7 @@ import { ApiResponse } from "@/types/api";
 import { NewsArticle } from "../../news/_components/NewsArticle";
 import { NewsEditor, type EditorMenuAction } from "../../news/_components/NewsEditor";
 import { RolePicker, type RoleOption } from "../../news/_components/RolePicker";
+import { ArticleBrief } from "./ArticleBrief";
 
 interface WikiGroup {
     id: number;
@@ -50,6 +52,7 @@ interface WikiArticle {
     status: "draft" | "published";
     publishedAt: string;
     tags: string[];
+    summary: string;
 }
 
 export function WikiForm({ articleId = null }: { articleId?: number | null }) {
@@ -59,6 +62,8 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
     const requestedGroup = groupParam !== null && /^\d+$/.test(groupParam) ? Number(groupParam) : null;
     const { data: session } = useSession();
     const savedId = useRef<number | null>(articleId);
+    const publishOnce = useRef(false);
+    const publishOnOpen = useRef(searchParams.get("publish") === "1");
     const [storedStatus, setStoredStatus] = useState<"draft" | "published">("draft");
     const [title, setTitle] = useState("");
     const [document, setDocument] = useState<WikiNode>(emptyWikiDocument());
@@ -66,6 +71,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
     const [publishedAt, setPublishedAt] = useState(localStamp());
     const [roleIds, setRoleIds] = useState<number[]>([]);
     const [tags, setTags] = useState<string[]>([]);
+    const [summary, setSummary] = useState("");
     const [knownTags, setKnownTags] = useState<string[]>([]);
     const [groups, setGroups] = useState<WikiGroup[]>([]);
     const [articles, setArticles] = useState<PickerArticle[]>([]);
@@ -141,23 +147,40 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                     setError(json.error.message);
                     return;
                 }
+                const stamp = localStamp(json.data.publishedAt);
+                const articleTags = json.data.tags ?? [];
                 setTitle(json.data.title);
                 setGroupId(json.data.groupId);
                 setDocument(json.data.document);
                 setGeneration((value) => value + 1);
-                setPublishedAt(localStamp(json.data.publishedAt));
+                setPublishedAt(stamp);
                 setRoleIds(json.data.roleIds);
-                setTags(json.data.tags ?? []);
+                setTags(articleTags);
+                setSummary(json.data.summary ?? "");
                 setStoredStatus(json.data.status);
+                if (!publishOnce.current && publishOnOpen.current && json.data.status === "draft") {
+                    publishOnce.current = true;
+                    setPreview(true);
+                    setPublishTitle(json.data.title);
+                    setPublishDate(stamp);
+                    setPublishGroup(json.data.groupId);
+                    setPublishRoles(json.data.roleIds);
+                    setPublishTags(articleTags);
+                    setError(null);
+                    setPublishOpen(true);
+                    router.replace(`/wiki/${articleId}/edit`);
+                }
             } catch (reason: unknown) {
                 if (reason instanceof DOMException && reason.name === "AbortError") return;
                 setError("Не удалось загрузить статью");
             } finally {
-                setLoaded(true);
+                if (!controller.signal.aborted) {
+                    setLoaded(true);
+                }
             }
         })();
         return () => controller.abort();
-    }, [articleId, requestedGroup]);
+    }, [articleId, requestedGroup, router]);
 
     function openDraft() {
         setDraftTitle(title);
@@ -179,11 +202,16 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
 
     async function save(
         status: "draft" | "published",
-        fields: { title: string; publishedAt: string; roleIds: number[]; groupId: number | null; tags: string[] },
+        fields: { title: string; publishedAt: string; roleIds: number[]; groupId: number | null; tags: string[]; summary: string },
     ) {
         const nextTitle = fields.title.trim();
+        const nextSummary = fields.summary.trim();
         if (nextTitle.length === 0) {
             setError("Укажите заголовок");
+            return;
+        }
+        if (status === "published" && nextSummary.length === 0) {
+            setError("Укажите краткое содержание");
             return;
         }
         if (fields.groupId === null) {
@@ -212,6 +240,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                     publishedAt: new Date(fields.publishedAt).toISOString(),
                     roleIds: fields.roleIds,
                     tags: fields.tags,
+                    summary: nextSummary,
                     status,
                 }),
             });
@@ -225,6 +254,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
             setPublishedAt(fields.publishedAt);
             setRoleIds(fields.roleIds);
             setTags(fields.tags);
+            setSummary(nextSummary);
             setDraftOpen(false);
             setPublishOpen(false);
             if (status === "draft") {
@@ -267,6 +297,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
 
     const editorMenu: EditorMenuAction[] = [
         { label: "Сохранить черновик", icon: Save, disabled: saving !== null, run: openDraft },
+        ...(storedStatus === "draft" ? [{ label: "Опубликовать", icon: Send, disabled: saving !== null, run: () => { openPublish(); setPreview(true); } }] : []),
         { label: "Предпросмотр", icon: Eye, disabled: saving !== null, run: () => { setError(null); setPreview(true); } },
         { label: "К списку", icon: List, run: () => router.push("/wiki") },
     ];
@@ -297,6 +328,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                 <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40 px-4 py-8 sm:px-8">
                     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
                         <p className="text-sm text-muted-foreground">Так статья будет выглядеть после публикации.</p>
+                        <ArticleBrief text={summary} />
                         <NewsArticle
                             title={title.trim() || "Без названия"}
                             publishedAt={new Date(publishedAt).toISOString()}
@@ -331,7 +363,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                         className="grid gap-4"
                         onSubmit={(event) => {
                             event.preventDefault();
-                            void save("draft", { title: draftTitle, publishedAt, roleIds, groupId: draftGroup, tags: draftTags });
+                            void save("draft", { title: draftTitle, publishedAt, roleIds, groupId: draftGroup, tags: draftTags, summary });
                         }}
                     >
                         <DialogHeader>
@@ -341,6 +373,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                             <Label htmlFor="draft-title">Заголовок</Label>
                             <Input id="draft-title" value={draftTitle} autoFocus onChange={(event) => setDraftTitle(event.target.value)} />
                         </div>
+                        <SummaryField value={summary} disabled={saving !== null} onChange={setSummary} />
                         <GroupField groups={groups} articles={articles} value={draftGroup} disabled={saving !== null} onChange={setDraftGroup} />
                         <TagField tags={draftTags} known={knownTags} disabled={saving !== null} onChange={setDraftTags} />
                         {error ? <FormAlert message={error} /> : null}
@@ -360,7 +393,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                         className="grid gap-4"
                         onSubmit={(event) => {
                             event.preventDefault();
-                            void save("published", { title: publishTitle, publishedAt: publishDate, roleIds: publishRoles, groupId: publishGroup, tags: publishTags });
+                            void save("published", { title: publishTitle, publishedAt: publishDate, roleIds: publishRoles, groupId: publishGroup, tags: publishTags, summary });
                         }}
                     >
                         <DialogHeader>
@@ -374,6 +407,7 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                             <Label htmlFor="publish-date">Дата публикации</Label>
                             <Input id="publish-date" type="datetime-local" value={publishDate} onChange={(event) => setPublishDate(event.target.value)} />
                         </div>
+                        <SummaryField value={summary} disabled={saving !== null} required onChange={setSummary} />
                         <GroupField groups={groups} articles={articles} value={publishGroup} disabled={saving !== null} onChange={setPublishGroup} />
                         <TagField tags={publishTags} known={knownTags} disabled={saving !== null} onChange={setPublishTags} />
                         <div className="flex flex-col gap-1.5">
@@ -391,6 +425,33 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                     </form>
                 </DialogContent>
             </Dialog>
+        </div>
+    );
+}
+
+function SummaryField({
+    value,
+    disabled,
+    required = false,
+    onChange,
+}: {
+    value: string;
+    disabled: boolean;
+    required?: boolean;
+    onChange: (value: string) => void;
+}) {
+    return (
+        <div className="flex flex-col gap-1.5">
+            <Label htmlFor={required ? "publish-summary" : "draft-summary"}>Краткое содержание</Label>
+            <Textarea
+                id={required ? "publish-summary" : "draft-summary"}
+                value={value}
+                required={required}
+                disabled={disabled}
+                maxLength={2000}
+                placeholder="О чём эта статья"
+                onChange={(event) => onChange(event.target.value)}
+            />
         </div>
     );
 }
