@@ -1,5 +1,5 @@
 import NextAuth from "next-auth";
-import { authOptions } from "@/auth"; // Import your configurations object
+import { authOptions } from "@/auth";
 
 // Initialize the Next-Auth v4 handler directly inside the API route
 const handler = NextAuth(authOptions);

@@ -13,7 +13,6 @@ export function SidebarBrand() {
             <SidebarMenuItem>
                 <SidebarMenuButton
                     size="lg"
-                    tooltip={BRAND_NAME}
                     className="h-10! w-full items-center gap-0 overflow-hidden rounded-lg bg-transparent p-0! text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground data-active:bg-transparent data-active:text-sidebar-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-0!"
                     render={
                         <Link href="/" onClick={() => setOpenMobile(false)}>
