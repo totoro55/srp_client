@@ -3,6 +3,8 @@ import path from "path";
 import { PERMISSION_CATALOG } from "@/lib/permissions";
 import { APP_NAVIGATION_MAP, isNavigationSubgroup } from "@/lib/routes-config";
 import { API_GROUPS, apiDescription, formatApiMethods } from "@/lib/api-catalog";
+import { APP_TABLE_GROUPS, fieldSense, tableIntro } from "@/lib/app-table-notes";
+import { parseAppSchema, type SqlTable } from "@/lib/sql-schema";
 import { markdownGroup, uniqueId, type DocGroup, type DocSection } from "@/lib/tech-docs";
 
 async function readOptional(file: string): Promise<string | null> {
@@ -13,27 +15,15 @@ async function readOptional(file: string): Promise<string | null> {
     }
 }
 
-async function migrationNotes(): Promise<{ tables: { title: string; note: string }[]; columns: { title: string; note: string }[] }> {
+async function migrationSql(): Promise<string | null> {
     const directory = path.join(process.cwd(), "src/services/migrations");
-    const tables: { title: string; note: string }[] = [];
-    const columns: { title: string; note: string }[] = [];
-    let files: string[] = [];
     try {
-        files = (await readdir(directory)).filter((file) => file.endsWith(".sql")).sort();
+        const files = (await readdir(directory)).filter((file) => file.endsWith(".sql")).sort();
+        const parts = await Promise.all(files.map((file) => readFile(path.join(directory, file), "utf8")));
+        return parts.join("\n");
     } catch {
-        return { tables, columns };
+        return null;
     }
-    for (const file of files) {
-        const sql = await readFile(path.join(directory, file), "utf8");
-        for (const match of sql.matchAll(/COMMENT ON TABLE (\w+) IS\s+'([^']*)'/g)) {
-            tables.push({ title: match[1] ?? "", note: (match[2] ?? "").replaceAll(/\s+/g, " ").trim() });
-        }
-        for (const match of sql.matchAll(/COMMENT ON COLUMN (app_settings\.\w+) IS\s+'([^']*)'/g)) {
-            columns.push({ title: match[1] ?? "", note: (match[2] ?? "").replaceAll(/\s+/g, " ").trim() });
-        }
-    }
-    tables.sort((left, right) => left.title.localeCompare(right.title, "ru"));
-    return { tables, columns };
 }
 
 async function apiRoutes(): Promise<{ path: string; methods: string[]; group: string; description: string }[] | null> {
@@ -77,6 +67,7 @@ function apiSections(routes: { path: string; methods: string[]; group: string; d
     return order.map((group) => ({
         id: uniqueId(used, group),
         title: group,
+        cluster: "Маршруты API",
         blocks: [{
             kind: "items" as const,
             rows: routes
@@ -90,14 +81,57 @@ function apiSections(routes: { path: string; methods: string[]; group: string; d
     }));
 }
 
+function tableSections(schema: SqlTable[], used: Set<string>): DocSection[] {
+    const byName = new Map(schema.map((table) => [table.name, table]));
+    const placed = new Set<string>();
+    const sections: DocSection[] = [];
+    function push(table: SqlTable, cluster: string) {
+        placed.add(table.name);
+        const title = table.schema === "public" ? table.name : `${table.schema}.${table.name}`;
+        sections.push({
+            id: uniqueId(used, title),
+            title,
+            cluster,
+            blocks: [
+                { kind: "p", text: tableIntro(table.name, table.note, table.schema) },
+                {
+                    kind: "table",
+                    headers: ["Поле", "Тип", "Пусто", "Смысл"],
+                    rows: table.columns.map((column) => [
+                        column.name,
+                        column.type,
+                        column.nullable ? "да" : "нет",
+                        fieldSense(table.name, column.name, column.note) || "Смысл не задан.",
+                    ]),
+                },
+            ],
+        });
+    }
+    for (const group of APP_TABLE_GROUPS) {
+        for (const name of group.tables) {
+            const table = byName.get(name);
+            if (table) {
+                push(table, group.title);
+            }
+        }
+    }
+    for (const table of schema) {
+        if (!placed.has(table.name)) {
+            push(table, "Прочие");
+        }
+    }
+    return sections;
+}
+
 export async function loadTechDocs(): Promise<DocGroup[]> {
     const used = new Set<string>();
-    const [notes, routes, external, contract] = await Promise.all([
-        migrationNotes(),
+    const [sql, routes, external, contract] = await Promise.all([
+        migrationSql(),
         apiRoutes(),
         readOptional(path.join(process.cwd(), "docs/external-tables.md")),
         readOptional(path.join(process.cwd(), "docs/mvp-contracts.md")),
     ]);
+    const schema = sql ? parseAppSchema(sql) : [];
 
     const pages = APP_NAVIGATION_MAP.flatMap((group) => group.items.flatMap((entry) => (
         isNavigationSubgroup(entry) ? entry.items : [entry]
@@ -142,12 +176,7 @@ export async function loadTechDocs(): Promise<DocGroup[]> {
                 blocks: [
                     { kind: "p", text: "Одна строка app_settings. Обслуживание показывает текст всем, кроме администратора. Объявление выводится в верхней полосе. Просмотр ролей позволяет администратору открыть приложение от имени другой роли без права записи." },
                     { kind: "p", text: "Взять обращение в работу, назначить ответственного и сменить статус можно вместе с сообщением: готовый текст попадает в поле и уходит при отправке." },
-                    {
-                        kind: "items",
-                        rows: notes.columns.length > 0
-                            ? notes.columns
-                            : [{ title: "app_settings", note: "Комментарии колонок в миграциях не найдены." }],
-                    },
+                    { kind: "p", text: "Поля строки перечислены в разделе таблицы app_settings." },
                 ],
             },
         ],
@@ -156,13 +185,13 @@ export async function loadTechDocs(): Promise<DocGroup[]> {
     const tables: DocGroup = {
         id: "tables",
         title: "Таблицы приложения",
-        sections: [{
-            id: uniqueId(used, "Таблицы приложения"),
-            title: "Таблицы приложения",
-            blocks: notes.tables.length > 0
-                ? [{ kind: "items", rows: notes.tables }]
-                : [{ kind: "p", text: "Комментарии таблиц не найдены. На стенде для этого нужен каталог src/services/migrations." }],
-        }],
+        sections: schema.length > 0
+            ? tableSections(schema, used)
+            : [{
+                id: uniqueId(used, "Таблицы приложения"),
+                title: "Таблицы приложения",
+                blocks: [{ kind: "p", text: "Схема не собрана. На стенде для этого нужен каталог src/services/migrations." }],
+            }],
     };
 
     return [

@@ -401,6 +401,27 @@ select {
     color: inherit;
 }
 
+.tech-doc-hit {
+    border-radius: 0.125rem;
+    background-color: color-mix(in oklab, var(--chart-2) 70%, white);
+    color: inherit;
+}
+
+.dark .tech-doc-hit {
+    background-color: oklch(0.86 0.15 92);
+    color: oklch(0.2 0.04 70);
+}
+
+.tech-doc-hit[data-current="true"] {
+    background-color: color-mix(in oklab, var(--primary) 55%, white);
+}
+
+.dark .tech-doc-hit[data-current="true"] {
+    background-color: oklch(0.95 0.11 98);
+    color: oklch(0.15 0.03 70);
+    box-shadow: inset 0 0 0 1px oklch(0.62 0.14 70);
+}
+
 .katex .mord.text {
     font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
     font-style: normal;

@@ -8,6 +8,7 @@ export type DocBlock =
 export type DocSection = {
     id: string;
     title: string;
+    cluster?: string;
     blocks: DocBlock[];
 };
 
