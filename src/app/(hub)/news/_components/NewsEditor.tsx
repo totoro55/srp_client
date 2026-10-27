@@ -5,12 +5,14 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Heading from "@tiptap/extension-heading";
+import { Details, DetailsContent, DetailsSummary } from "@tiptap/extension-details";
 import Highlight from "@tiptap/extension-highlight";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
+import Mention from "@tiptap/extension-mention";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import { Table, TableRow } from "@tiptap/extension-table";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import "katex/dist/katex.min.css";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
@@ -19,14 +21,19 @@ import {
     AlignCenter,
     AlignLeft,
     AlignRight,
-    ALargeSmall,
+    AtSign,
     BetweenHorizontalEnd,
     BetweenHorizontalStart,
     BetweenVerticalEnd,
     BetweenVerticalStart,
     Bold,
+    Bookmark,
     Check,
+    ChevronDown,
+    Circle,
     CircleOff,
+    Copy,
+    Download,
     Code,
     CornerDownLeft,
     FileCode,
@@ -38,6 +45,7 @@ import {
     Italic,
     Link2,
     List,
+    ListCollapse,
     ListOrdered,
     Minus,
     PaintBucket,
@@ -46,20 +54,25 @@ import {
     Pilcrow,
     Plus,
     Quote,
+    Radius,
     Radical,
     Redo2,
     RemoveFormatting,
     Square,
+    SquareRoundCorner,
+    Squircle,
     Sigma,
     Strikethrough,
     Table as TableIcon,
     TableCellsMerge,
     TableCellsSplit,
     TextCursorInput,
+    TextSelect,
     Trash2,
     Underline,
     Undo2,
     Unlink,
+    X,
     type LucideIcon,
 } from "lucide-react";
 import {
@@ -86,21 +99,31 @@ import {
     MenubarSubTrigger,
     MenubarTrigger,
 } from "@/components/ui/menubar";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { StackSkeleton } from "@/components/loading-state";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { NEWS_ASSET_SRC, type NewsNode } from "@/lib/news-document";
+import { type NewsNode } from "@/lib/news-document";
+import { wikiAnchorSlug } from "@/lib/wiki-document";
+import { mentionSuggestion } from "./mention";
 import {
     NEWS_BORDER_COLORS,
     NEWS_BORDER_WIDTHS,
+    NEWS_IMAGE_FRAMES,
     NEWS_FILL_COLORS,
+    NEWS_FONT_SIZE_DEFAULT,
+    NEWS_FONT_SIZE_MAX,
+    NEWS_FONT_SIZE_MIN,
     NEWS_FONT_SIZES,
     NEWS_HIGHLIGHT_COLORS,
     NEWS_TEXT_COLORS,
@@ -111,15 +134,18 @@ import {
     newsBorderWidthToken,
     newsColor,
     newsImageAlign,
+    newsImageFrame,
 } from "@/lib/news-format";
 import { ElementFill } from "./element-fill";
+import { NewsTableCell, NewsTableHeader, NewsTableView, replaceCellAttributes, TableGesture } from "./table-node";
 import { applyRowHeight, TableRowResize } from "./table-row-resize";
 import { notifyError } from "@/lib/notify";
+import { copyWikiAnchorLink, followAnchorLink } from "@/lib/wiki-anchor";
 import type { ApiResponse } from "@/types/api";
 
 const popupClass = "w-max! min-w-72 max-h-[70vh]! overflow-x-visible! overflow-y-auto! whitespace-nowrap";
 
-const prose = "max-w-none wrap-break-word focus:outline-none [&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-medium [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_.tableWrapper]:my-3 [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:overflow-y-clip [&_table]:w-full [&_table]:border-collapse [&_td]:relative [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:relative [&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_tr[data-row-height]>td]:h-(--row-height) [&_tr[data-row-height]>th]:h-(--row-height) [&_.row-resize-handle]:absolute [&_.row-resize-handle]:right-3 [&_.row-resize-handle]:bottom-0 [&_.row-resize-handle]:left-1 [&_.row-resize-handle]:z-30 [&_.row-resize-handle]:h-2 [&_.row-resize-handle]:cursor-row-resize [&_.row-resize-handle:hover]:bg-primary/60 [&_.column-resize-handle]:pointer-events-none [&_.column-resize-handle]:absolute [&_.column-resize-handle]:-right-0.5 [&_.column-resize-handle]:top-0 [&_.column-resize-handle]:bottom-0 [&_.column-resize-handle]:z-20 [&_.column-resize-handle]:w-1 [&_.column-resize-handle]:bg-primary/50 [&.resize-cursor]:cursor-col-resize [&.row-resize]:cursor-row-resize [&_[data-resize-container]]:my-3 [&_[data-resize-container]]:w-fit [&_[data-resize-container]]:max-w-full [&_[data-resize-wrapper]]:w-fit [&_[data-resize-wrapper]]:max-w-full [&_img]:max-w-full [&_img]:rounded-md [&_[data-resize-handle]]:z-30 [&_[data-resize-handle=right]]:w-2 [&_[data-resize-handle=right]]:cursor-ew-resize [&_[data-resize-handle=right]]:bg-primary/50 [&_[data-resize-handle=bottom]]:h-2 [&_[data-resize-handle=bottom]]:cursor-ns-resize [&_[data-resize-handle=bottom]]:bg-primary/50 [&_[data-resize-handle=bottom-right]]:size-3 [&_[data-resize-handle=bottom-right]]:cursor-nwse-resize [&_[data-resize-handle=bottom-right]]:rounded-sm [&_[data-resize-handle=bottom-right]]:bg-primary [&[contenteditable=false]_[data-resize-handle]]:hidden [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-sm [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_.ProseMirror-selectednode]:rounded-md [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-ring [&_mark]:rounded-sm [&_mark]:px-0.5 [&_mark]:text-inherit [&_a]:text-primary [&_a]:underline-offset-4 [&_a]:hover:underline [&_p.is-editor-empty:first-child]:before:pointer-events-none [&_p.is-editor-empty:first-child]:before:float-left [&_p.is-editor-empty:first-child]:before:h-0 [&_p.is-editor-empty:first-child]:before:text-muted-foreground [&_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]";
+const prose = "max-w-none wrap-break-word focus:outline-none [&_h2]:mt-6 [&_h2]:scroll-mt-24 [&_h2]:text-xl [&_h2]:font-semibold [&_h2[data-anchor]]:before:mr-2 [&_h2[data-anchor]]:before:font-normal [&_h2[data-anchor]]:before:text-muted-foreground [&_h2[data-anchor]]:before:content-['#'] [&_h3]:mt-4 [&_h3]:scroll-mt-24 [&_h3]:text-lg [&_h3]:font-medium [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_.tableWrapper]:my-3 [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:overflow-y-clip [&_table]:w-full [&_table]:border-collapse [&_td]:relative [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:relative [&_th]:border [&_th]:border-border [&_th]:bg-muted/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_tr[data-row-height]>td]:h-(--row-height) [&_tr[data-row-height]>th]:h-(--row-height) [&_.row-resize-handle]:absolute [&_.row-resize-handle]:right-3 [&_.row-resize-handle]:bottom-0 [&_.row-resize-handle]:left-1 [&_.row-resize-handle]:z-30 [&_.row-resize-handle]:h-2 [&_.row-resize-handle]:cursor-row-resize [&_.row-resize-handle:hover]:bg-primary/60 [&_.column-resize-handle]:pointer-events-none [&_.column-resize-handle]:absolute [&_.column-resize-handle]:-right-0.5 [&_.column-resize-handle]:top-0 [&_.column-resize-handle]:bottom-0 [&_.column-resize-handle]:z-20 [&_.column-resize-handle]:w-1 [&_.column-resize-handle]:bg-primary/50 [&.resize-cursor]:cursor-col-resize [&.row-resize]:cursor-row-resize [&_[data-resize-container]]:my-3 [&_[data-resize-container]]:w-fit [&_[data-resize-container]]:max-w-full [&_[data-resize-wrapper]]:w-fit [&_[data-resize-wrapper]]:max-w-full [&_img]:max-w-full [&_img]:rounded-md [&_[data-resize-handle]]:z-30 [&[contenteditable=false]_[data-resize-handle]]:hidden [&_hr]:my-4 [&_hr]:border-border [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-sm [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_.ProseMirror-selectednode]:rounded-md [&_.ProseMirror-selectednode]:ring-2 [&_.ProseMirror-selectednode]:ring-ring [&_mark]:rounded-sm [&_mark]:px-0.5 [&_mark]:text-inherit [&_a]:text-primary [&_a]:underline-offset-4 [&_a]:hover:underline [&_p.is-editor-empty:first-child]:before:pointer-events-none [&_p.is-editor-empty:first-child]:before:float-left [&_p.is-editor-empty:first-child]:before:h-0 [&_p.is-editor-empty:first-child]:before:text-muted-foreground [&_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]";
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
@@ -137,9 +163,109 @@ const FILE_TYPES = new Set([
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 
-const ATOM_NODES = new Set(["image", "fileAttachment", "horizontalRule", "blockMath", "inlineMath"]);
+const ATOM_NODES = new Set(["image", "fileAttachment", "horizontalRule", "blockMath", "inlineMath", "mention"]);
+
+const EDITOR_ASSET_SRC = /^\/api\/(?:news|wiki)\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ArticleHeading = Heading.extend({
+    addAttributes() {
+        return {
+            ...this.parent?.(),
+            id: {
+                default: null,
+                parseHTML: (element: HTMLElement) => element.getAttribute("id"),
+                renderHTML: (attributes: { id?: string | null }) => attributes.id ? { id: attributes.id } : {},
+            },
+        };
+    },
+}).configure({ levels: [2, 3] });
+
+const WikiAnchor = Node.create({
+    name: "wikiAnchor",
+    group: "block",
+    content: "inline*",
+    defining: true,
+    addStorage() {
+        return { pagePath: "" };
+    },
+    addAttributes() {
+        return {
+            id: {
+                default: null,
+                parseHTML: (element: HTMLElement) => element.getAttribute("id"),
+                renderHTML: (attributes: { id?: string | null }) => (attributes.id ? { id: attributes.id } : {}),
+            },
+        };
+    },
+    parseHTML() {
+        return [{ tag: "h2[data-anchor]" }];
+    },
+    renderHTML({ HTMLAttributes }) {
+        return ["h2", mergeAttributes(HTMLAttributes, { "data-anchor": "" }), 0];
+    },
+    addNodeView() {
+        return ({ node, editor }) => {
+            let current = node;
+            const dom = document.createElement("h2");
+            dom.dataset.anchor = "";
+            dom.className = "group/anchor flex items-baseline gap-2";
+            const contentDOM = document.createElement("span");
+            contentDOM.className = "min-w-0";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "anchor-copy inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/anchor:opacity-100 focus-visible:opacity-100";
+            button.setAttribute("aria-label", "Копировать ссылку на раздел");
+            button.setAttribute("contenteditable", "false");
+            button.innerHTML = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' class='size-3.5' aria-hidden='true'><rect width='14' height='14' x='8' y='8' rx='2'/><path d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/></svg>";
+            button.addEventListener("mousedown", (event) => event.preventDefault());
+            button.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const id = typeof current.attrs.id === "string" ? current.attrs.id : "";
+                const pagePath = anchorPagePath(editor.storage);
+                void copyWikiAnchorLink(pagePath, id);
+            });
+            writeAnchorId(dom, current);
+            dom.append(contentDOM, button);
+            return {
+                dom,
+                contentDOM,
+                stopEvent(event) {
+                    return event.target instanceof Element && Boolean(event.target.closest(".anchor-copy"));
+                },
+                update(updated) {
+                    if (updated.type.name !== "wikiAnchor") {
+                        return false;
+                    }
+                    current = updated;
+                    writeAnchorId(dom, updated);
+                    return true;
+                },
+            };
+        };
+    },
+});
+
+function writeAnchorId(dom: HTMLElement, node: { attrs: Record<string, unknown> }) {
+    const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
+    if (id) {
+        dom.id = id;
+    } else {
+        dom.removeAttribute("id");
+    }
+}
+
+function anchorPagePath(storage: object): string {
+    const page = storage as { wikiAnchor?: { pagePath?: string } };
+    return page.wikiAnchor?.pagePath ?? "";
+}
+
+const NewsMention = Mention.extend({
+    selectable: true,
+});
 
 const NewsTableRow = TableRow.extend({
+    draggable: false,
     addAttributes() {
         return {
             ...this.parent?.(),
@@ -164,6 +290,7 @@ const NewsTableRow = TableRow.extend({
     addNodeView() {
         return ({ node }) => {
             const dom = document.createElement("tr");
+            dom.draggable = false;
             applyRowHeight(dom, node.attrs.height);
             return {
                 dom,
@@ -172,6 +299,7 @@ const NewsTableRow = TableRow.extend({
                     if (updated.type.name !== "tableRow") {
                         return false;
                     }
+                    dom.draggable = false;
                     if (dom.dataset.rowResizing === "true") {
                         return true;
                     }
@@ -230,6 +358,14 @@ const NewsImage = Image.extend({
                     return align ? { "data-align": align } : {};
                 },
             },
+            frame: {
+                default: null,
+                parseHTML: (element) => newsImageFrame(element.getAttribute("data-frame")) ?? null,
+                renderHTML: (attributes) => {
+                    const frame = newsImageFrame(attributes.frame);
+                    return frame ? { "data-frame": frame } : {};
+                },
+            },
         };
     },
     parseHTML() {
@@ -240,7 +376,7 @@ const NewsImage = Image.extend({
                     return false;
                 }
                 const src = element.getAttribute("src") ?? "";
-                if (!NEWS_ASSET_SRC.test(src)) {
+                if (!EDITOR_ASSET_SRC.test(src)) {
                     return false;
                 }
                 return { src, alt: element.getAttribute("alt") ?? "" };
@@ -279,21 +415,23 @@ const FileAttachment = Node.create({
                     return false;
                 }
                 const href = element.getAttribute("href") ?? "";
-                if (!NEWS_ASSET_SRC.test(href)) {
+                if (!EDITOR_ASSET_SRC.test(href)) {
                     return false;
                 }
                 return {
                     src: href,
                     title: (element.textContent ?? "").slice(0, 255),
-                    mime: "",
+                    mime: (element.getAttribute("data-mime") ?? "").slice(0, 100),
                 };
             },
         }];
     },
     renderHTML({ node }) {
         const title = typeof node.attrs.title === "string" && node.attrs.title ? node.attrs.title : "Вложение";
+        const mime = typeof node.attrs.mime === "string" ? node.attrs.mime : "";
         return ["a", mergeAttributes({
             "data-attachment": "",
+            ...(mime ? { "data-mime": mime } : {}),
             href: node.attrs.src,
             target: "_blank",
             rel: "noopener noreferrer",
@@ -321,11 +459,61 @@ function hold(event: { preventDefault: () => void }) {
     event.preventDefault();
 }
 
+const FRAME_ICON = {
+    square: Square,
+    soft: SquareRoundCorner,
+    round: Squircle,
+    strong: Radius,
+    circle: Circle,
+} as const;
+
+function lineIcon(strokeWidth: number): LucideIcon {
+    function Icon({ className, ...props }: { className?: string }) {
+        return (
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                aria-hidden
+                className={className}
+                {...props}
+                strokeWidth={strokeWidth}
+            >
+                <line x1="4" y1="12" x2="20" y2="12" />
+            </svg>
+        );
+    }
+    return Icon as LucideIcon;
+}
+
+const WIDTH_ICON = {
+    1: lineIcon(1.5),
+    2: lineIcon(2.5),
+    4: lineIcon(3.75),
+} as const;
+
+function ToolbarRule() {
+    return <span aria-hidden className="mx-1 h-6 w-px shrink-0 self-center bg-border" />;
+}
+
+function MenuIcon({ icon: Icon }: { icon: LucideIcon }) {
+    return (
+        <span className="flex size-4 shrink-0 items-center justify-center">
+            <Icon className="size-4" />
+        </span>
+    );
+}
+
 function commandMark(item: Command) {
     if (item.swatch) {
-        return <span className="size-3.5 shrink-0 rounded-sm border border-border" style={{ backgroundColor: item.swatch }} />;
+        return (
+            <span className="flex size-4 shrink-0 items-center justify-center">
+                <span className="size-3.5 rounded-sm border border-border" style={{ backgroundColor: item.swatch }} />
+            </span>
+        );
     }
-    return <item.icon />;
+    return <MenuIcon icon={item.icon} />;
 }
 
 function renderCommands(items: Command[], kind: "menu" | "context") {
@@ -377,6 +565,116 @@ function renderGroups(groups: Command[][], kind: "menu" | "context") {
     ));
 }
 
+function FontSizeField({
+    value,
+    disabled,
+    onPrepare,
+    onChange,
+}: {
+    value: number;
+    disabled?: boolean;
+    onPrepare: () => void;
+    onChange: (size: number) => void;
+}) {
+    const [draft, setDraft] = useState<string | null>(null);
+    const [open, setOpen] = useState(false);
+    const shown = draft ?? String(value);
+
+    function commit(raw = shown) {
+        const parsed = Number.parseInt(raw, 10);
+        if (Number.isFinite(parsed)) {
+            onChange(parsed);
+        }
+        setDraft(null);
+        setOpen(false);
+    }
+
+    return (
+        <div data-font-size="" className="flex items-center" onPointerDown={onPrepare}>
+            <button
+                type="button"
+                aria-label="Уменьшить шрифт"
+                disabled={disabled || value <= NEWS_FONT_SIZE_MIN}
+                className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-r-none" })}
+                onClick={() => onChange(value - 1)}
+            >
+                <Minus />
+            </button>
+            <Popover open={open} onOpenChange={setOpen}>
+                <div className="relative">
+                    <Input
+                        value={shown}
+                        inputMode="numeric"
+                        aria-label="Размер шрифта"
+                        disabled={disabled}
+                        className="h-8 w-14 rounded-none border-x-0 px-1 text-center text-sm shadow-none focus-visible:z-10"
+                        onFocus={() => setOpen(true)}
+                        onChange={(event) => setDraft(event.target.value.replace(/\D/g, "").slice(0, 2))}
+                        onBlur={(event) => {
+                            const next = event.relatedTarget;
+                            if (next instanceof Element && next.closest("[data-font-size-list]")) {
+                                return;
+                            }
+                            commit();
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                                event.preventDefault();
+                                commit();
+                            } else if (event.key === "Escape") {
+                                setDraft(null);
+                                setOpen(false);
+                            } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                                event.preventDefault();
+                                const current = Number.parseInt(shown, 10);
+                                const base = Number.isFinite(current) ? current : value;
+                                const next = event.key === "ArrowUp" ? base + 1 : base - 1;
+                                const clamped = Math.min(NEWS_FONT_SIZE_MAX, Math.max(NEWS_FONT_SIZE_MIN, next));
+                                setDraft(String(clamped));
+                            }
+                        }}
+                    />
+                </div>
+                <PopoverTrigger
+                    type="button"
+                    aria-label="Список размеров"
+                    disabled={disabled}
+                    className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-none border-r-0" })}
+                >
+                    <ChevronDown />
+                </PopoverTrigger>
+                <PopoverContent data-font-size-list="" align="start" className="w-32 gap-0.5 p-1">
+                    {NEWS_FONT_SIZES.map((size) => (
+                        <button
+                            key={size}
+                            type="button"
+                            className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                            onMouseDown={hold}
+                            onClick={() => {
+                                onChange(size);
+                                setDraft(null);
+                                setOpen(false);
+                            }}
+                        >
+                            <span>{size} px</span>
+                            {size === value ? <Check className="ml-auto size-4" /> : null}
+                        </button>
+                    ))}
+                </PopoverContent>
+            </Popover>
+            <button
+                type="button"
+                aria-label="Увеличить шрифт"
+                disabled={disabled || value >= NEWS_FONT_SIZE_MAX}
+                className={buttonVariants({ variant: "outline", size: "icon-sm", className: "rounded-l-none" })}
+                onClick={() => onChange(value + 1)}
+            >
+                <Plus />
+            </button>
+        </div>
+    );
+}
+
 function SwatchMenu({ label, icon: Icon, mark, disabled, items }: {
     label: string;
     icon: LucideIcon;
@@ -408,33 +706,47 @@ function SwatchMenu({ label, icon: Icon, mark, disabled, items }: {
     );
 }
 
-function renderSubmenu(kind: "menu" | "context", label: string, icon: LucideIcon, items: Command[]) {
+function commandGroups(items: Command[] | Command[][]): Command[][] {
+    if (items.length > 0 && Array.isArray(items[0])) {
+        return items as Command[][];
+    }
+    return [items as Command[]];
+}
+
+function renderSubmenu(kind: "menu" | "context", label: string, icon: LucideIcon, items: Command[] | Command[][]) {
     const Icon = icon;
+    const groups = commandGroups(items);
     if (kind === "menu") {
         return (
             <MenubarSub key={label}>
                 <MenubarSubTrigger className="whitespace-nowrap" onMouseDown={hold}>
-                    <Icon />
+                    <MenuIcon icon={Icon} />
                     {label}
                 </MenubarSubTrigger>
-                <MenubarSubContent className={popupClass} onMouseDown={hold}>{renderCommands(items, "menu")}</MenubarSubContent>
+                <MenubarSubContent className={popupClass} onMouseDown={hold}>{renderGroups(groups, "menu")}</MenubarSubContent>
             </MenubarSub>
         );
     }
     return (
         <ContextMenuSub key={label}>
             <ContextMenuSubTrigger className="whitespace-nowrap" onMouseDown={hold}>
-                <Icon />
+                <MenuIcon icon={Icon} />
                 {label}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className={popupClass} onMouseDown={hold}>
-                <ContextMenuGroup>{renderCommands(items, "context")}</ContextMenuGroup>
+                {renderGroups(groups, "context")}
             </ContextMenuSubContent>
         </ContextMenuSub>
     );
 }
 
-function allowedHref(url: string): boolean {
+function allowedHref(url: string, anchorLinks: boolean): boolean {
+    if (anchorLinks && url.startsWith("#") && /^#[\p{L}\p{N}-]+$/u.test(url)) {
+        return true;
+    }
+    if (anchorLinks && url.startsWith("/wiki/") && !url.includes("..")) {
+        return true;
+    }
     try {
         const parsed = new URL(url);
         return parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "mailto:";
@@ -490,6 +802,11 @@ export function NewsEditor({
     onChange,
     sheet,
     newsMenu,
+    assetsUrl = "/api/news/assets",
+    placeholder = "Текст новости",
+    anchorLinks = false,
+    anchorPage = "",
+    menuLabel = "Новость",
 }: {
     content: NewsNode;
     loadKey: string;
@@ -497,14 +814,24 @@ export function NewsEditor({
     onChange?: (content: NewsNode) => void;
     sheet?: ReactNode;
     newsMenu?: EditorMenuAction[];
+    assetsUrl?: string;
+    placeholder?: string;
+    anchorLinks?: boolean;
+    anchorPage?: string;
+    menuLabel?: string;
 }) {
     const [, refresh] = useState(0);
     const [menu, setMenu] = useState<"news" | "edit" | "format" | "insert" | "table" | null>(null);
+    const [sectionOpen, setSectionOpen] = useState(false);
+    const [sectionName, setSectionName] = useState("");
+    const [sectionLinkOpen, setSectionLinkOpen] = useState(false);
+    const [readingMedia, setReadingMedia] = useState<ReadingMedia | null>(null);
     const contentRef = useRef(content);
     const ready = useRef(false);
     contentRef.current = content;
     const imageInput = useRef<HTMLInputElement>(null);
     const fileInput = useRef<HTMLInputElement>(null);
+    const fontSelection = useRef<{ from: number; to: number } | null>(null);
     const uploadRef = useRef<(kind: "image" | "file", file: File) => Promise<void>>(async () => undefined);
     const editor = useEditor({
         immediatelyRender: false,
@@ -514,11 +841,12 @@ export function NewsEditor({
                 heading: false,
                 link: false,
             }),
-            Heading.configure({ levels: [2, 3] }),
+            ArticleHeading,
+            ...(anchorLinks ? [WikiAnchor] : []),
             Link.configure({
                 openOnClick: false,
                 autolink: false,
-                isAllowedUri: allowedHref,
+                isAllowedUri: (url) => allowedHref(url, anchorLinks),
             }),
             NewsImage,
             BlockMath.configure({ katexOptions: { throwOnError: false } }),
@@ -528,13 +856,30 @@ export function NewsEditor({
             FontSize,
             Highlight.configure({ multicolor: true }),
             ElementFill,
-            Table.configure({ resizable: true, lastColumnResizable: true }),
+            Table.configure({
+                resizable: true,
+                lastColumnResizable: true,
+                allowTableNodeSelection: true,
+                View: NewsTableView,
+            }),
             NewsTableRow,
-            TableHeader,
-            TableCell,
+            NewsTableHeader,
+            NewsTableCell,
             TableRowResize,
+            TableGesture,
             FileAttachment,
-            Placeholder.configure({ placeholder: editable ? "Текст новости" : "" }),
+            Details.configure({
+                persist: editable,
+                renderToggleButton: ({ element, isOpen }) => {
+                    element.setAttribute("aria-label", isOpen ? "Свернуть" : "Развернуть");
+                },
+            }),
+            DetailsSummary,
+            DetailsContent,
+            NewsMention.configure({
+                suggestion: mentionSuggestion(),
+            }),
+            Placeholder.configure({ placeholder: editable ? placeholder : "" }),
         ],
         content,
         editorProps: {
@@ -600,6 +945,16 @@ export function NewsEditor({
         ready.current = true;
     }, [editor, loadKey]);
 
+    useEffect(() => {
+        if (!editor) {
+            return;
+        }
+        const storage = editor.storage as { wikiAnchor?: { pagePath: string } };
+        if (storage.wikiAnchor) {
+            storage.wikiAnchor.pagePath = anchorPage;
+        }
+    }, [editor, anchorPage]);
+
     uploadRef.current = async (kind, file) => {
         if (!editable || !editor) {
             return;
@@ -608,7 +963,7 @@ export function NewsEditor({
             const form = new FormData();
             form.set("file", file);
             form.set("kind", kind);
-            const response = await fetch("/api/news/assets", { method: "POST", body: form });
+            const response = await fetch(assetsUrl, { method: "POST", body: form });
             const json = (await response.json()) as ApiResponse<{ src: string }>;
             if (!json.success) {
                 notifyError(json.error.message);
@@ -628,7 +983,20 @@ export function NewsEditor({
     };
 
     if (!editable) {
-        return <EditorContent editor={editor} />;
+        return (
+            <div
+                className="news-reading"
+                onClick={(event) => {
+                    if (anchorLinks) {
+                        followAnchorLink(event);
+                    }
+                    openReadingMedia(event, setReadingMedia);
+                }}
+            >
+                <EditorContent editor={editor} />
+                <ReadingMediaDialog item={readingMedia} onClose={() => setReadingMedia(null)} />
+            </div>
+        );
     }
 
     function editLink() {
@@ -640,8 +1008,8 @@ export function NewsEditor({
             editor.chain().focus().unsetLink().run();
             return;
         }
-        if (!allowedHref(href.trim())) {
-            notifyError("Можно указать адрес http, https или mailto");
+        if (!allowedHref(href.trim(), anchorLinks)) {
+            notifyError(anchorLinks ? "Можно указать http, https, mailto, якорь #раздел или страницу /wiki/…" : "Можно указать адрес http, https или mailto");
             return;
         }
         editor.chain().focus().setLink({ href: href.trim() }).run();
@@ -690,6 +1058,72 @@ export function NewsEditor({
 
     function setImageAlign(next: "left" | "center" | "right") {
         editor?.chain().focus().updateAttributes("image", { align: next === "left" ? null : next }).run();
+    }
+
+    function setCellBorder(color: string | null) {
+        if (!editor) {
+            return;
+        }
+        const current = editor.isActive("tableHeader") ? editor.getAttributes("tableHeader") : editor.getAttributes("tableCell");
+        const width = color && color !== "none" ? newsBorderWidth(current.borderWidth) ?? 2 : null;
+        const borderColor = color === "none" ? "none" : color;
+        editor.chain().focus().command(({ state, tr, dispatch }) => {
+            const applicable = replaceCellAttributes(state, tr, { borderColor, borderWidth: width });
+            if (applicable && tr.docChanged && dispatch) {
+                dispatch(tr);
+            }
+            return applicable;
+        }).run();
+    }
+
+    function setCellBorderWidth(width: number | null) {
+        if (!editor) {
+            return;
+        }
+        if (!width) {
+            setCellBorder(null);
+            return;
+        }
+        const current = editor.isActive("tableHeader") ? editor.getAttributes("tableHeader") : editor.getAttributes("tableCell");
+        const color = current.borderColor === "none" ? "#111827" : newsColor(current.borderColor) ?? "#111827";
+        editor.chain().focus().command(({ state, tr, dispatch }) => {
+            const applicable = replaceCellAttributes(state, tr, { borderColor: color, borderWidth: width });
+            if (applicable && tr.docChanged && dispatch) {
+                dispatch(tr);
+            }
+            return applicable;
+        }).run();
+    }
+
+    function setImageFrame(frame: (typeof NEWS_IMAGE_FRAMES)[number]["token"]) {
+        editor?.chain().focus().updateAttributes("image", { frame }).run();
+    }
+
+    function prepareFontSize() {
+        if (!editor || !editor.view.hasFocus()) {
+            return;
+        }
+        const { from, to } = editor.state.selection;
+        fontSelection.current = { from, to };
+    }
+
+    function applyFontSize(size: number) {
+        if (!editor) {
+            return;
+        }
+        const next = Math.min(NEWS_FONT_SIZE_MAX, Math.max(NEWS_FONT_SIZE_MIN, Math.round(size)));
+        const range = fontSelection.current;
+        const chain = editor.chain();
+        if (range) {
+            chain.setTextSelection(range);
+        }
+        chain.focus();
+        if (next === NEWS_FONT_SIZE_DEFAULT) {
+            chain.unsetFontSize();
+        } else {
+            chain.setFontSize(`${next}px`);
+        }
+        chain.run();
     }
 
     function editMath(kind: "block" | "inline") {
@@ -761,27 +1195,40 @@ export function NewsEditor({
         { label: "Отменить", icon: Undo2, shortcut: "Ctrl+Z", disabled: !editor?.can().undo(), run: () => editor?.chain().focus().undo().run() },
         { label: "Повторить", icon: Redo2, shortcut: "Ctrl+Y", disabled: !editor?.can().redo(), run: () => editor?.chain().focus().redo().run() },
     ];
+    const selectionCommands: Command[] = [
+        { label: "Выделить всё", icon: TextSelect, shortcut: "Ctrl+A", run: () => editor?.chain().focus().selectAll().run() },
+    ];
     const styles: Command[] = [
-        { label: "Абзац", icon: Pilcrow, run: () => setHeading("text") },
-        { label: "Заголовок", icon: Heading2, run: () => setHeading("h2") },
-        { label: "Подзаголовок", icon: Heading3, run: () => setHeading("h3") },
+        { label: "Абзац", icon: Pilcrow, active: heading === "text" && list === "" && !editor?.isActive("blockquote") && !editor?.isActive("codeBlock"), run: () => setHeading("text") },
+        { label: "Заголовок", icon: Heading2, active: heading === "h2", run: () => setHeading("h2") },
+        { label: "Подзаголовок", icon: Heading3, active: heading === "h3", run: () => setHeading("h3") },
     ];
     const marks: Command[] = [
-        { label: "Жирный", icon: Bold, shortcut: "Ctrl+B", run: () => editor?.chain().focus().toggleBold().run() },
-        { label: "Курсив", icon: Italic, shortcut: "Ctrl+I", run: () => editor?.chain().focus().toggleItalic().run() },
-        { label: "Подчёркнутый", icon: Underline, shortcut: "Ctrl+U", run: () => editor?.chain().focus().toggleUnderline().run() },
-        { label: "Зачёркнутый", icon: Strikethrough, run: () => editor?.chain().focus().toggleStrike().run() },
-        { label: "Код", icon: Code, run: () => editor?.chain().focus().toggleCode().run() },
+        { label: "Жирный", icon: Bold, shortcut: "Ctrl+B", active: editor?.isActive("bold") ?? false, run: () => editor?.chain().focus().toggleBold().run() },
+        { label: "Курсив", icon: Italic, shortcut: "Ctrl+I", active: editor?.isActive("italic") ?? false, run: () => editor?.chain().focus().toggleItalic().run() },
+        { label: "Подчёркнутый", icon: Underline, shortcut: "Ctrl+U", active: editor?.isActive("underline") ?? false, run: () => editor?.chain().focus().toggleUnderline().run() },
+        { label: "Зачёркнутый", icon: Strikethrough, active: editor?.isActive("strike") ?? false, run: () => editor?.chain().focus().toggleStrike().run() },
+        { label: "Код", icon: Code, active: editor?.isActive("code") ?? false, run: () => editor?.chain().focus().toggleCode().run() },
     ];
     const blocks: Command[] = editor?.isActive("codeBlock")
         ? [{ label: "Обычный текст", icon: Pilcrow, run: () => editor.chain().focus().toggleCodeBlock().run() }]
         : [
-            { label: "Список", icon: List, run: () => editor?.chain().focus().toggleBulletList().run() },
-            { label: "Нумерация", icon: ListOrdered, run: () => editor?.chain().focus().toggleOrderedList().run() },
-            { label: "Цитата", icon: Quote, run: () => editor?.chain().focus().toggleBlockquote().run() },
+            { label: "Список", icon: List, active: list === "bullet", run: () => editor?.chain().focus().toggleBulletList().run() },
+            { label: "Нумерация", icon: ListOrdered, active: list === "ordered", run: () => editor?.chain().focus().toggleOrderedList().run() },
+            { label: "Цитата", icon: Quote, active: editor?.isActive("blockquote") ?? false, run: () => editor?.chain().focus().toggleBlockquote().run() },
         ];
+    function clearFormatting() {
+        if (!editor) {
+            return;
+        }
+        const chain = editor.chain().focus().unsetAllMarks();
+        if (!editor.isActive("mention")) {
+            chain.unsetElementFill().clearNodes();
+        }
+        chain.run();
+    }
     const clearing: Command[] = [
-        { label: "Очистить оформление", icon: RemoveFormatting, run: () => editor?.chain().focus().unsetAllMarks().unsetElementFill().clearNodes().run() },
+        { label: "Очистить оформление", icon: RemoveFormatting, run: clearFormatting },
     ];
     const textStyle = editor?.getAttributes("textStyle") ?? {};
     const textColor = typeof textStyle.color === "string" ? textStyle.color : "";
@@ -827,48 +1274,85 @@ export function NewsEditor({
             run: () => editor?.chain().focus().setElementFill(color.value).run(),
         })),
     ];
-    const sizes: Command[] = [
-        { label: "Обычный", icon: ALargeSmall, active: fontSize === "", run: () => editor?.chain().focus().unsetFontSize().run() },
-        ...NEWS_FONT_SIZES.map((size) => ({
-            label: size.label,
-            icon: ALargeSmall,
-            active: fontSize === size.value,
-            run: () => editor?.chain().focus().setFontSize(size.value).run(),
-        })),
-    ];
+    const fontPx = Number.parseInt(fontSize, 10);
+    const fontValue = Number.isFinite(fontPx) ? fontPx : NEWS_FONT_SIZE_DEFAULT;
     const links: Command[] = [
         { label: editor?.isActive("link") ? "Изменить ссылку" : "Ссылка", icon: Link2, run: editLink },
         ...(editor?.isActive("link")
             ? [{ label: "Убрать ссылку", icon: Unlink, run: () => editor.chain().focus().unsetLink().run() }]
             : []),
     ];
-    const inserts: Command[] = [
+    function toggleDetails() {
+        if (!editor) {
+            return;
+        }
+        if (editor.isActive("details")) {
+            editor.chain().focus().unsetDetails().run();
+            return;
+        }
+        editor.chain().focus().setDetails().run();
+    }
+    function insertMention() {
+        if (!editor) {
+            return;
+        }
+        const { $from } = editor.state.selection;
+        const before = $from.parent.textBetween(Math.max(0, $from.parentOffset - 1), $from.parentOffset, undefined, "\ufffc");
+        const prefix = before.length > 0 && !/\s/.test(before) ? " @" : "@";
+        editor.chain().focus().insertContent(prefix).run();
+    }
+    function replaceMention() {
+        editor?.chain().focus().deleteSelection().insertContent("@").run();
+    }
+    const insertMedia: Command[] = [
         { label: "Таблица", icon: TableIcon, disabled: editor?.isActive("table") ?? false, run: () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
         { label: "Снимок", icon: ImageIcon, run: () => imageInput.current?.click() },
         { label: "Вложение", icon: Paperclip, run: () => fileInput.current?.click() },
+    ];
+    const insertBlocks: Command[] = [
+        ...(anchorLinks ? [
+            { label: "Якорь", icon: Bookmark, run: () => { setSectionName(""); setSectionOpen(true); } },
+            { label: "Ссылка на раздел", icon: Link2, run: () => setSectionLinkOpen(true) },
+        ] : []),
+        { label: editor?.isActive("details") ? "Убрать раскрывающийся блок" : "Раскрывающийся блок", icon: ListCollapse, run: toggleDetails },
+        { label: "Упоминание", icon: AtSign, disabled: editor?.isActive("codeBlock") ?? false, run: insertMention },
         { label: "Горизонтальная линия", icon: Minus, run: () => editor?.chain().focus().setHorizontalRule().run() },
         { label: "Блок кода", icon: FileCode, run: () => editor?.chain().focus().toggleCodeBlock().run() },
+    ];
+    const insertMath: Command[] = [
         { label: "Формула", icon: Sigma, run: () => editMath("block") },
         { label: "Формула в строке", icon: Radical, run: () => editMath("inline") },
         { label: "Перенос строки", icon: CornerDownLeft, run: () => editor?.chain().focus().setHardBreak().run() },
     ];
-    const table: Command[] = [
+    const inserts = [...insertMedia, ...insertBlocks, ...insertMath];
+    const tableRows: Command[] = [
         { label: "Строка выше", icon: BetweenHorizontalStart, disabled: !editor?.can().addRowBefore(), run: () => editor?.chain().focus().addRowBefore().run() },
         { label: "Строка ниже", icon: BetweenHorizontalEnd, disabled: !editor?.can().addRowAfter(), run: () => editor?.chain().focus().addRowAfter().run() },
+        { label: "Удалить строку", icon: Trash2, disabled: !editor?.can().deleteRow(), run: () => editor?.chain().focus().deleteRow().run() },
+    ];
+    const tableColumns: Command[] = [
         { label: "Столбец слева", icon: BetweenVerticalStart, disabled: !editor?.can().addColumnBefore(), run: () => editor?.chain().focus().addColumnBefore().run() },
         { label: "Столбец справа", icon: BetweenVerticalEnd, disabled: !editor?.can().addColumnAfter(), run: () => editor?.chain().focus().addColumnAfter().run() },
-        { label: "Удалить строку", icon: Trash2, disabled: !editor?.can().deleteRow(), run: () => editor?.chain().focus().deleteRow().run() },
         { label: "Удалить столбец", icon: Trash2, disabled: !editor?.can().deleteColumn(), run: () => editor?.chain().focus().deleteColumn().run() },
+    ];
+    const tableCells: Command[] = [
         { label: "Объединить ячейки", icon: TableCellsMerge, disabled: !editor?.can().mergeCells(), run: () => editor?.chain().focus().mergeCells().run() },
         { label: "Разделить ячейку", icon: TableCellsSplit, disabled: !editor?.can().splitCell(), run: () => editor?.chain().focus().splitCell().run() },
+    ];
+    const tableRemove: Command[] = [
         { label: "Удалить таблицу", icon: Trash2, destructive: true, disabled: !editor?.can().deleteTable(), run: () => editor?.chain().focus().deleteTable().run() },
     ];
+    const tableGroups = [tableRows, tableColumns, tableCells, tableRemove];
 
     const onImage = editor?.isActive("image") ?? false;
+    const onAnchor = anchorLinks && (editor?.isActive("wikiAnchor") ?? false);
+    const sectionItems = sectionLinkOpen && editor ? anchorItems(editor.getJSON() as NewsNode) : [];
     const imageAttrs = onImage ? editor?.getAttributes("image") ?? {} : {};
     const imageBorder = newsColor(imageAttrs.borderColor) ?? "";
     const imageBorderWidth = newsBorderWidth(imageAttrs.borderWidth);
     const imageAlign = newsImageAlign(imageAttrs.align) ?? "left";
+    const imageFrame = newsImageFrame(imageAttrs.frame) ?? "soft";
+    const frameIcon = FRAME_ICON[imageFrame];
     const imageAligns: Command[] = [
         { label: "Слева", icon: AlignLeft, active: imageAlign === "left", run: () => setImageAlign("left") },
         { label: "По центру", icon: AlignCenter, active: imageAlign === "center", run: () => setImageAlign("center") },
@@ -884,20 +1368,52 @@ export function NewsEditor({
             run: () => setImageBorder(color.value),
         })),
     ];
+    const imageFrames: Command[] = NEWS_IMAGE_FRAMES.map((frame) => ({
+        label: frame.label,
+        icon: FRAME_ICON[frame.token],
+        active: imageFrame === frame.token,
+        run: () => setImageFrame(frame.token),
+    }));
     const imageWidths: Command[] = [
         { label: "Без обводки", icon: CircleOff, active: imageBorderWidth === undefined, run: () => setImageBorderWidth(null) },
         ...NEWS_BORDER_WIDTHS.map((width) => ({
             label: width.label,
-            icon: Minus,
+            icon: WIDTH_ICON[width.value],
             active: imageBorderWidth === width.value,
             run: () => setImageBorderWidth(width.value),
         })),
     ];
     const onFile = editor?.isActive("fileAttachment") ?? false;
+    const onMention = editor?.isActive("mention") ?? false;
     const onRule = editor?.isActive("horizontalRule") ?? false;
     const onBlockMath = editor?.isActive("blockMath") ?? false;
     const onInlineMath = editor?.isActive("inlineMath") ?? false;
     const inTable = editor?.isActive("table") ?? false;
+    const cellAttrs = inTable
+        ? editor?.isActive("tableHeader") ? editor.getAttributes("tableHeader") : editor?.getAttributes("tableCell") ?? {}
+        : {};
+    const cellBorder = cellAttrs.borderColor === "none" ? "none" : newsColor(cellAttrs.borderColor) ?? "";
+    const cellBorderWidth = newsBorderWidth(cellAttrs.borderWidth);
+    const cellBorders: Command[] = [
+        { label: "По умолчанию", icon: CircleOff, active: cellBorder === "", run: () => setCellBorder(null) },
+        { label: "Без обводки", icon: CircleOff, active: cellBorder === "none", run: () => setCellBorder("none") },
+        ...NEWS_BORDER_COLORS.map((color) => ({
+            label: color.label,
+            icon: Frame,
+            swatch: color.value,
+            active: cellBorder === color.value,
+            run: () => setCellBorder(color.value),
+        })),
+    ];
+    const cellWidths: Command[] = [
+        { label: "По умолчанию", icon: CircleOff, active: cellBorderWidth === undefined && cellBorder !== "none", run: () => setCellBorderWidth(null) },
+        ...NEWS_BORDER_WIDTHS.map((width) => ({
+            label: width.label,
+            icon: WIDTH_ICON[width.value],
+            active: cellBorderWidth === width.value,
+            run: () => setCellBorderWidth(width.value),
+        })),
+    ];
     const inCode = editor?.isActive("codeBlock") ?? false;
     const specificTitle = onFile
         ? "Вложение"
@@ -941,38 +1457,55 @@ export function NewsEditor({
                 <Menubar className="h-9 w-full border-0 bg-transparent p-0 shadow-none">
                     {newsMenu && newsMenu.length > 0 ? (
                         <MenubarMenu open={menu === "news"} onOpenChange={(next) => setMenu((current) => next ? "news" : current === "news" ? null : current)}>
-                            <MenubarTrigger className="whitespace-nowrap">Новость</MenubarTrigger>
+                            <MenubarTrigger className="whitespace-nowrap">{menuLabel}</MenubarTrigger>
                             <MenubarContent className={popupClass}>{renderGroups([newsMenu.map((item) => ({ ...item, keepSelection: false }))], "menu")}</MenubarContent>
                         </MenubarMenu>
                     ) : null}
                     <MenubarMenu open={menu === "edit"} onOpenChange={(next) => setMenu((current) => next ? "edit" : current === "edit" ? null : current)}>
                         <MenubarTrigger className="whitespace-nowrap">Правка</MenubarTrigger>
-                        <MenubarContent className={popupClass}>{renderGroups([history], "menu")}</MenubarContent>
+                        <MenubarContent className={popupClass}>{renderGroups([history, selectionCommands, clearing], "menu")}</MenubarContent>
                     </MenubarMenu>
                     <MenubarMenu open={menu === "format"} onOpenChange={(next) => setMenu((current) => next ? "format" : current === "format" ? null : current)}>
                         <MenubarTrigger className="whitespace-nowrap">Формат</MenubarTrigger>
                         <MenubarContent className={popupClass}>
-                            {renderGroups([styles, marks, blocks], "menu")}
+                            {renderSubmenu("menu", "Абзац", Pilcrow, [styles, blocks])}
+                            {renderSubmenu("menu", "Начертание", Bold, marks)}
                             <MenubarSeparator />
                             {renderSubmenu("menu", "Цвет текста", Palette, textColors)}
                             {renderSubmenu("menu", fillLabel, PaintBucket, fills)}
                             {renderSubmenu("menu", "Выделение текста", Highlighter, highlights)}
-                            {renderSubmenu("menu", "Размер шрифта", ALargeSmall, sizes)}
+                            {!inCode ? (
+                                <div className="px-2 py-1.5">
+                                    <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
+                                </div>
+                            ) : null}
                             <MenubarSeparator />
                             {renderCommands(clearing, "menu")}
                         </MenubarContent>
                     </MenubarMenu>
                     <MenubarMenu open={menu === "insert"} onOpenChange={(next) => setMenu((current) => next ? "insert" : current === "insert" ? null : current)}>
                         <MenubarTrigger className="whitespace-nowrap">Вставка</MenubarTrigger>
-                        <MenubarContent className={popupClass}>{renderGroups([links, inserts], "menu")}</MenubarContent>
+                        <MenubarContent className={popupClass}>{renderGroups([links, insertMedia, insertBlocks, insertMath], "menu")}</MenubarContent>
                     </MenubarMenu>
                     <MenubarMenu open={menu === "table"} onOpenChange={(next) => setMenu((current) => next ? "table" : current === "table" ? null : current)}>
-                        <MenubarTrigger className="whitespace-nowrap">Таблица</MenubarTrigger>
-                        <MenubarContent className={popupClass}>{renderGroups([table], "menu")}</MenubarContent>
+                        <MenubarTrigger className="whitespace-nowrap disabled:opacity-50" disabled={!inTable} title={inTable ? undefined : "Доступно внутри таблицы"}>Таблица</MenubarTrigger>
+                        <MenubarContent className={popupClass}>
+                            {renderGroups([tableRows, tableColumns, tableCells], "menu")}
+                            <MenubarSeparator />
+                            {renderSubmenu("menu", "Граница ячейки", Frame, cellBorders)}
+                            {renderSubmenu("menu", "Толщина границы", WIDTH_ICON[cellBorderWidth ?? 2], cellWidths)}
+                            <MenubarSeparator />
+                            {renderGroups([tableRemove], "menu")}
+                        </MenubarContent>
                     </MenubarMenu>
                 </Menubar>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1" onMouseDown={hold}>
+            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b bg-background px-2 py-1" onMouseDown={(event) => {
+                if (event.target instanceof Element && event.target.closest("[data-font-size]")) {
+                    return;
+                }
+                hold(event);
+            }}>
                 {onImage ? (
                     <>
                         <ToggleGroup
@@ -992,9 +1525,10 @@ export function NewsEditor({
                             <ToggleGroupItem value="center" aria-label="По центру"><AlignCenter /></ToggleGroupItem>
                             <ToggleGroupItem value="right" aria-label="Справа"><AlignRight /></ToggleGroupItem>
                         </ToggleGroup>
-                        <Separator orientation="vertical" className="mx-1 h-6" />
+                        <ToolbarRule />
                         <SwatchMenu label="Обводка" icon={Frame} mark={imageBorder || undefined} disabled={!editor} items={imageBorders} />
-                        <SwatchMenu label="Толщина обводки" icon={Square} disabled={!editor} items={imageWidths} />
+                        <SwatchMenu label="Толщина обводки" icon={WIDTH_ICON[imageBorderWidth ?? 2]} disabled={!editor} items={imageWidths} />
+                        <SwatchMenu label="Форма рамки" icon={frameIcon} disabled={!editor} items={imageFrames} />
                         <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Подпись" disabled={!editor} onPressedChange={editImageAlt}><TextCursorInput /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Удалить снимок" disabled={!editor} onPressedChange={() => editor?.chain().focus().deleteSelection().run()}><Trash2 /></Toggle>
                     </>
@@ -1012,13 +1546,13 @@ export function NewsEditor({
                             <ToggleGroupItem value="h2" aria-label="Заголовок">H2</ToggleGroupItem>
                             <ToggleGroupItem value="h3" aria-label="Подзаголовок">H3</ToggleGroupItem>
                         </ToggleGroup>
-                        <Separator orientation="vertical" className="mx-1 h-6" />
+                        <ToolbarRule />
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("bold") ?? false} aria-label="Жирный" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleBold().run()}><Bold /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("italic") ?? false} aria-label="Курсив" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleItalic().run()}><Italic /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("underline") ?? false} aria-label="Подчёркнутый" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleUnderline().run()}><Underline /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("strike") ?? false} aria-label="Зачёркнутый" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough /></Toggle>
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("code") ?? false} aria-label="Код" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleCode().run()}><Code /></Toggle>
-                        <Separator orientation="vertical" className="mx-1 h-6" />
+                        <ToolbarRule />
                         <ToggleGroup
                             variant="outline"
                             size="sm"
@@ -1031,12 +1565,22 @@ export function NewsEditor({
                             <ToggleGroupItem value="ordered" aria-label="Нумерация" disabled={inCode}><ListOrdered /></ToggleGroupItem>
                         </ToggleGroup>
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("blockquote") ?? false} aria-label="Цитата" disabled={!editor || inCode} onPressedChange={() => editor?.chain().focus().toggleBlockquote().run()}><Quote /></Toggle>
+                        <ToolbarRule />
                         <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("link") ?? false} aria-label="Ссылка" disabled={!editor || inCode} onPressedChange={editLink}><Link2 /></Toggle>
-                        <Separator orientation="vertical" className="mx-1 h-6" />
+                        <Toggle type="button" size="sm" variant="outline" pressed={editor?.isActive("details") ?? false} aria-label="Раскрывающийся блок" disabled={!editor || inCode} onPressedChange={toggleDetails}><ListCollapse /></Toggle>
+                        <Toggle type="button" size="sm" variant="outline" pressed={false} aria-label="Упоминание" disabled={!editor || inCode} onPressedChange={insertMention}><AtSign /></Toggle>
+                        <ToolbarRule />
                         <SwatchMenu label="Цвет текста" icon={Palette} mark={textColor || undefined} disabled={!editor || inCode} items={textColors} />
                         <SwatchMenu label={fillLabel} icon={PaintBucket} mark={fill || undefined} disabled={!editor} items={fills} />
                         <SwatchMenu label="Выделение текста" icon={Highlighter} mark={highlightColor || undefined} disabled={!editor || inCode} items={highlights} />
-                        <SwatchMenu label="Размер шрифта" icon={ALargeSmall} disabled={!editor || inCode} items={sizes} />
+                        <FontSizeField value={fontValue} disabled={!editor || inCode} onPrepare={prepareFontSize} onChange={applyFontSize} />
+                        {inTable ? (
+                            <>
+                                <ToolbarRule />
+                                <SwatchMenu label="Граница ячейки" icon={Frame} mark={cellBorder && cellBorder !== "none" ? cellBorder : undefined} disabled={!editor} items={cellBorders} />
+                                <SwatchMenu label="Толщина границы" icon={WIDTH_ICON[cellBorderWidth ?? 2]} disabled={!editor} items={cellWidths} />
+                            </>
+                        ) : null}
                     </>
                 )}
                 <span className="ml-auto flex items-center gap-1">
@@ -1065,7 +1609,27 @@ export function NewsEditor({
                             </ContextMenuGroup>
                             {renderSubmenu("context", "Выравнивание", AlignLeft, imageAligns)}
                             {renderSubmenu("context", "Обводка", Frame, imageBorders)}
-                            {renderSubmenu("context", "Толщина обводки", Square, imageWidths)}
+                            {renderSubmenu("context", "Толщина обводки", WIDTH_ICON[imageBorderWidth ?? 2], imageWidths)}
+                            {renderSubmenu("context", "Форма рамки", frameIcon, imageFrames)}
+                        </>
+                    ) : onMention ? (
+                        <>
+                            <ContextMenuGroup>
+                                <ContextMenuLabel className="whitespace-nowrap">Упоминание</ContextMenuLabel>
+                                {renderCommands([
+                                    { label: "Заменить", icon: AtSign, run: replaceMention },
+                                    { label: "Удалить", icon: Trash2, destructive: true, run: () => editor?.chain().focus().deleteSelection().run() },
+                                ], "context")}
+                            </ContextMenuGroup>
+                            <ContextMenuSeparator />
+                            <ContextMenuGroup>{renderCommands(marks.filter((item) => item.label !== "Код"), "context")}</ContextMenuGroup>
+                            {renderSubmenu("context", "Цвет текста", Palette, textColors)}
+                            {renderSubmenu("context", "Выделение текста", Highlighter, highlights)}
+                            <div className="px-2 py-1.5">
+                                <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
+                            </div>
+                            <ContextMenuSeparator />
+                            <ContextMenuGroup>{renderCommands(clearing, "context")}</ContextMenuGroup>
                         </>
                     ) : specific ? (
                         <ContextMenuGroup>
@@ -1074,19 +1638,34 @@ export function NewsEditor({
                         </ContextMenuGroup>
                     ) : (
                         <>
-                            {links.length > 0 ? (
-                                <ContextMenuGroup>{renderCommands(links, "context")}</ContextMenuGroup>
+                            {onAnchor ? (
+                                <ContextMenuGroup>
+                                    {renderCommands([
+                                        { label: "Копировать ссылку", icon: Copy, run: () => void copyWikiAnchorLink(anchorPage, String(editor?.getAttributes("wikiAnchor").id ?? "")) },
+                                        { label: "Убрать якорь", icon: Bookmark, run: () => editor?.chain().focus().setParagraph().run() },
+                                    ], "context")}
+                                </ContextMenuGroup>
                             ) : null}
-                            {renderSubmenu("context", "Оформление", Bold, marks)}
-                            {renderSubmenu("context", "Абзац", Pilcrow, [...styles, ...blocks])}
-                            {inTable || !inCode ? <ContextMenuSeparator /> : null}
-                            {inTable ? renderSubmenu("context", "Таблица", TableIcon, table) : null}
-                            {!inCode ? renderSubmenu("context", "Вставка", Plus, inserts) : null}
+                            <ContextMenuGroup>
+                                <ContextMenuLabel className="whitespace-nowrap">Текст</ContextMenuLabel>
+                                {renderCommands(marks, "context")}
+                            </ContextMenuGroup>
                             <ContextMenuSeparator />
+                            <ContextMenuGroup>{renderCommands(links, "context")}</ContextMenuGroup>
+                            {renderSubmenu("context", "Абзац", Pilcrow, [styles, blocks])}
                             {!inCode ? renderSubmenu("context", "Цвет текста", Palette, textColors) : null}
                             {renderSubmenu("context", fillLabel, PaintBucket, fills)}
                             {!inCode ? renderSubmenu("context", "Выделение текста", Highlighter, highlights) : null}
-                            {!inCode ? renderSubmenu("context", "Размер шрифта", ALargeSmall, sizes) : null}
+                            {!inCode ? (
+                                <div className="px-2 py-1.5">
+                                    <FontSizeField value={fontValue} disabled={!editor} onPrepare={prepareFontSize} onChange={applyFontSize} />
+                                </div>
+                            ) : null}
+                            {!inCode || inTable ? <ContextMenuSeparator /> : null}
+                            {inTable ? renderSubmenu("context", "Граница ячейки", Frame, cellBorders) : null}
+                            {inTable ? renderSubmenu("context", "Толщина границы", WIDTH_ICON[cellBorderWidth ?? 2], cellWidths) : null}
+                            {inTable ? renderSubmenu("context", "Таблица", TableIcon, tableGroups) : null}
+                            {!inCode ? renderSubmenu("context", "Вставка", Plus, [insertMedia, insertBlocks, insertMath]) : null}
                             <ContextMenuSeparator />
                             <ContextMenuGroup>{renderCommands(clearing, "context")}</ContextMenuGroup>
                         </>
@@ -1107,6 +1686,319 @@ export function NewsEditor({
                 className="hidden"
                 onChange={(event) => takeFile("file", event.target.files)}
             />
+            <Dialog open={sectionOpen} onOpenChange={setSectionOpen}>
+                <DialogContent>
+                    <form
+                        className="grid gap-4"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            placeAnchor();
+                        }}
+                    >
+                        <DialogHeader>
+                            <DialogTitle>Якорь</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-1.5">
+                            <Label htmlFor="section-name">Название раздела</Label>
+                            <Input id="section-name" value={sectionName} autoFocus onChange={(event) => setSectionName(event.target.value)} />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setSectionOpen(false)}>Отмена</Button>
+                            <Button type="submit" disabled={sectionName.trim().length === 0}>Вставить</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={sectionLinkOpen} onOpenChange={setSectionLinkOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Ссылка на раздел</DialogTitle>
+                    </DialogHeader>
+                    {sectionItems.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Сначала добавьте якорь. Он появится в содержании.</p>
+                    ) : (
+                        <div className="flex flex-col gap-1">
+                            {sectionItems.map((item) => (
+                                <Button key={item.id} type="button" variant="ghost" className="justify-start" onClick={() => linkAnchor(item.id, item.text)}>
+                                    {item.text}
+                                </Button>
+                            ))}
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+
+    function placeAnchor() {
+        const label = sectionName.trim().slice(0, 120);
+        if (!editor || label.length === 0) {
+            return;
+        }
+        const id = nextAnchorId(editor.getJSON() as NewsNode, wikiAnchorSlug(label));
+        editor.chain().focus().insertContent({
+            type: "wikiAnchor",
+            attrs: { id },
+            content: [{ type: "text", text: label }],
+        }).run();
+        setSectionOpen(false);
+    }
+
+    function linkAnchor(id: string, label: string) {
+        if (!editor) {
+            return;
+        }
+        const href = `#${id}`;
+        if (editor.state.selection.empty) {
+            editor.chain().focus().insertContent({
+                type: "text",
+                text: label,
+                marks: [{ type: "link", attrs: { href } }],
+            }).run();
+        } else {
+            editor.chain().focus().setLink({ href }).run();
+        }
+        setSectionLinkOpen(false);
+    }
+}
+
+function nextAnchorId(document: NewsNode, base: string): string {
+    const used = new Set(anchorItems(document).map((item) => item.id));
+    let id = base;
+    let index = 2;
+    while (used.has(id)) {
+        id = `${base}-${index}`.slice(0, 80);
+        index += 1;
+    }
+    return id;
+}
+
+function anchorItems(document: NewsNode): { id: string; text: string }[] {
+    const items: { id: string; text: string }[] = [];
+    const walk = (node: NewsNode) => {
+        if (node.type === "wikiAnchor" && typeof node.attrs?.id === "string" && node.attrs.id.length > 0) {
+            const text = (node.content ?? []).map((child) => child.text ?? "").join("").trim();
+            items.push({ id: node.attrs.id, text: text || "Раздел" });
+        }
+        for (const child of node.content ?? []) {
+            walk(child);
+        }
+    };
+    walk(document);
+    return items;
+}
+
+type ReadingMedia = {
+    src: string;
+    title: string;
+    mime: string;
+};
+
+function openReadingMedia(event: { target: EventTarget | null; preventDefault: () => void; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; button: number }, open: (item: ReadingMedia) => void) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+        return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    const image = target?.closest("img");
+    if (image instanceof HTMLImageElement) {
+        const src = image.getAttribute("src") ?? "";
+        if (!EDITOR_ASSET_SRC.test(src)) {
+            return;
+        }
+        event.preventDefault();
+        open({ src, title: image.alt || "Снимок", mime: "image/*" });
+        return;
+    }
+    const link = target?.closest("a[data-attachment]");
+    if (!(link instanceof HTMLAnchorElement)) {
+        return;
+    }
+    const src = link.getAttribute("href") ?? "";
+    if (!EDITOR_ASSET_SRC.test(src)) {
+        return;
+    }
+    event.preventDefault();
+    open({
+        src,
+        title: (link.textContent ?? "").trim() || "Вложение",
+        mime: link.getAttribute("data-mime") ?? "",
+    });
+}
+
+function readingMediaKind(mime: string, title: string): "image" | "pdf" | "text" | "none" {
+    const type = mime.toLowerCase();
+    const name = title.toLowerCase();
+    if (type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/.test(name)) {
+        return "image";
+    }
+    if (type === "application/pdf" || name.endsWith(".pdf")) {
+        return "pdf";
+    }
+    if (type.startsWith("text/") || /\.(txt|csv|md|log)$/.test(name)) {
+        return "text";
+    }
+    return "none";
+}
+
+function ReadingMediaDialog({ item, onClose }: { item: ReadingMedia | null; onClose: () => void }) {
+    const kind = item ? readingMediaKind(item.mime, item.title) : "none";
+    const [text, setText] = useState<string | null>(null);
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        setText(null);
+        setFailed(false);
+        if (!item || kind !== "text") {
+            return;
+        }
+        const controller = new AbortController();
+        void fetch(`${item.src}?inline=1`, { signal: controller.signal })
+            .then(async (response) => {
+                if (!response.ok) {
+                    throw new Error("preview");
+                }
+                const body = await response.text();
+                setText(body.length > 100_000 ? `${body.slice(0, 100_000)}\n…` : body);
+            })
+            .catch((reason: unknown) => {
+                if (reason instanceof DOMException && reason.name === "AbortError") {
+                    return;
+                }
+                setFailed(true);
+            });
+        return () => controller.abort();
+    }, [item, kind]);
+
+    if (item && kind === "image") {
+        return <PhotoLightbox key={item.src} src={item.src} title={item.title} download={`${item.src}?download=1`} onClose={onClose} />;
+    }
+
+    const preview = item ? `${item.src}?inline=1` : "";
+    const download = item ? `${item.src}?download=1` : "";
+
+    return (
+        <Dialog open={item !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <DialogContent className="max-h-[min(48rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-3xl">
+                <DialogHeader>
+                    <DialogTitle className="truncate pr-8">{item?.title || "Файл"}</DialogTitle>
+                </DialogHeader>
+                {item && kind === "pdf" ? (
+                    <iframe src={preview} title={item.title} className="h-[70dvh] w-full rounded-md border" />
+                ) : null}
+                {item && kind === "text" && text === null && !failed ? <StackSkeleton rows={3} /> : null}
+                {item && kind === "text" && text !== null ? (
+                    <pre className="max-h-[70dvh] overflow-auto rounded-md bg-muted p-3 text-sm whitespace-pre-wrap">{text}</pre>
+                ) : null}
+                {item && (kind === "none" || failed) ? (
+                    <p className="text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
+                ) : null}
+                <DialogFooter>
+                    {item ? (
+                        <a href={download} download={item.title} className={buttonVariants({ variant: "outline" })}>Скачать</a>
+                    ) : null}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function PhotoLightbox({ src, title, download, onClose }: { src: string; title: string; download: string; onClose: () => void }) {
+    const frame = useRef<HTMLDivElement>(null);
+    const scaleRef = useRef(1);
+    const [scale, setScale] = useState(1);
+    const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+    useEffect(() => {
+        function onKey(event: KeyboardEvent) {
+            if (event.key === "Escape") {
+                onClose();
+            }
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onClose]);
+
+    useEffect(() => {
+        const node = frame.current;
+        if (!node) {
+            return;
+        }
+        function onWheel(event: WheelEvent) {
+            event.preventDefault();
+            const next = Math.min(5, Math.max(1, scaleRef.current * (event.deltaY < 0 ? 1.12 : 1 / 1.12)));
+            scaleRef.current = next;
+            setScale(next);
+            if (next <= 1) {
+                setOffset({ x: 0, y: 0 });
+            }
+        }
+        node.addEventListener("wheel", onWheel, { passive: false });
+        return () => node.removeEventListener("wheel", onWheel);
+    }, []);
+
+    function setZoom(next: number) {
+        const zoom = Math.min(5, Math.max(1, next));
+        scaleRef.current = zoom;
+        setScale(zoom);
+        if (zoom <= 1) {
+            setOffset({ x: 0, y: 0 });
+        }
+    }
+
+    return (
+        <div ref={frame} className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/80" onClick={onClose}>
+            <div className="absolute top-3 right-3 z-10 flex gap-2" onClick={(event) => event.stopPropagation()}>
+                <a
+                    href={download}
+                    download={title}
+                    aria-label="Скачать"
+                    className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
+                >
+                    <Download />
+                </a>
+                <button
+                    type="button"
+                    aria-label="Закрыть"
+                    className={buttonVariants({ variant: "secondary", size: "icon-sm" })}
+                    onClick={onClose}
+                >
+                    <X />
+                </button>
+            </div>
+            <div
+                className="relative"
+                style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <img
+                    src={src}
+                    alt={title}
+                    draggable={false}
+                    className="max-h-[calc(100dvh-5rem)] max-w-[calc(100dvw-2rem)] object-contain select-none"
+                    style={{ cursor: scale > 1 ? "grab" : "zoom-in" }}
+                    onDoubleClick={() => setZoom(scale > 1 ? 1 : 2)}
+                    onPointerDown={(event) => {
+                        if (scale <= 1) {
+                            return;
+                        }
+                        drag.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                        if (!drag.current) {
+                            return;
+                        }
+                        setOffset({
+                            x: drag.current.ox + event.clientX - drag.current.x,
+                            y: drag.current.oy + event.clientY - drag.current.y,
+                        });
+                    }}
+                    onPointerUp={() => {
+                        drag.current = null;
+                    }}
+                />
+            </div>
         </div>
     );
 }

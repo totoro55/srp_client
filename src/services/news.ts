@@ -4,6 +4,7 @@ import { newsAssetIds, newsPlainText, readNewsDocument, type NewsNode } from "@/
 import type { NewsStatus } from "@/lib/news";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
+import { deleteContentFiles, readContentFile, storeContentFile } from "@/services/content-files";
 import { ContentError } from "@/services/content-error";
 
 export interface NewsPost {
@@ -110,10 +111,15 @@ export async function saveNews(access: AccessView, id: number | null, body: unkn
 }
 
 export async function deleteNews(id: number): Promise<void> {
+    const files = await db.query<{ storage_key: string | null }>(
+        "SELECT storage_key FROM news_assets WHERE post_id = $1",
+        [id],
+    );
     const rows = await db.query<{ id: number }>("DELETE FROM news_posts WHERE id = $1 RETURNING id", [id]);
     if (rows.length === 0) {
         throw new ContentError("Новость не найдена");
     }
+    await deleteContentFiles(files.map((file) => file.storage_key));
 }
 
 function readNews(body: unknown): { title: string; body: string; document: NewsNode; publishedAt: string; roleIds: number[]; status: NewsStatus } {
@@ -224,41 +230,8 @@ function storedDocument(value: unknown): NewsNode | null {
     return "error" in result ? null : result.document;
 }
 
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-const FILE_TYPES = new Set([
-    ...IMAGE_TYPES,
-    "application/pdf",
-    "text/plain",
-    "text/csv",
-    "application/zip",
-    "application/msword",
-    "application/vnd.ms-excel",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-]);
-
 export async function storeNewsAsset(access: AccessView, file: File, kind: "image" | "file"): Promise<string> {
-    const allowed = kind === "image" ? IMAGE_TYPES : FILE_TYPES;
-    if (!allowed.has(file.type)) {
-        throw new ContentError(kind === "image" ? "Нужен снимок в PNG, JPEG, WEBP или GIF" : "Этот тип файла не поддерживается");
-    }
-    if (file.size <= 0) {
-        throw new ContentError("Файл пустой");
-    }
-    const limit = kind === "image" ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
-    if (file.size > limit) {
-        throw new ContentError(kind === "image" ? "Снимок больше 5 МБ" : "Файл больше 10 МБ");
-    }
-    const filename = file.name.split(/[/\\]/).pop()?.slice(0, 255) || (kind === "image" ? "image" : "file");
-    const content = Buffer.from(await file.arrayBuffer());
-    const rows = await db.query<{ id: string }>(
-        "INSERT INTO news_assets (mime, filename, content, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
-        [file.type, filename, content, access.username]
-    );
-    return rows[0].id;
+    return storeContentFile("news", access.username, file, kind);
 }
 
 export async function readNewsAsset(
@@ -268,26 +241,37 @@ export async function readNewsAsset(
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
         return null;
     }
-    const rows = await db.query<{ mime: string; filename: string; content: Buffer; post_id: number | null }>(
-        "SELECT mime, filename, content, post_id FROM news_assets WHERE id = $1",
+    const rows = await db.query<{
+        mime: string;
+        filename: string;
+        content: Buffer | null;
+        storage_key: string | null;
+        post_id: number | null;
+    }>(
+        "SELECT mime, filename, content, storage_key, post_id FROM news_assets WHERE id = $1",
         [id]
     );
     const asset = rows[0];
     if (!asset) {
         return null;
     }
-    const payload = { mime: asset.mime, filename: asset.filename, content: asset.content };
-    if (can(access, "news:write")) {
-        return payload;
-    }
-    if (asset.post_id == null) {
+    const allowed = can(access, "news:write") || await publishedAsset(access, asset.post_id, id);
+    if (!allowed) {
         return null;
     }
-    const post = await getNews(access, Number(asset.post_id));
-    if (!post?.document || !newsAssetIds(post.document).includes(id.toLowerCase())) {
+    const content = await readContentFile("news", id, asset.mime, asset.storage_key, asset.content);
+    if (!content) {
         return null;
     }
-    return payload;
+    return { mime: asset.mime, filename: asset.filename, content };
+}
+
+async function publishedAsset(access: AccessView, postId: number | null, id: string): Promise<boolean> {
+    if (postId == null) {
+        return false;
+    }
+    const post = await getNews(access, Number(postId));
+    return Boolean(post?.document && newsAssetIds(post.document).includes(id.toLowerCase()));
 }
 
 async function linkNewsAssets(

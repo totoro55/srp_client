@@ -5,6 +5,8 @@ export const WIKI_TITLE_MAX = 300;
 export const WIKI_HINT_MAX = 500;
 export const WIKI_FIELD_MAX = 4000;
 export const WIKI_TEXT_MAX = 200_000;
+export const WIKI_TAG_MAX = 32;
+export const WIKI_TAGS_MAX = 12;
 
 export const ROADMAP_TITLE_MAX = 200;
 export const ROADMAP_DESCRIPTION_MAX = 2000;

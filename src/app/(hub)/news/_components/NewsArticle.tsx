@@ -17,6 +17,10 @@ export function NewsArticle({
     content,
     plain,
     editHref,
+    assetsUrl,
+    placeholder,
+    anchorLinks,
+    anchorPage,
 }: {
     title: string;
     publishedAt: string;
@@ -25,6 +29,10 @@ export function NewsArticle({
     content: NewsNode | null;
     plain: string;
     editHref?: string | null;
+    assetsUrl?: string;
+    placeholder?: string;
+    anchorLinks?: boolean;
+    anchorPage?: string;
 }) {
     const scheduled = status === "published" && new Date(publishedAt).getTime() > Date.now();
 
@@ -51,7 +59,17 @@ export function NewsArticle({
                 ) : null}
             </CardHeader>
             <CardContent>
-                {content ? <NewsEditor content={content} loadKey="article" editable={false} /> : <p className="text-sm wrap-break-word whitespace-pre-wrap">{plain}</p>}
+                {content ? (
+                    <NewsEditor
+                        content={content}
+                        loadKey="article"
+                        editable={false}
+                        assetsUrl={assetsUrl}
+                        placeholder={placeholder}
+                        anchorLinks={anchorLinks}
+                        anchorPage={anchorPage}
+                    />
+                ) : <p className="text-sm wrap-break-word whitespace-pre-wrap">{plain}</p>}
             </CardContent>
         </Card>
     );

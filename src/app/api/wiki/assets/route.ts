@@ -8,12 +8,13 @@ export async function POST(request: Request) {
         const access = await requirePermission("wiki:write");
         const form = await request.formData();
         const file = form.get("file");
-        if (!(file instanceof File)) {
-            throw new ContentError("Выберите снимок");
+        const kind = form.get("kind");
+        if (!(file instanceof File) || (kind !== "image" && kind !== "file")) {
+            throw new ContentError("Выберите файл");
         }
-        const id = await storeWikiAsset(access, file);
+        const id = await storeWikiAsset(access, file, kind);
         return contentOk({ id, src: `/api/wiki/assets/${id}` });
     } catch (error) {
-        return contentError(error, "Не удалось загрузить снимок");
+        return contentError(error, "Не удалось загрузить файл");
     }
 }

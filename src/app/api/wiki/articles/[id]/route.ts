@@ -1,7 +1,7 @@
 import { contentError, contentOk } from "@/lib/content-response";
 import { getActiveAccess, requirePermission } from "@/lib/require-admin";
 import { ContentError } from "@/services/content-error";
-import { deleteWikiArticle, getWikiArticle, saveWikiArticle } from "@/services/wiki";
+import { deleteWikiArticle, getWikiArticle, saveWikiArticle, setWikiArchived } from "@/services/wiki";
 
 interface Context {
     params: Promise<{ id: string }>;
@@ -30,6 +30,19 @@ export async function PUT(request: Request, context: Context) {
         return contentOk(await saveWikiArticle(access, await articleId(context), await request.json()));
     } catch (error) {
         return contentError(error, "Не удалось сохранить статью");
+    }
+}
+
+export async function PATCH(request: Request, context: Context) {
+    try {
+        const access = await requirePermission("wiki:write");
+        const body = await request.json() as { archived?: unknown };
+        if (typeof body?.archived !== "boolean") {
+            throw new ContentError("Укажите, в архиве статья или нет");
+        }
+        return contentOk(await setWikiArchived(access, await articleId(context), body.archived));
+    } catch (error) {
+        return contentError(error, "Не удалось изменить архив статьи");
     }
 }
 

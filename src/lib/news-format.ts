@@ -26,14 +26,11 @@ export const NEWS_FILL_COLORS = [
     { label: "Фиолетовый", value: "#ede9fe" },
 ] as const;
 
-export const NEWS_FONT_SIZES = [
-    { label: "12 px", value: "12px" },
-    { label: "14 px", value: "14px" },
-    { label: "18 px", value: "18px" },
-    { label: "20 px", value: "20px" },
-    { label: "24 px", value: "24px" },
-    { label: "32 px", value: "32px" },
-] as const;
+export const NEWS_FONT_SIZE_MIN = 8;
+export const NEWS_FONT_SIZE_MAX = 96;
+export const NEWS_FONT_SIZE_DEFAULT = 16;
+
+export const NEWS_FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72, 96] as const;
 
 const COLORS = new Set<string>([
     ...NEWS_TEXT_COLORS.map((item) => item.value),
@@ -41,14 +38,23 @@ const COLORS = new Set<string>([
     ...NEWS_FILL_COLORS.map((item) => item.value),
 ]);
 
-const FONT_SIZES = new Set<string>(NEWS_FONT_SIZES.map((item) => item.value));
-
 export function newsColor(value: unknown): string | undefined {
     return typeof value === "string" && COLORS.has(value.toLowerCase()) ? value.toLowerCase() : undefined;
 }
 
 export function newsFontSize(value: unknown): string | undefined {
-    return typeof value === "string" && FONT_SIZES.has(value) ? value : undefined;
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const match = /^(\d{1,2})px$/.exec(value);
+    if (!match) {
+        return undefined;
+    }
+    const size = Number(match[1]);
+    if (size < NEWS_FONT_SIZE_MIN || size > NEWS_FONT_SIZE_MAX) {
+        return undefined;
+    }
+    return `${size}px`;
 }
 
 export const NEWS_BORDER_COLORS = [
@@ -102,4 +108,16 @@ export function newsBorderWidthFromAttribute(value: unknown): (typeof NEWS_BORDE
 
 export function newsImageAlign(value: unknown): "center" | "right" | undefined {
     return value === "center" || value === "right" ? value : undefined;
+}
+
+export const NEWS_IMAGE_FRAMES = [
+    { label: "Прямая", token: "square" },
+    { label: "Слегка", token: "soft" },
+    { label: "Скруглённая", token: "round" },
+    { label: "Сильно", token: "strong" },
+    { label: "Круг", token: "circle" },
+] as const;
+
+export function newsImageFrame(value: unknown): (typeof NEWS_IMAGE_FRAMES)[number]["token"] | undefined {
+    return NEWS_IMAGE_FRAMES.find((item) => item.token === value)?.token;
 }

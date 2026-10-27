@@ -1,158 +1,98 @@
+import { newsPlainText, readNewsDocument, type DocumentRules, type NewsNode } from "@/lib/news-document";
+
 export interface WikiHeading {
     id: string;
     text: string;
     level: 2 | 3;
 }
 
-export interface WikiMark {
-    type: string;
-    attrs?: Record<string, string>;
-}
+export type WikiNode = NewsNode;
 
-export interface WikiNode {
-    type: string;
-    attrs?: Record<string, unknown>;
-    text?: string;
-    marks?: WikiMark[];
-    content?: WikiNode[];
-}
+const WIKI_ASSET_SRC = /^\/api\/wiki\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
-const BLOCKS = new Set([
-    "doc",
-    "paragraph",
-    "heading",
-    "bulletList",
-    "orderedList",
-    "listItem",
-    "blockquote",
-    "table",
-    "tableRow",
-    "tableHeader",
-    "tableCell",
-    "image",
-    "horizontalRule",
-    "formula",
-    "blockMath",
-    "inlineMath",
-]);
-
-const MARKS = new Set(["bold", "italic", "strike", "code", "link"]);
-
-const ASSET_SRC = /^\/api\/wiki\/assets\/[0-9a-f-]{36}$/i;
+const WIKI_RULES: DocumentRules = {
+    assetRoot: "/api/wiki/assets",
+    assetPattern: WIKI_ASSET_SRC,
+    allowHref: wikiHref,
+    allowAnchors: true,
+};
 
 export function emptyWikiDocument(): WikiNode {
     return { type: "doc", content: [{ type: "paragraph" }] };
 }
 
 export function readWikiDocument(value: unknown): { document: WikiNode } | { error: string } {
-    if (!value || typeof value !== "object") {
-        return { error: "Текст статьи повреждён" };
+    const result = readNewsDocument(legacyFormula(value), WIKI_RULES);
+    if ("error" in result) {
+        return { error: articleError(result.error) };
     }
-    const node = value as WikiNode;
-    if (node.type !== "doc" || !Array.isArray(node.content)) {
-        return { error: "Текст статьи повреждён" };
-    }
-    try {
-        const document = sanitizeNode(node, true);
-        stampHeadingIds(document);
-        return { document };
-    } catch (error) {
-        return { error: error instanceof Error ? error.message : "Текст статьи повреждён" };
-    }
+    stampHeadingIds(result.document);
+    stampAnchorIds(result.document);
+    return { document: result.document };
 }
 
 export function wikiPlainText(document: WikiNode, extra: string[]): string {
-    const parts = [...extra, collectText(document)];
-    return parts.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    return [...extra, newsPlainText(document)].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function wikiAnchorSlug(text: string): string {
+    return slug(text);
 }
 
 export function wikiHeadings(document: WikiNode): WikiHeading[] {
     const headings: WikiHeading[] = [];
     walk(document, (node) => {
-        if (node.type !== "heading") {
+        if (node.type !== "wikiAnchor" || typeof node.attrs?.id !== "string" || node.attrs.id.length === 0) {
             return;
         }
-        const level = node.attrs?.level;
-        const id = node.attrs?.id;
-        if ((level === 2 || level === 3) && typeof id === "string") {
-            headings.push({ id, text: collectText(node), level });
-        }
+        headings.push({ id: node.attrs.id, text: collectText(node).trim() || "Раздел", level: 2 });
     });
     return headings;
 }
 
-function sanitizeNode(node: WikiNode, root: boolean): WikiNode {
-    if (!BLOCKS.has(node.type) && node.type !== "text" && node.type !== "hardBreak") {
-        throw new Error("В статье есть недопустимый блок");
-    }
-    if (root && node.type !== "doc") {
-        throw new Error("Текст статьи повреждён");
-    }
-
-    if (node.type === "text") {
-        if (typeof node.text !== "string") {
-            throw new Error("Текст статьи повреждён");
+export function wikiAssetIds(document: WikiNode): string[] {
+    const ids = new Set<string>();
+    walk(document, (node) => {
+        if (node.type !== "image" && node.type !== "fileAttachment") {
+            return;
         }
-        return { type: "text", text: node.text, marks: sanitizeMarks(node.marks) };
-    }
-
-    if (node.type === "hardBreak" || node.type === "horizontalRule") {
-        return { type: node.type };
-    }
-
-    const next: WikiNode = { type: node.type };
-    if (node.type === "heading") {
-        const level = node.attrs?.level === 3 ? 3 : 2;
-        next.attrs = { level };
-    }
-    if (node.type === "image") {
-        const src = node.attrs?.src;
-        const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt.slice(0, 200) : "";
-        if (typeof src !== "string" || !ASSET_SRC.test(src)) {
-            throw new Error("Снимок можно вставить только из этой статьи");
+        const src = typeof node.attrs?.src === "string" ? node.attrs.src : "";
+        const match = WIKI_ASSET_SRC.exec(src);
+        if (match?.[1]) {
+            ids.add(match[1].toLowerCase());
         }
-        next.attrs = { src, alt };
-    }
-    if (node.type === "blockMath" || node.type === "inlineMath") {
-        const latex = typeof node.attrs?.latex === "string" ? node.attrs.latex.slice(0, 2000) : "";
-        next.attrs = { latex };
-    }
-    if (node.type === "formula") {
-        next.content = (node.content ?? []).map((child) => {
-            if (child.type !== "text" || typeof child.text !== "string") {
-                throw new Error("Формула содержит недопустимый блок");
-            }
-            return { type: "text", text: child.text.slice(0, 2000) };
-        });
-        return next;
-    }
-
-    if (node.content) {
-        next.content = node.content.map((child) => sanitizeNode(child, false));
-    }
-    return next;
-}
-
-function sanitizeMarks(marks: WikiMark[] | undefined): WikiMark[] | undefined {
-    if (!marks || marks.length === 0) {
-        return undefined;
-    }
-    return marks.map((mark) => {
-        if (!MARKS.has(mark.type)) {
-            throw new Error("В статье есть недопустимое оформление");
-        }
-        if (mark.type !== "link") {
-            return { type: mark.type };
-        }
-        const href = mark.attrs?.href ?? "";
-        if (!safeHref(href)) {
-            throw new Error("Ссылка ведёт на недопустимый адрес");
-        }
-        return { type: "link", attrs: { href } };
     });
+    return [...ids];
 }
 
-function safeHref(href: string): boolean {
+function legacyFormula(value: unknown): unknown {
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+    const node = value as WikiNode;
+    const content = Array.isArray(node.content) ? node.content.map((child) => legacyFormula(child) as WikiNode) : undefined;
+    if (node.type !== "formula") {
+        return content ? { ...node, content } : node;
+    }
+    const latex = (content ?? [])
+        .map((child) => child.type === "text" && typeof child.text === "string" ? child.text : "")
+        .join("")
+        .slice(0, 2000);
+    if ((content ?? []).some((child) => child.type !== "text")) {
+        return content ? { ...node, content } : node;
+    }
+    return { type: "blockMath", attrs: { latex } };
+}
+
+function articleError(message: string): string {
+    return message
+        .replaceAll("Текст новости", "Текст статьи")
+        .replaceAll("В новости", "В статье")
+        .replaceAll("новости", "статьи")
+        .replaceAll("новость", "статья");
+}
+
+function wikiHref(href: string): boolean {
     if (href.startsWith("#") && /^#[\p{L}\p{N}-]+$/u.test(href)) {
         return true;
     }
@@ -165,6 +105,25 @@ function safeHref(href: string): boolean {
     } catch {
         return false;
     }
+}
+
+function stampAnchorIds(document: WikiNode): void {
+    const used = new Set<string>();
+    walk(document, (node) => {
+        if (node.type !== "wikiAnchor") {
+            return;
+        }
+        const current = typeof node.attrs?.id === "string" ? node.attrs.id : "";
+        const base = /^[\p{L}\p{N}][\p{L}\p{N}-]{0,79}$/u.test(current) ? current : slug(collectText(node));
+        let id = base;
+        let index = 2;
+        while (used.has(id)) {
+            id = `${base}-${index}`.slice(0, 80);
+            index += 1;
+        }
+        used.add(id);
+        node.attrs = { id };
+    });
 }
 
 function stampHeadingIds(document: WikiNode): void {
@@ -200,11 +159,7 @@ function collectText(node: WikiNode): string {
     if (node.type === "text") {
         return node.text ?? "";
     }
-    if ((node.type === "blockMath" || node.type === "inlineMath") && typeof node.attrs?.latex === "string") {
-        return node.attrs.latex;
-    }
-    const separator = node.type === "doc" ? "\n" : "";
-    return (node.content ?? []).map(collectText).join(separator);
+    return (node.content ?? []).map(collectText).join("");
 }
 
 function walk(node: WikiNode, visit: (node: WikiNode) => void): void {

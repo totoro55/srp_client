@@ -6,7 +6,8 @@ export async function GET(request: Request) {
     try {
         const access = await getActiveAccess();
         const query = new URL(request.url).searchParams.get("q") ?? "";
-        return contentOk(await listWiki(access, query));
+        const tag = new URL(request.url).searchParams.get("tag") ?? "";
+        return contentOk(await listWiki(access, query, tag));
     } catch (error) {
         return contentError(error, "Не удалось загрузить базу знаний");
     }

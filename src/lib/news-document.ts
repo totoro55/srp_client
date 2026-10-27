@@ -1,4 +1,4 @@
-import { newsBorderWidth, newsColor, newsFontSize, newsImageAlign } from "@/lib/news-format";
+import { newsBorderWidth, newsColor, newsFontSize, newsImageAlign, newsImageFrame } from "@/lib/news-format";
 
 export interface NewsMark {
     type: string;
@@ -33,6 +33,19 @@ const MARKS = new Set(["bold", "italic", "underline", "strike", "code", "link", 
 const FILLABLE = new Set(["paragraph", "heading", "blockquote", "listItem", "tableCell", "tableHeader", "codeBlock"]);
 
 export const NEWS_ASSET_SRC = /^\/api\/news\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+export interface DocumentRules {
+    assetRoot: string;
+    assetPattern: RegExp;
+    allowHref: (href: string) => boolean;
+    allowAnchors?: boolean;
+}
+
+export const NEWS_DOCUMENT_RULES: DocumentRules = {
+    assetRoot: "/api/news/assets",
+    assetPattern: NEWS_ASSET_SRC,
+    allowHref: safeHref,
+};
 
 export function newsAssetId(src: string): string | null {
     const match = NEWS_ASSET_SRC.exec(src);
@@ -73,7 +86,7 @@ export function plainTextDocument(text: string): NewsNode {
     };
 }
 
-export function readNewsDocument(value: unknown): { document: NewsNode } | { error: string } {
+export function readNewsDocument(value: unknown, rules: DocumentRules = NEWS_DOCUMENT_RULES): { document: NewsNode } | { error: string } {
     if (!value || typeof value !== "object") {
         return { error: "Текст новости повреждён" };
     }
@@ -82,7 +95,7 @@ export function readNewsDocument(value: unknown): { document: NewsNode } | { err
         return { error: "Текст новости повреждён" };
     }
     try {
-        return { document: sanitizeNode(node, true, 0) };
+        return { document: sanitizeNode(node, true, 0, rules) };
     } catch (error) {
         return { error: error instanceof Error ? error.message : "Текст новости повреждён" };
     }
@@ -92,7 +105,24 @@ export function newsPlainText(document: NewsNode): string {
     return collectText(document).replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
+function sanitizeAnchor(node: NewsNode, depth: number, rules: DocumentRules): NewsNode {
+    if (!rules.allowAnchors) {
+        throw new Error("В новости есть недопустимый блок");
+    }
+    const content = Array.isArray(node.content) ? node.content : [];
+    return {
+        type: "wikiAnchor",
+        attrs: { id: typeof node.attrs?.id === "string" ? node.attrs.id : "" },
+        content: content.map((child) => {
+            if (child.type !== "text" && child.type !== "hardBreak") {
+                throw new Error("В статье есть недопустимый блок");
+            }
+            return sanitizeNode(child, false, depth + 1, rules);
+        }),
+    };
+}
+
+function sanitizeNode(node: NewsNode, root: boolean, depth: number, rules: DocumentRules): NewsNode {
     if (depth > 30) {
         throw new Error("Текст новости слишком большой");
     }
@@ -100,7 +130,7 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
         if (typeof node.text !== "string") {
             throw new Error("Текст новости повреждён");
         }
-        return { type: "text", text: node.text, marks: sanitizeMarks(node.marks) };
+        return { type: "text", text: node.text, marks: sanitizeMarks(node.marks, rules) };
     }
     if (node.type === "hardBreak") {
         return { type: "hardBreak" };
@@ -118,15 +148,17 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
         const borderColor = newsColor(node.attrs?.borderColor);
         const borderWidth = newsBorderWidth(node.attrs?.borderWidth);
         const align = newsImageAlign(node.attrs?.align);
+        const frame = newsImageFrame(node.attrs?.frame);
         return {
             type: "image",
             attrs: {
-                src: assetSrc(node.attrs?.src, "Снимок ведёт на недопустимый адрес"),
+                src: assetSrc(node.attrs?.src, "Снимок ведёт на недопустимый адрес", rules),
                 alt: typeof node.attrs?.alt === "string" ? node.attrs.alt.slice(0, 200) : "",
                 ...(width ? { width } : {}),
                 ...(height ? { height } : {}),
                 ...(borderColor ? { borderColor, borderWidth: borderWidth ?? 2 } : {}),
                 ...(align ? { align } : {}),
+                ...(frame ? { frame } : {}),
             },
         };
     }
@@ -137,11 +169,20 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
         return {
             type: "fileAttachment",
             attrs: {
-                src: assetSrc(node.attrs?.src, "Вложение ведёт на недопустимый адрес"),
+                src: assetSrc(node.attrs?.src, "Вложение ведёт на недопустимый адрес", rules),
                 title: typeof node.attrs?.title === "string" ? node.attrs.title.slice(0, 255) : "",
                 mime,
             },
         };
+    }
+    if (node.type === "mention") {
+        return sanitizeMention(node);
+    }
+    if (node.type === "wikiAnchor") {
+        return sanitizeAnchor(node, depth, rules);
+    }
+    if (node.type === "details" || node.type === "detailsSummary" || node.type === "detailsContent") {
+        return sanitizeDetails(node, depth, rules);
     }
     if (!BLOCKS.has(node.type)) {
         throw new Error("В новости есть недопустимый блок");
@@ -161,10 +202,14 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
     }
     if (node.type === "tableCell" || node.type === "tableHeader") {
         const widths = columnWidths(node.attrs?.colwidth);
+        const border = cellBorder(node.attrs?.borderColor);
+        const borderWidth = newsBorderWidth(node.attrs?.borderWidth);
         next.attrs = {
             colspan: span(node.attrs?.colspan),
             rowspan: span(node.attrs?.rowspan),
             ...(widths ? { colwidth: widths } : {}),
+            ...(border === "none" ? { borderColor: "none" } : {}),
+            ...(border && border !== "none" ? { borderColor: border, borderWidth: borderWidth ?? 2 } : {}),
         };
     }
     if (node.type === "codeBlock") {
@@ -177,10 +222,92 @@ function sanitizeNode(node: NewsNode, root: boolean, depth: number): NewsNode {
         if (!Array.isArray(node.content)) {
             throw new Error("Текст новости повреждён");
         }
-        next.content = node.content.map((child) => sanitizeNode(child, false, depth + 1));
+        next.content = node.content.map((child) => sanitizeNode(child, false, depth + 1, rules));
     }
     mergeFill(next, node);
     return next;
+}
+
+const DETAILS_CONTENT = new Set([
+    "paragraph",
+    "heading",
+    "bulletList",
+    "orderedList",
+    "blockquote",
+    "codeBlock",
+    "table",
+    "horizontalRule",
+    "blockMath",
+    "image",
+    "fileAttachment",
+    "details",
+]);
+
+function sanitizeMention(node: NewsNode): NewsNode {
+    const id = mentionId(node.attrs?.id);
+    if (!id) {
+        throw new Error("Упоминание повреждено");
+    }
+    return {
+        type: "mention",
+        attrs: {
+            id,
+            label: mentionLabel(node.attrs?.label) ?? id,
+            mentionSuggestionChar: "@",
+        },
+    };
+}
+
+function sanitizeDetails(node: NewsNode, depth: number, rules: DocumentRules): NewsNode {
+    const content = Array.isArray(node.content)
+        ? node.content.map((child) => sanitizeNode(child, false, depth + 1, rules))
+        : [];
+    if (node.type === "detailsSummary") {
+        if (content.some((child) => child.type !== "text")) {
+            throw new Error("Раскрывающийся блок повреждён");
+        }
+        return content.length > 0 ? { type: "detailsSummary", content } : { type: "detailsSummary" };
+    }
+    if (node.type === "detailsContent") {
+        if (content.length === 0 || content.some((child) => !DETAILS_CONTENT.has(child.type))) {
+            throw new Error("Раскрывающийся блок повреждён");
+        }
+        return { type: "detailsContent", content };
+    }
+    if (content.length !== 2 || content[0]?.type !== "detailsSummary" || content[1]?.type !== "detailsContent") {
+        throw new Error("Раскрывающийся блок повреждён");
+    }
+    return {
+        type: "details",
+        attrs: { open: node.attrs?.open === true },
+        content,
+    };
+}
+
+function cellBorder(value: unknown): string | "none" | undefined {
+    if (value === "none") {
+        return "none";
+    }
+    return newsColor(value);
+}
+
+function mentionId(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const id = value.trim();
+    return /^[\w.@\\-]{1,100}$/.test(id) ? id : undefined;
+}
+
+function mentionLabel(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const label = value.replace(/\s+/g, " ").trim();
+    if (!label || label.length > 200 || /[<>\u0000-\u001f]/.test(label)) {
+        return undefined;
+    }
+    return label;
 }
 
 function mergeFill(next: NewsNode, source: NewsNode) {
@@ -194,24 +321,24 @@ function mergeFill(next: NewsNode, source: NewsNode) {
     next.attrs = { ...(next.attrs ?? {}), backgroundColor: color };
 }
 
-function sanitizeMarks(marks: NewsMark[] | undefined): NewsMark[] | undefined {
+function sanitizeMarks(marks: NewsMark[] | undefined, rules: DocumentRules): NewsMark[] | undefined {
     if (!marks || marks.length === 0) {
         return undefined;
     }
     const next = marks.flatMap((mark) => {
-        const sanitized = sanitizeMark(mark);
+        const sanitized = sanitizeMark(mark, rules);
         return sanitized ? [sanitized] : [];
     });
     return next.length > 0 ? next : undefined;
 }
 
-function sanitizeMark(mark: NewsMark): NewsMark | undefined {
+function sanitizeMark(mark: NewsMark, rules: DocumentRules): NewsMark | undefined {
     if (!MARKS.has(mark.type)) {
         throw new Error("В новости есть недопустимое оформление");
     }
     if (mark.type === "link") {
         const href = mark.attrs?.href ?? "";
-        if (!safeHref(href)) {
+        if (!rules.allowHref(href)) {
             throw new Error("Ссылка ведёт на недопустимый адрес");
         }
         return { type: "link", attrs: { href: href.slice(0, 2000) } };
@@ -237,15 +364,15 @@ function sanitizeMark(mark: NewsMark): NewsMark | undefined {
     return { type: mark.type };
 }
 
-function assetSrc(value: unknown, message: string): string {
+function assetSrc(value: unknown, message: string, rules: DocumentRules): string {
     if (typeof value !== "string") {
         throw new Error(message);
     }
-    const id = newsAssetId(value);
-    if (!id) {
+    const match = rules.assetPattern.exec(value);
+    if (!match?.[1]) {
         throw new Error(message);
     }
-    return `/api/news/assets/${id}`;
+    return `${rules.assetRoot}/${match[1].toLowerCase()}`;
 }
 
 function span(value: unknown): number {
@@ -320,6 +447,10 @@ function collectText(node: NewsNode): string {
     if (node.type === "blockMath" || node.type === "inlineMath") {
         const latex = typeof node.attrs?.latex === "string" ? node.attrs.latex.trim() : "";
         return latex ? `${latex}\n` : "";
+    }
+    if (node.type === "mention") {
+        const label = typeof node.attrs?.label === "string" ? node.attrs.label.trim() : "";
+        return label ? `@${label}` : "";
     }
     const inner = (node.content ?? []).map(collectText).join("");
     if (node.type === "doc") {
