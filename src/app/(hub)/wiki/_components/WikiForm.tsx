@@ -27,6 +27,7 @@ import { ApiResponse } from "@/types/api";
 import { NewsArticle } from "../../news/_components/NewsArticle";
 import { NewsEditor, type EditorMenuAction } from "../../news/_components/NewsEditor";
 import { RolePicker, type RoleOption } from "../../news/_components/RolePicker";
+import { useUnsavedChanges } from "../../news/_components/unsaved-changes";
 import { ArticleBrief } from "./ArticleBrief";
 
 interface WikiGroup {
@@ -94,6 +95,18 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
     const [publishTags, setPublishTags] = useState<string[]>([]);
     const [saving, setSaving] = useState<"draft" | "published" | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [savedDocument, setSavedDocument] = useState(() => JSON.stringify(emptyWikiDocument()));
+    const [savedSummary, setSavedSummary] = useState("");
+    const documentDirty = JSON.stringify(document) !== savedDocument || summary !== savedSummary;
+    const draftDirty = draftOpen && (draftTitle.trim() !== title.trim() || draftGroup !== groupId || draftTags.join("\0") !== tags.join("\0"));
+    const publishDirty = publishOpen && (
+        publishTitle.trim() !== title.trim()
+        || publishDate !== publishedAt
+        || publishGroup !== groupId
+        || publishRoles.join(",") !== roleIds.join(",")
+        || publishTags.join("\0") !== tags.join("\0")
+    );
+    const { leave, dialog: unsavedDialog } = useUnsavedChanges(loaded && !missing && (documentDirty || draftDirty || publishDirty));
 
     useEffect(() => {
         const controller = new AbortController();
@@ -149,14 +162,17 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
                 }
                 const stamp = localStamp(json.data.publishedAt);
                 const articleTags = json.data.tags ?? [];
+                const articleSummary = json.data.summary ?? "";
                 setTitle(json.data.title);
                 setGroupId(json.data.groupId);
                 setDocument(json.data.document);
+                setSavedDocument(JSON.stringify(json.data.document));
                 setGeneration((value) => value + 1);
                 setPublishedAt(stamp);
                 setRoleIds(json.data.roleIds);
                 setTags(articleTags);
-                setSummary(json.data.summary ?? "");
+                setSummary(articleSummary);
+                setSavedSummary(articleSummary);
                 setStoredStatus(json.data.status);
                 if (!publishOnce.current && publishOnOpen.current && json.data.status === "draft") {
                     publishOnce.current = true;
@@ -255,6 +271,8 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
             setRoleIds(fields.roleIds);
             setTags(fields.tags);
             setSummary(nextSummary);
+            setSavedDocument(JSON.stringify(document));
+            setSavedSummary(nextSummary);
             setDraftOpen(false);
             setPublishOpen(false);
             if (status === "draft") {
@@ -299,11 +317,12 @@ export function WikiForm({ articleId = null }: { articleId?: number | null }) {
         { label: "Сохранить черновик", icon: Save, disabled: saving !== null, run: openDraft },
         ...(storedStatus === "draft" ? [{ label: "Опубликовать", icon: Send, disabled: saving !== null, run: () => { openPublish(); setPreview(true); } }] : []),
         { label: "Предпросмотр", icon: Eye, disabled: saving !== null, run: () => { setError(null); setPreview(true); } },
-        { label: "К списку", icon: List, run: () => router.push("/wiki") },
+        { label: "К списку", icon: List, run: () => leave("/wiki") },
     ];
 
     return (
         <div className="flex h-[calc(100dvh-4rem)] min-h-0 w-full flex-col overflow-hidden">
+            {unsavedDialog}
             <PageHeading trail={[{ href: "/wiki", label: "База знаний" }, { label: heading }]} />
             {preview ? (
                 <div className="flex shrink-0 items-center border-b bg-background px-2">

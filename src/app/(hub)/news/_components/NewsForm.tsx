@@ -25,6 +25,7 @@ import { ApiResponse } from "@/types/api";
 import { NewsArticle } from "./NewsArticle";
 import { NewsEditor, type EditorMenuAction } from "./NewsEditor";
 import { RolePicker, type RoleOption } from "./RolePicker";
+import { useUnsavedChanges } from "./unsaved-changes";
 
 interface NewsPost {
     id: number;
@@ -64,6 +65,11 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
     const [publishRoles, setPublishRoles] = useState<number[]>([]);
     const [saving, setSaving] = useState<NewsStatus | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [savedContent, setSavedContent] = useState(() => JSON.stringify(emptyNewsDocument()));
+    const contentDirty = JSON.stringify(content) !== savedContent;
+    const draftDirty = draftOpen && draftTitle.trim() !== title.trim();
+    const publishDirty = publishOpen && (publishTitle.trim() !== title.trim() || publishDate !== publishedAt || publishRoles.join(",") !== roleIds.join(","));
+    const { leave, dialog: unsavedDialog } = useUnsavedChanges(loaded && !missing && (contentDirty || draftDirty || publishDirty));
 
     useEffect(() => {
         const controller = new AbortController();
@@ -98,8 +104,10 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
                     setError(json.error.message);
                     return;
                 }
+                const nextContent = json.data.document ?? plainTextDocument(json.data.body);
                 setTitle(json.data.title);
-                setContent(json.data.document ?? plainTextDocument(json.data.body));
+                setContent(nextContent);
+                setSavedContent(JSON.stringify(nextContent));
                 setGeneration((value) => value + 1);
                 setPublishedAt(localStamp(json.data.publishedAt));
                 setRoleIds(json.data.roleIds);
@@ -165,6 +173,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
             setTitle(nextTitle);
             setPublishedAt(fields.publishedAt);
             setRoleIds(fields.roleIds);
+            setSavedContent(JSON.stringify(content));
             setDraftOpen(false);
             setPublishOpen(false);
             if (status === "draft") {
@@ -208,11 +217,12 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
     const editorMenu: EditorMenuAction[] = [
         { label: "Сохранить черновик", icon: Save, disabled: saving !== null, run: openDraft },
         { label: "Предпросмотр", icon: Eye, disabled: saving !== null, run: () => { setError(null); setPreview(true); } },
-        { label: "К списку", icon: List, run: () => router.push("/news") },
+        { label: "К списку", icon: List, run: () => leave("/news") },
     ];
 
     return (
         <div className="flex h-[calc(100dvh-4rem)] min-h-0 w-full flex-col overflow-hidden">
+            {unsavedDialog}
             <PageHeading trail={[{ href: "/news", label: "Новости" }, { label: heading }]} />
             {preview ? (
                 <div className="flex shrink-0 items-center border-b bg-background px-2">
