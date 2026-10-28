@@ -44,6 +44,7 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
             { path: "/api/feedback/assignees", description: "GET ищет сотрудников, которым можно назначить обращение. Нужно право feedback:process. Параметр q — строка поиска." },
             { path: "/api/feedback/limits", description: "GET возвращает допустимый размер, число и типы вложений обращения." },
             { path: "/api/feedback/files/[id]", description: "GET отдаёт вложение автору обращения или тому, кто обрабатывает обращения. Параметр inline=1 открывает предпросмотр, download=1 скачивает файл." },
+            { path: "/api/notifications", description: "GET возвращает до 100 последних событий текущего человека и число непрочитанных. POST помечает одно событие прочитанным или все сразу, если передано all. read: false возвращает событие в непрочитанные, read: true меняет только статус и не открывает обращение. Сначала события только об обращениях." },
         ],
     },
     {

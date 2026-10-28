@@ -26,6 +26,7 @@ import { ContentError } from "@/services/content-error";
 import { db } from "@/services/db";
 import { getAppSettings } from "@/services/app-settings";
 import { deleteStoredObject, putStoredObject, readStoredObject } from "@/services/object-storage";
+import { markFeedbackSeen, notifyFeedback } from "@/services/notifications";
 import { getWikiArticle } from "@/services/wiki";
 
 export interface FeedbackTicket {
@@ -43,6 +44,7 @@ export interface FeedbackTicket {
     assigneeName: string | null;
     createdAt: string;
     updatedAt: string;
+    unread: boolean;
     files: FeedbackFile[];
     messages: FeedbackMessage[];
 }
@@ -87,6 +89,7 @@ interface TicketRow {
     assignee_name: string | null;
     created_at: Date;
     updated_at: Date;
+    unread?: boolean;
 }
 
 export interface FeedbackAssignee {
@@ -159,6 +162,28 @@ const ASSIGNEE_NAME = `
     )
 `;
 
+const UNREAD = `
+    (
+        EXISTS (
+            SELECT 1 FROM feedback_messages message
+            WHERE message.ticket_id = ticket.id
+              AND lower(message.author) <> lower($2)
+              AND message.id > COALESCE((
+                  SELECT visit.seen_message_id
+                  FROM feedback_visits visit
+                  WHERE visit.ticket_id = ticket.id AND visit.username = lower($2)
+              ), 0)
+        )
+        OR (
+            lower(ticket.author) <> lower($2)
+            AND NOT EXISTS (
+                SELECT 1 FROM feedback_visits visit
+                WHERE visit.ticket_id = ticket.id AND visit.username = lower($2)
+            )
+        )
+    )
+`;
+
 const TICKET_FROM = `
     FROM feedback_tickets ticket
     LEFT JOIN employees employee ON lower(employee.login) = lower(ticket.assignee)
@@ -188,7 +213,8 @@ export async function listFeedback(
                ticket.article_id,
                COALESCE(NULLIF(btrim(wiki.title), ''), NULLIF(btrim(ticket.document_title), '')) AS document_title,
                ticket.assignee, ${ASSIGNEE_NAME} AS assignee_name,
-               ticket.created_at, ticket.updated_at
+               ticket.created_at, ticket.updated_at,
+               ${UNREAD} AS unread
         ${TICKET_FROM}
         ${FEEDBACK_FILTER}
         ORDER BY ticket.updated_at DESC, ticket.id DESC
@@ -209,6 +235,7 @@ export async function getFeedback(access: AccessView, id: number): Promise<Feedb
     if (!canReadTicket(access, ticket)) {
         throw new ContentError("Обращение не найдено");
     }
+    await markFeedbackSeen(access.username, id);
     const files = await filesOf(id);
     return {
         ...toTicket(ticket),
@@ -232,6 +259,9 @@ export async function feedbackChanges(
         throw new ContentError("Обращение не найдено");
     }
     const messages = await messagesOf(id, after);
+    if (messages.length > 0) {
+        await markFeedbackSeen(access.username, id);
+    }
     const sameHeader = knownStatus === ticket.status && (knownAssignee ?? "") === (ticket.assignee ?? "");
     if (sameHeader && messages.length === 0) {
         return {
@@ -276,7 +306,16 @@ export async function createFeedback(access: AccessView, body: unknown, files: F
         await db.query("DELETE FROM feedback_tickets WHERE id = $1", [id]);
         throw error;
     }
-    return getFeedback(access, id);
+    const created = await getFeedback(access, id);
+    await notifyFeedback({
+        actor: access.username,
+        ticketId: id,
+        subject: created.subject,
+        author: created.author,
+        assignee: created.assignee,
+        event: "created",
+    });
+    return created;
 }
 
 export async function addFeedbackMessage(
@@ -318,7 +357,16 @@ export async function addFeedbackMessage(
         await db.query("DELETE FROM feedback_messages WHERE id = $1", [inserted]);
         throw error;
     }
-    return getFeedback(access, id);
+    const updated = await getFeedback(access, id);
+    await notifyFeedback({
+        actor: access.username,
+        ticketId: id,
+        subject: updated.subject,
+        author: ticket.author,
+        assignee: change?.assignee ?? ticket.assignee,
+        event: "reply",
+    });
+    return updated;
 }
 
 export async function updateFeedbackMessage(
@@ -509,7 +557,18 @@ export async function setFeedbackHandling(access: AccessView, id: number, body: 
             );
         }
     });
-    return getFeedback(access, id);
+    const updated = await getFeedback(access, id);
+    if (notify) {
+        await notifyFeedback({
+            actor: access.username,
+            ticketId: id,
+            subject: updated.subject,
+            author: ticket.author,
+            assignee,
+            event: "reply",
+        });
+    }
+    return updated;
 }
 
 async function loadTicket(id: number): Promise<TicketRow & { messages?: never }> {
@@ -722,6 +781,7 @@ function toTicket(row: TicketRow): Omit<FeedbackTicket, "messages" | "files"> {
         assigneeName: row.assignee_name,
         createdAt: new Date(row.created_at).toISOString(),
         updatedAt: new Date(row.updated_at).toISOString(),
+        unread: row.unread === true,
     };
 }
 

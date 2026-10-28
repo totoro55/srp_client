@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { announceBrowserNotification } from "@/app/_components/header/browser-notify";
 import { PageHeading } from "@/app/_components/header/page-heading";
 import { buttonVariants } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -200,6 +201,13 @@ export function FeedbackThread() {
                 }
                 if (next.messages.length > previous.messages.length && !stickToBottom.current) {
                     keepFresh(latestMessageId(previous));
+                }
+                const foreign = next.messages.some((message) => (
+                    message.id > latestMessageId(previous)
+                    && message.author.toLowerCase() !== access.username?.toLowerCase()
+                ));
+                if (foreign) {
+                    announceBrowserNotification(`Новый ответ в обращении №${next.id}: ${next.subject}`);
                 }
                 setTicket(next);
             } catch {

@@ -225,6 +225,17 @@ const NOTES: Record<string, string> = {
     "feedback_files.size_bytes": "Размер в байтах",
     "feedback_files.storage_key": "Ключ объекта в хранилище",
     "feedback_files.created_by": "Кто приложил файл",
+    "feedback_messages.edited_at": "Когда сообщение правили в последний раз. Пусто, если его не меняли",
+    "feedback_visits.ticket_id": "Обращение",
+    "feedback_visits.username": "Кто открывал обращение, логин в нижнем регистре",
+    "feedback_visits.seen_message_id": "Последнее сообщение, которое человек уже видел. Ноль — открывал обращение без ответов",
+    "feedback_visits.opened_at": "Когда обращение открывали в последний раз",
+    "app_notifications.recipient": "Кому адресовано событие",
+    "app_notifications.kind": "Раздел. Сначала только feedback",
+    "app_notifications.body": "Текст события",
+    "app_notifications.href": "Куда ведёт событие",
+    "app_notifications.source_key": "Связь с объектом, например feedback:12. Пусто, если связи нет",
+    "app_notifications.read_at": "Когда событие прочитали. Пусто, пока оно новое",
 };
 
 const INTRO: Record<string, string> = {

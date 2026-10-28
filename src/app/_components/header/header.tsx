@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { getPageHeading } from "@/lib/routes-config";
 import { useAccess } from "@/hooks/useAccess";
 import { Menu, X } from "lucide-react";
+import { NotificationBell } from "@/app/_components/header/NotificationBell";
 import { PageHeadingTrail, usePageHeadingTrail } from "@/app/_components/header/page-heading";
 
 export default function Header() {
@@ -39,9 +40,12 @@ export default function Header() {
                     ) : null}
                 </div>
             )}
-            {identity ? (
-                <p className="ml-2 hidden min-w-0 max-w-[40%] shrink truncate px-3 text-xs text-muted-foreground sm:block">{identity}</p>
-            ) : null}
+            <div className="ml-auto flex min-w-0 shrink-0 items-center">
+                {identity ? (
+                    <p className="hidden min-w-0 max-w-[40vw] truncate px-3 text-xs text-muted-foreground sm:block">{identity}</p>
+                ) : null}
+                <NotificationBell />
+            </div>
         </header>
         {openMobile ? (
             <div className="pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] flex justify-center md:hidden">

@@ -19,6 +19,7 @@ export interface FeedbackListItem {
     documentTitle: string | null;
     assigneeName: string | null;
     updatedAt: string;
+    unread: boolean;
 }
 
 function listWhen(value: string): string {
@@ -41,6 +42,8 @@ export function FeedbackTicketCard({ ticket, canProcess }: { ticket: FeedbackLis
                 <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
                     <CardTitle className="min-w-0">
                         <Link href={`/feedback/${ticket.id}`} className="after:absolute after:inset-0">
+                            {ticket.unread ? <span className="mr-1.5 inline-block size-2 translate-y-[-1px] rounded-full bg-primary" title="Новые сообщения" /> : null}
+                            {ticket.unread ? <span className="sr-only">Есть новые сообщения. </span> : null}
                             <span className="font-normal text-muted-foreground">№{ticket.id}</span>
                             {" "}
                             {ticket.subject}

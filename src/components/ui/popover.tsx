@@ -34,7 +34,7 @@ function PopoverContent({
         side={side}
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
-        className="isolate z-[60]"
+        className="isolate z-[60] overflow-clip [overflow-clip-margin:1.5rem]"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"

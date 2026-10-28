@@ -4,9 +4,11 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/auth";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { HomeNotifications } from "@/app/_components/HomeNotifications";
 import { can } from "@/lib/access";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { listNews } from "@/services/news";
+import { listNotifications } from "@/services/notifications";
 import { newsAuthorLine } from "@/lib/news";
 
 export default async function Home() {
@@ -16,6 +18,7 @@ export default async function Home() {
     }
     const access = await getRequestAccess();
     const news = access ? await listNews(access) : [];
+    const notifications = access ? await listNotifications(access) : { unread: 0, items: [] };
     const published = news.filter((post) => post.status === "published" && new Date(post.publishedAt).getTime() <= Date.now());
 
     return (
@@ -31,6 +34,7 @@ export default async function Home() {
                     <CardContent className="text-sm">Просмотр от имени роли. Изменения недоступны.</CardContent>
                 ) : null}
             </Card>
+            <HomeNotifications initial={notifications} />
             <section className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                     <h2 className="text-base font-semibold">Новости</h2>
