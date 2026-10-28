@@ -2,10 +2,18 @@ import { contentError, contentOk } from "@/lib/content-response";
 import { can } from "@/lib/access";
 import { getActiveAccess, requirePermission } from "@/lib/require-admin";
 import { ContentError } from "@/services/content-error";
-import { addFeedbackMessage, getFeedback, readFeedbackRequest, setFeedbackHandling } from "@/services/feedback";
+import { addFeedbackMessage, getFeedback, readFeedbackRequest, setFeedbackClass, setFeedbackHandling } from "@/services/feedback";
 
 interface Context {
     params: Promise<{ id: string }>;
+}
+
+function isClassChange(body: unknown): boolean {
+    if (!body || typeof body !== "object") {
+        return false;
+    }
+    const record = body as Record<string, unknown>;
+    return ("kind" in record || "category" in record) && !("status" in record) && !("action" in record);
 }
 
 async function ticketId(context: Context): Promise<number> {
@@ -49,7 +57,11 @@ export async function PATCH(request: Request, context: Context) {
         if (!can(access, "feedback:process")) {
             throw new ContentError("Обращение не найдено");
         }
-        return contentOk(await setFeedbackHandling(access, await ticketId(context), await request.json()));
+        const body = await request.json() as unknown;
+        if (isClassChange(body)) {
+            return contentOk(await setFeedbackClass(access, await ticketId(context), body));
+        }
+        return contentOk(await setFeedbackHandling(access, await ticketId(context), body));
     } catch (error) {
         return contentError(error, "Не удалось сменить статус");
     }

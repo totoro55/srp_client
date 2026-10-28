@@ -79,6 +79,12 @@ export const PERMISSION_CATALOG = [
         description: "Вехи и их статус",
     },
     {
+        code: "feedback:write",
+        group: "Приложение",
+        title: "Создание обращений",
+        description: "Новые обращения и обратная связь по статье",
+    },
+    {
         code: "feedback:process",
         group: "Приложение",
         title: "Обработка обращений",

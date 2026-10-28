@@ -52,7 +52,14 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         items: [
             { name: "Новости", href: "/news", icon: Newspaper, title: "Новости", description: "Сообщения для выбранных ролей" },
             { name: "База знаний", href: "/wiki", icon: BookOpen, title: "База знаний", description: "Описания работы и версии корзин" },
-            { name: "Обратная связь", href: "/feedback", icon: MessageSquareText, title: "Обратная связь", description: "Обращения и ответы поддержки" },
+            {
+                name: "Обратная связь",
+                href: "/feedback",
+                icon: MessageSquareText,
+                title: "Обратная связь",
+                description: "Обращения и ответы поддержки",
+                permissionAny: ["feedback:write", "feedback:process"],
+            },
         ],
     },
     {

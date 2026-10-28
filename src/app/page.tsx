@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/auth";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { can } from "@/lib/access";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { listNews } from "@/services/news";
 import { newsAuthorLine } from "@/lib/news";
@@ -52,15 +53,17 @@ export default async function Home() {
                     </Link>
                 ))}
             </section>
-            <Card>
-                <CardHeader>
-                    <CardTitle>Обратная связь</CardTitle>
-                    <CardDescription>Сообщите о проблеме или предложении. Ответ придёт в том же обращении.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Link href="/feedback" className={buttonVariants({ size: "sm" })}>Создать обращение</Link>
-                </CardContent>
-            </Card>
+            {access && can(access, "feedback:write") ? (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Обратная связь</CardTitle>
+                        <CardDescription>Сообщите о проблеме или предложении. Ответ придёт в том же обращении.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Link href="/feedback" className={buttonVariants({ size: "sm" })}>Создать обращение</Link>
+                    </CardContent>
+                </Card>
+            ) : null}
         </div>
     );
 }

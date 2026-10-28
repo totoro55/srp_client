@@ -5,8 +5,13 @@ import {
     FEEDBACK_STATUS_LABELS,
     FEEDBACK_SUBJECT_MAX,
     boundedText,
+    optionalText,
+    FEEDBACK_ARTICLE_CATEGORY,
+    isFeedbackCategory,
+    isFeedbackKind,
     isFeedbackStatus,
-    type FeedbackListScope,
+    type FeedbackCategory,
+    type FeedbackKind,
     type FeedbackStatus,
 } from "@/lib/content";
 import {
@@ -21,13 +26,19 @@ import { ContentError } from "@/services/content-error";
 import { db } from "@/services/db";
 import { getAppSettings } from "@/services/app-settings";
 import { deleteStoredObject, putStoredObject, readStoredObject } from "@/services/object-storage";
+import { getWikiArticle } from "@/services/wiki";
 
 export interface FeedbackTicket {
     id: number;
     author: string;
+    authorName: string;
     subject: string;
     body: string;
     status: FeedbackStatus;
+    kind: FeedbackKind | null;
+    category: FeedbackCategory | null;
+    articleId: number | null;
+    documentTitle: string | null;
     assignee: string | null;
     assigneeName: string | null;
     createdAt: string;
@@ -46,8 +57,10 @@ export interface FeedbackFile {
 export interface FeedbackMessage {
     id: number;
     author: string;
+    authorName: string;
     body: string;
     createdAt: string;
+    editedAt: string | null;
     files: FeedbackFile[];
 }
 
@@ -62,9 +75,14 @@ export interface FeedbackChanges {
 interface TicketRow {
     id: number;
     author: string;
+    author_name: string;
     subject: string;
     body: string;
     status: FeedbackStatus;
+    kind: string | null;
+    category: string | null;
+    article_id: number | null;
+    document_title: string | null;
     assignee: string | null;
     assignee_name: string | null;
     created_at: Date;
@@ -91,28 +109,72 @@ const FEEDBACK_FILTER = `
         OR ticket.body ILIKE $4 ESCAPE '\\'
         OR ticket.author ILIKE $4 ESCAPE '\\'
         OR EXISTS (
+            SELECT 1 FROM employees employee
+            WHERE lower(employee.login) = lower(ticket.author)
+              AND employee.name ILIKE $4 ESCAPE '\\'
+        )
+        OR ticket.document_title ILIKE $4 ESCAPE '\\'
+        OR EXISTS (
+            SELECT 1 FROM wiki_articles linked
+            WHERE linked.id = ticket.article_id
+              AND linked.title ILIKE $4 ESCAPE '\\'
+        )
+        OR EXISTS (
             SELECT 1 FROM feedback_messages
             WHERE ticket_id = ticket.id AND body ILIKE $4 ESCAPE '\\'
         )
       )
       AND (
-        $5 = 'all'
-        OR ($5 = 'open' AND ticket.status IN ('new', 'progress', 'waiting'))
-        OR ticket.status = $5
+        cardinality($5::text[]) = 0
+        OR ticket.status = ANY($5::text[])
       )
+      AND (
+        cardinality($6::text[]) = 0
+        OR ('none' = ANY($6::text[]) AND ticket.kind IS NULL)
+        OR ticket.kind = ANY($6::text[])
+      )
+      AND (
+        cardinality($7::text[]) = 0
+        OR ('none' = ANY($7::text[]) AND ticket.category IS NULL)
+        OR ticket.category = ANY($7::text[])
+      )
+`;
+
+const AUTHOR_NAME = `
+    COALESCE(
+        NULLIF(btrim((
+            SELECT employee.name
+            FROM employees employee
+            WHERE lower(employee.login) = lower(ticket.author)
+            LIMIT 1
+        )), ''),
+        ticket.author
+    )
 `;
 
 const ASSIGNEE_NAME = `
     COALESCE(
         NULLIF(btrim(employee.name), ''),
-        NULLIF(btrim(account.display_name), ''),
         ticket.assignee
     )
 `;
 
-export async function listFeedback(access: AccessView, query: string, scope: FeedbackListScope, requestedPage: number): Promise<FeedbackListPage> {
+const TICKET_FROM = `
+    FROM feedback_tickets ticket
+    LEFT JOIN employees employee ON lower(employee.login) = lower(ticket.assignee)
+    LEFT JOIN wiki_articles wiki ON wiki.id = ticket.article_id
+`;
+
+export async function listFeedback(
+    access: AccessView,
+    query: string,
+    statuses: readonly string[],
+    kinds: readonly string[],
+    categories: readonly string[],
+    requestedPage: number,
+): Promise<FeedbackListPage> {
     const processor = can(access, "feedback:process");
-    const filterParams = [processor, access.username, query, likePattern(query), scope];
+    const filterParams = [processor, access.username, query, likePattern(query), statuses, kinds, categories];
     const totals = await db.query<{ total: number }>(
         `SELECT COUNT(*)::int AS total FROM feedback_tickets ticket ${FEEDBACK_FILTER}`,
         filterParams
@@ -121,15 +183,16 @@ export async function listFeedback(access: AccessView, query: string, scope: Fee
     const page = Math.min(requestedPage, pageCount(total, ADMIN_PAGE_SIZE));
     const rows = await db.query<TicketRow>(
         `
-        SELECT ticket.id, ticket.author, ticket.subject, ticket.body, ticket.status,
+        SELECT ticket.id, ticket.author, ${AUTHOR_NAME} AS author_name,
+               ticket.subject, ticket.body, ticket.status, ticket.kind, ticket.category,
+               ticket.article_id,
+               COALESCE(NULLIF(btrim(wiki.title), ''), NULLIF(btrim(ticket.document_title), '')) AS document_title,
                ticket.assignee, ${ASSIGNEE_NAME} AS assignee_name,
                ticket.created_at, ticket.updated_at
-        FROM feedback_tickets ticket
-        LEFT JOIN employees employee ON lower(employee.login) = lower(ticket.assignee)
-        LEFT JOIN users account ON lower(account.username) = lower(ticket.assignee)
+        ${TICKET_FROM}
         ${FEEDBACK_FILTER}
         ORDER BY ticket.updated_at DESC, ticket.id DESC
-        LIMIT $6 OFFSET $7
+        LIMIT $8 OFFSET $9
         `,
         [...filterParams, ADMIN_PAGE_SIZE, (page - 1) * ADMIN_PAGE_SIZE]
     );
@@ -193,10 +256,18 @@ export async function feedbackChanges(
 }
 
 export async function createFeedback(access: AccessView, body: unknown, files: File[] = []): Promise<FeedbackTicket> {
+    if (!can(access, "feedback:write")) {
+        throw new ContentError("Недостаточно прав");
+    }
     const input = readTicket(body);
+    const article = input.articleId === null ? null : await getWikiArticle(access, input.articleId);
     const rows = await db.query<{ id: number }>(
-        "INSERT INTO feedback_tickets (author, subject, body) VALUES ($1, $2, $3) RETURNING id",
-        [access.username, input.subject, input.body]
+        `
+        INSERT INTO feedback_tickets (author, subject, body, kind, category, article_id, document_title)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+        `,
+        [access.username, input.subject, input.body, input.kind, input.category, article?.id ?? null, article?.title ?? null]
     );
     const id = rows[0].id;
     try {
@@ -222,6 +293,9 @@ export async function addFeedbackMessage(
         throw new ContentError("Обращение закрыто");
     }
     const text = readMessage(body);
+    if (!text && files.length === 0) {
+        throw new ContentError("Напишите ответ");
+    }
     const change = await messageChange(access, ticket, requestedStatus, action, assignee);
     const inserted = await db.transaction(async (query) => {
         const messages = await query<{ id: number }>(
@@ -247,6 +321,76 @@ export async function addFeedbackMessage(
     return getFeedback(access, id);
 }
 
+export async function updateFeedbackMessage(
+    access: AccessView,
+    ticketId: number,
+    messageId: number,
+    body: unknown,
+    files: File[] = [],
+    keep: readonly string[] | null = null,
+): Promise<FeedbackTicket> {
+    await ownMessage(access, ticketId, messageId);
+    const text = readMessage(body);
+    const existing = await db.query<{ id: string; storage_key: string }>(
+        "SELECT id, storage_key FROM feedback_files WHERE ticket_id = $1 AND message_id = $2",
+        [ticketId, messageId]
+    );
+    const known = new Map(existing.map((file) => [file.id, file.storage_key]));
+    const keptIds = keep === null ? [...known.keys()] : [...new Set(keep)];
+    if (keptIds.some((id) => !known.has(id))) {
+        throw new ContentError("Вложение не найдено");
+    }
+    const settings = await getAppSettings();
+    if (keptIds.length + files.length > settings.feedbackFileMaxCount) {
+        throw new ContentError(`Можно приложить не больше ${settings.feedbackFileMaxCount} файлов`);
+    }
+    if (!text && keptIds.length + files.length === 0) {
+        throw new ContentError("Напишите ответ");
+    }
+    await db.query("UPDATE feedback_messages SET body = $2, edited_at = NOW() WHERE id = $1", [messageId, text]);
+    await addFeedbackFiles(access, ticketId, messageId, files);
+    const removed = existing.filter((file) => !keptIds.includes(file.id));
+    if (removed.length > 0) {
+        await db.query("DELETE FROM feedback_files WHERE id = ANY($1::uuid[])", [removed.map((file) => file.id)]);
+        await Promise.all(removed.map((file) => deleteStoredObject(file.storage_key)));
+    }
+    await db.query("UPDATE feedback_tickets SET updated_at = NOW() WHERE id = $1", [ticketId]);
+    return getFeedback(access, ticketId);
+}
+
+export async function deleteFeedbackMessage(access: AccessView, ticketId: number, messageId: number): Promise<FeedbackTicket> {
+    await ownMessage(access, ticketId, messageId);
+    const stored = await db.query<{ storage_key: string }>(
+        "SELECT storage_key FROM feedback_files WHERE ticket_id = $1 AND message_id = $2",
+        [ticketId, messageId]
+    );
+    await db.query("DELETE FROM feedback_messages WHERE id = $1 AND ticket_id = $2", [messageId, ticketId]);
+    await db.query("UPDATE feedback_tickets SET updated_at = NOW() WHERE id = $1", [ticketId]);
+    await Promise.all(stored.map((file) => deleteStoredObject(file.storage_key)));
+    return getFeedback(access, ticketId);
+}
+
+async function ownMessage(access: AccessView, ticketId: number, messageId: number): Promise<void> {
+    if (!can(access, "feedback:process")) {
+        throw new ContentError("Недостаточно прав");
+    }
+    const ticket = await loadTicket(ticketId);
+    if (!canReadTicket(access, ticket)) {
+        throw new ContentError("Обращение не найдено");
+    }
+    const rows = await db.query<{ author: string }>(
+        "SELECT author FROM feedback_messages WHERE id = $1 AND ticket_id = $2",
+        [messageId, ticketId]
+    );
+    const message = rows[0];
+    if (!message) {
+        throw new ContentError("Сообщение не найдено");
+    }
+    if (message.author.toLowerCase() !== access.username.toLowerCase()) {
+        throw new ContentError("Можно править только свои сообщения");
+    }
+}
+
 export async function listFeedbackAssignees(access: AccessView, query: string): Promise<FeedbackAssignee[]> {
     const pattern = likePattern(query.toLowerCase());
     return db.query<FeedbackAssignee>(
@@ -256,7 +400,6 @@ export async function listFeedbackAssignees(access: AccessView, query: string): 
             SELECT candidate.login,
                    COALESCE(
                        NULLIF(btrim(employee.name), ''),
-                       NULLIF(btrim(account.display_name), ''),
                        candidate.login
                    ) AS name
             FROM (
@@ -290,7 +433,6 @@ export async function listFeedbackAssignees(access: AccessView, query: string): 
                 SELECT $3::varchar
             ) candidate
             LEFT JOIN employees employee ON lower(employee.login) = lower(candidate.login)
-            LEFT JOIN users account ON lower(account.username) = lower(candidate.login)
         ) people
         WHERE btrim(people.login) <> ''
           AND (
@@ -303,6 +445,35 @@ export async function listFeedbackAssignees(access: AccessView, query: string): 
         `,
         [query.toLowerCase(), pattern, access.username]
     );
+}
+
+export async function setFeedbackClass(access: AccessView, id: number, body: unknown): Promise<FeedbackTicket> {
+    if (!can(access, "feedback:process")) {
+        throw new ContentError("Недостаточно прав");
+    }
+    const ticket = await getFeedback(access, id);
+    if (!body || typeof body !== "object") {
+        throw new ContentError("Выберите вид или категорию");
+    }
+    const record = body as Record<string, unknown>;
+    const hasKind = Object.prototype.hasOwnProperty.call(record, "kind");
+    const hasCategory = Object.prototype.hasOwnProperty.call(record, "category");
+    if (!hasKind && !hasCategory) {
+        throw new ContentError("Выберите вид или категорию");
+    }
+    const kind = hasKind ? record.kind : ticket.kind;
+    const category = hasCategory ? record.category : ticket.category;
+    if (hasKind && !isFeedbackKind(kind)) {
+        throw new ContentError("Выберите вид обращения");
+    }
+    if (hasCategory && !isFeedbackCategory(category)) {
+        throw new ContentError("Выберите категорию");
+    }
+    await db.query(
+        "UPDATE feedback_tickets SET kind = $2, category = $3, updated_at = NOW() WHERE id = $1",
+        [id, kind, category]
+    );
+    return getFeedback(access, id);
 }
 
 export async function setFeedbackHandling(access: AccessView, id: number, body: unknown): Promise<FeedbackTicket> {
@@ -344,12 +515,13 @@ export async function setFeedbackHandling(access: AccessView, id: number, body: 
 async function loadTicket(id: number): Promise<TicketRow & { messages?: never }> {
     const rows = await db.query<TicketRow>(
         `
-        SELECT ticket.id, ticket.author, ticket.subject, ticket.body, ticket.status,
+        SELECT ticket.id, ticket.author, ${AUTHOR_NAME} AS author_name,
+               ticket.subject, ticket.body, ticket.status, ticket.kind, ticket.category,
+               ticket.article_id,
+               COALESCE(NULLIF(btrim(wiki.title), ''), NULLIF(btrim(ticket.document_title), '')) AS document_title,
                ticket.assignee, ${ASSIGNEE_NAME} AS assignee_name,
                ticket.created_at, ticket.updated_at
-        FROM feedback_tickets ticket
-        LEFT JOIN employees employee ON lower(employee.login) = lower(ticket.assignee)
-        LEFT JOIN users account ON lower(account.username) = lower(ticket.assignee)
+        ${TICKET_FROM}
         WHERE ticket.id = $1
         `,
         [id]
@@ -368,15 +540,32 @@ function canReadTicket(access: AccessView, ticket: { author: string; assignee: s
 }
 
 async function messagesOf(ticketId: number, after = 0): Promise<Omit<FeedbackMessage, "files">[]> {
-    const rows = await db.query<{ id: number; author: string; body: string; created_at: Date }>(
-        "SELECT id, author, body, created_at FROM feedback_messages WHERE ticket_id = $1 AND id > $2 ORDER BY id",
+    const rows = await db.query<{ id: number; author: string; author_name: string; body: string; created_at: Date; edited_at: Date | null }>(
+        `
+        SELECT message.id, message.author,
+               COALESCE(
+                   NULLIF(btrim((
+                       SELECT employee.name
+                       FROM employees employee
+                       WHERE lower(employee.login) = lower(message.author)
+                       LIMIT 1
+                   )), ''),
+                   message.author
+               ) AS author_name,
+               message.body, message.created_at, message.edited_at
+        FROM feedback_messages message
+        WHERE message.ticket_id = $1 AND message.id > $2
+        ORDER BY message.id
+        `,
         [ticketId, after]
     );
     return rows.map((row) => ({
         id: row.id,
         author: row.author,
+        authorName: row.author_name.trim() || row.author,
         body: row.body,
         createdAt: new Date(row.created_at).toISOString(),
+        editedAt: row.edited_at ? new Date(row.edited_at).toISOString() : null,
     }));
 }
 
@@ -521,9 +710,14 @@ function toTicket(row: TicketRow): Omit<FeedbackTicket, "messages" | "files"> {
     return {
         id: row.id,
         author: row.author,
+        authorName: row.author_name?.trim() || row.author,
         subject: row.subject,
         body: row.body,
         status: row.status,
+        kind: isFeedbackKind(row.kind) ? row.kind : null,
+        category: isFeedbackCategory(row.category) ? row.category : null,
+        articleId: row.article_id,
+        documentTitle: shownDocumentTitle(row),
         assignee: row.assignee,
         assigneeName: row.assignee_name,
         createdAt: new Date(row.created_at).toISOString(),
@@ -531,7 +725,15 @@ function toTicket(row: TicketRow): Omit<FeedbackTicket, "messages" | "files"> {
     };
 }
 
-function readTicket(body: unknown): { subject: string; body: string } {
+function shownDocumentTitle(row: TicketRow): string | null {
+    const title = row.document_title?.trim() ?? "";
+    if (title) {
+        return title;
+    }
+    return row.article_id === null ? null : "Статья";
+}
+
+function readTicket(body: unknown): { subject: string; body: string; kind: FeedbackKind; category: FeedbackCategory; articleId: number | null } {
     if (!body || typeof body !== "object") {
         throw new ContentError("Проверьте тему и текст");
     }
@@ -544,14 +746,35 @@ function readTicket(body: unknown): { subject: string; body: string } {
     if (typeof text !== "string") {
         throw new ContentError(text.error);
     }
-    return { subject, body: text };
+    if (!isFeedbackKind(record.kind)) {
+        throw new ContentError("Выберите вид обращения");
+    }
+    if (!isFeedbackCategory(record.category)) {
+        throw new ContentError("Выберите категорию");
+    }
+    const articleId = readArticleId(record.articleId);
+    if (articleId !== null && record.category !== FEEDBACK_ARTICLE_CATEGORY) {
+        throw new ContentError("Категория обращения из статьи — база знаний");
+    }
+    return { subject, body: text, kind: record.kind, category: record.category, articleId };
+}
+
+function readArticleId(value: unknown): number | null {
+    if (value == null || value === "") {
+        return null;
+    }
+    const id = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+    if (!Number.isInteger(id) || id <= 0) {
+        throw new ContentError("Статья не найдена");
+    }
+    return id;
 }
 
 function readMessage(body: unknown): string {
     if (!body || typeof body !== "object") {
         throw new ContentError("Напишите ответ");
     }
-    const text = boundedText((body as Record<string, unknown>).body, FEEDBACK_MESSAGE_MAX, "Ответ");
+    const text = optionalText((body as Record<string, unknown>).body, FEEDBACK_MESSAGE_MAX, "Ответ");
     if (typeof text !== "string") {
         throw new ContentError(text.error);
     }
@@ -646,12 +869,10 @@ async function assigneeDisplayName(login: string): Promise<string> {
         `
         SELECT COALESCE(
             NULLIF(btrim(employee.name), ''),
-            NULLIF(btrim(account.display_name), ''),
             $1
         ) AS name
         FROM (SELECT $1::varchar AS login) seed
         LEFT JOIN employees employee ON lower(employee.login) = lower(seed.login)
-        LEFT JOIN users account ON lower(account.username) = lower(seed.login)
         `,
         [login]
     );

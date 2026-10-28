@@ -37,12 +37,13 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
     {
         title: "Обратная связь",
         routes: [
-            { path: "/api/feedback", description: "GET возвращает свои обращения или очередь поддержки. POST создаёт обращение с текстом и вложениями." },
-            { path: "/api/feedback/[id]", description: "GET открывает переписку. POST добавляет сообщение и может сменить статус. PATCH меняет ведение обращения, нужно право feedback:process." },
+            { path: "/api/feedback", description: "GET возвращает свои обращения или очередь поддержки. Фильтры: q, status, kind, category. status, kind и category можно передать несколько раз. Без status остаются незавершённые, status=all снимает ограничение. kind и category принимают код или none, если значение не указано. POST создаёт обращение: вид, категория, текст и вложения, нужно право feedback:write. Из статьи категория остаётся «База знаний», и к обращению прикладывается эта статья." },
+            { path: "/api/feedback/[id]", description: "GET открывает переписку. POST добавляет сообщение — текст, вложения или и то и другое — и может сменить статус. PATCH меняет ведение обращения, вид или категорию. Нужно право feedback:process." },
+            { path: "/api/feedback/[id]/messages/[messageId]", description: "PATCH меняет своё сообщение: текст, список оставляемых вложений keep и новые файлы. DELETE удаляет своё сообщение вместе с вложениями. Чужие сообщения недоступны. Нужно право feedback:process." },
             { path: "/api/feedback/[id]/updates", description: "GET отдаёт новые сообщения и смену статуса после указанного номера. Ответ не кэшируется." },
             { path: "/api/feedback/assignees", description: "GET ищет сотрудников, которым можно назначить обращение. Нужно право feedback:process. Параметр q — строка поиска." },
             { path: "/api/feedback/limits", description: "GET возвращает допустимый размер, число и типы вложений обращения." },
-            { path: "/api/feedback/files/[id]", description: "GET отдаёт вложение автору обращения или тому, кто обрабатывает обращения." },
+            { path: "/api/feedback/files/[id]", description: "GET отдаёт вложение автору обращения или тому, кто обрабатывает обращения. Параметр inline=1 открывает предпросмотр, download=1 скачивает файл." },
         ],
     },
     {

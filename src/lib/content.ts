@@ -41,16 +41,36 @@ export function isFeedbackStatus(value: unknown): value is FeedbackStatus {
     return typeof value === "string" && (FEEDBACK_STATUSES as readonly string[]).includes(value);
 }
 
-export type FeedbackListScope = "open" | "all" | FeedbackStatus;
+export const FEEDBACK_KINDS = ["problem", "question", "suggestion"] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
 
-export const FEEDBACK_LIST_SCOPE_LABELS: Record<FeedbackListScope, string> = {
-    open: "Незавершенные",
-    all: "Все",
-    ...FEEDBACK_STATUS_LABELS,
+export const FEEDBACK_KIND_LABELS: Record<FeedbackKind, string> = {
+    problem: "Проблема",
+    question: "Вопрос",
+    suggestion: "Предложение",
 };
 
-export function isFeedbackListScope(value: unknown): value is FeedbackListScope {
-    return value === "open" || value === "all" || isFeedbackStatus(value);
+export const FEEDBACK_CATEGORIES = ["wiki", "news", "bonus", "rrs", "baskets", "tariffs", "other"] as const;
+export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
+
+export const FEEDBACK_CATEGORY_LABELS: Record<FeedbackCategory, string> = {
+    wiki: "База знаний",
+    news: "Новости",
+    bonus: "Расчёт премий",
+    rrs: "Настройки РРС",
+    baskets: "Корзины",
+    tariffs: "Алгоритмы тарифов",
+    other: "Другое",
+};
+
+export const FEEDBACK_ARTICLE_CATEGORY: FeedbackCategory = "wiki";
+
+export function isFeedbackKind(value: unknown): value is FeedbackKind {
+    return typeof value === "string" && (FEEDBACK_KINDS as readonly string[]).includes(value);
+}
+
+export function isFeedbackCategory(value: unknown): value is FeedbackCategory {
+    return typeof value === "string" && (FEEDBACK_CATEGORIES as readonly string[]).includes(value);
 }
 
 export function boundedText(value: unknown, max: number, label: string): string | { error: string } {

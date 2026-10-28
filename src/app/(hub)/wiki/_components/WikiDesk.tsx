@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Calendar, ChevronsDownUp, ChevronsUpDown, ChevronRight, Clock, CornerUpLeft, FilePlus, FileText, Folder, FolderOpen, FolderPlus, GripVertical, House, Info, List, PanelLeftClose, PanelLeftOpen, Pencil, Search, Send, Star, Trash2, UserRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Calendar, ChevronsDownUp, ChevronsUpDown, ChevronRight, Clock, CornerUpLeft, FilePlus, FileText, Folder, FolderOpen, FolderPlus, GripVertical, House, Info, List, MessageSquareText, PanelLeftClose, PanelLeftOpen, Pencil, Search, Send, Star, Trash2, UserRound, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
     Breadcrumb,
@@ -98,6 +98,7 @@ export function WikiDesk() {
     const searchParams = useSearchParams();
     const access = useAccess();
     const canWrite = access.has("wiki:write");
+    const canFeedback = access.has("feedback:write");
     const urlQuery = searchParams.get("q") ?? "";
     const tag = searchParams.get("tag") ?? "";
     const articleId = params.id && /^\d+$/.test(params.id) ? Number(params.id) : null;
@@ -729,6 +730,7 @@ export function WikiDesk() {
                                 onDelete={() => setConfirm("delete")}
                             />
                         ) : null}
+                        {canFeedback && showing ? <ArticleFeedbackLink id={showing.id} /> : null}
                     </div>
                 </div>
                 <div className="flex flex-col gap-3 p-3 lg:p-4">
@@ -827,6 +829,7 @@ export function WikiDesk() {
                                 onDelete={() => setConfirm("delete")}
                             />
                         ) : null}
+                        {canFeedback ? <ArticleFeedbackLink labelled id={showing.id} /> : null}
                     </div>
                 ) : null}
                 <p className="text-xs font-medium text-muted-foreground">Содержание</p>
@@ -2165,6 +2168,37 @@ function GroupDialog({
                 </form>
             </DialogContent>
         </Dialog>
+    );
+}
+
+function ArticleFeedbackLink({ id, labelled = false }: { id: number; labelled?: boolean }) {
+    const label = "Обратная связь по статье";
+    const href = `/feedback?article=${id}`;
+    if (labelled) {
+        return (
+            <Link
+                href={href}
+                className={cn(
+                    buttonVariants({ variant: "ghost", size: "sm" }),
+                    "h-auto min-h-8 w-full items-start justify-start gap-2 whitespace-normal py-1.5 text-left",
+                )}
+            >
+                <MessageSquareText className="mt-0.5" />
+                <span>{label}</span>
+            </Link>
+        );
+    }
+    return (
+        <Tooltip>
+            <TooltipTrigger
+                render={
+                    <Link href={href} aria-label={label} className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "shrink-0")}>
+                        <MessageSquareText />
+                    </Link>
+                }
+            />
+            <TooltipContent>{label}</TooltipContent>
+        </Tooltip>
     );
 }
 

@@ -141,12 +141,11 @@ import {
     TextSpacingFields,
     WIDTH_ICON,
 } from "./editor-menus";
+import { ReadingMediaDialog, type ReadingMedia } from "@/components/reading-media";
 import {
     anchorItems,
     nextAnchorId,
     openReadingMedia,
-    ReadingMediaDialog,
-    type ReadingMedia,
 } from "./editor-reading";
 import { EditorSurface } from "./editor-surface";
 
