@@ -1,4 +1,4 @@
-import type { BasketForm } from "../../_components/model";
+import type { BasketForm } from "./model";
 import type { RrsBasketOffer, RrsBranch } from "@/lib/rrs";
 
 const PREFIX = "srp:rrs-wizard:v1";

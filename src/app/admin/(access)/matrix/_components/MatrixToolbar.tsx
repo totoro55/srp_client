@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
-import { RoleMultiSelect } from "@/app/admin/_componenets/RoleMultiSelect";
+import { RoleMultiSelect } from "./RoleMultiSelect";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
 
 interface Role { id: number; name: string; }

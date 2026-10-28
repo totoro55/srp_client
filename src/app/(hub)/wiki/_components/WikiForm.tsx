@@ -24,10 +24,10 @@ import { notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { emptyWikiDocument, type WikiNode } from "@/lib/wiki-document";
 import { ApiResponse } from "@/types/api";
-import { NewsArticle } from "../../news/_components/NewsArticle";
-import { NewsEditor, type EditorMenuAction } from "../../news/_components/NewsEditor";
-import { RolePicker, type RoleOption } from "../../news/_components/RolePicker";
-import { useUnsavedChanges } from "../../news/_components/unsaved-changes";
+import { NewsArticle } from "../../_components/editor/NewsArticle";
+import { NewsEditor, type EditorMenuAction } from "../../_components/editor/NewsEditor";
+import { RolePicker, type RoleOption } from "../../_components/RolePicker";
+import { useUnsavedChanges } from "../../_components/unsaved-changes";
 import { ArticleBrief } from "./ArticleBrief";
 
 interface WikiGroup {

@@ -6,8 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MatrixToolbar } from './MatrixToolbar';
-import { AdminTableSkeleton } from '@/app/admin/_components/AdminTableSkeleton';
-import { ButtonSpinner } from "@/components/loading-state";
+import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 
 interface Role { id: number; name: string; description?: string | null; isSystem?: boolean }
 interface Permission { code: string; group: string; title: string; description?: string }
@@ -105,7 +104,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                     </TableHeader>
                     <TableBody>
                         {isLoading ? (
-                            <AdminTableSkeleton columns={4} rows={10} />
+                            <TableSkeleton columns={4} rows={10} />
                         ) : filteredPermissions.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={filteredRoles.length + 1} className="py-10 text-center text-xs text-muted-foreground">

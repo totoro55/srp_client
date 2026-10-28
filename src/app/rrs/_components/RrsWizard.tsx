@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { useSession } from "next-auth/react";
 import { withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
@@ -23,11 +23,11 @@ import {
 } from "@/lib/rrs-edit-window";
 import { ApiResponse } from "@/types/api";
 import { PageHeading } from "@/app/_components/header/page-heading";
-import { CoefficientTable } from "../../_components/CoefficientTable";
+import { CoefficientTable } from "./CoefficientTable";
 import { deleteDraft, readDraft, restoreDraft, writeDraft, type WizardDraft } from "./wizard-draft";
 import { cn } from "@/lib/utils";
-import { ParameterField } from "../../_components/ParameterField";
-import { VersionChoice } from "../../_components/VersionChoice";
+import { ParameterField } from "./ParameterField";
+import { VersionChoice } from "./VersionChoice";
 import {
     basketsForTerritory,
     currentMonth,
@@ -38,7 +38,7 @@ import {
     selectClassName,
     valuesFor,
     type BasketForm,
-} from "../../_components/model";
+} from "./model";
 
 export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const router = useRouter();

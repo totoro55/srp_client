@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";

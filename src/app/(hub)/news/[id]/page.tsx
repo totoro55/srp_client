@@ -6,7 +6,7 @@ import { getRequestAccess } from "@/server/authz/resolve-access";
 import { getNews } from "@/services/news";
 import { newsAuthorLine } from "@/lib/news";
 import { HubColumn } from "../../_components/HubColumn";
-import { NewsArticle } from "../_components/NewsArticle";
+import { NewsArticle } from "../../_components/editor/NewsArticle";
 
 export default async function NewsItemPage({ params }: { params: Promise<{ id: string }> }) {
     const access = await getRequestAccess();

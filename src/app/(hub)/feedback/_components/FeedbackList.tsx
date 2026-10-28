@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { PageControls } from "@/app/admin/_components/PageControls";
+import { PageControls } from "@/components/page-controls";
 import { FeedbackStatusBadge } from "./FeedbackStatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

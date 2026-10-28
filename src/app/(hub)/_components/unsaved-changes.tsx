@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export function useUnsavedChanges(dirty: boolean) {
     const router = useRouter();

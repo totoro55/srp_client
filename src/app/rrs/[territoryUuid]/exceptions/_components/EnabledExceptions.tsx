@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PinnedTable } from "@/components/pinned-table";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { BadgePercent, Check, ChevronRight, Eye, EyeOff, Folder, Hash, ListChecks, Package, Save, Tag, Trash2, Undo2, X } from "lucide-react";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { HelpDrawer } from "@/components/help-drawer";

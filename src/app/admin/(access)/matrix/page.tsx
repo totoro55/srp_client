@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition } from 'react';
 import { MatrixGrid } from './_components/MatrixGrid';
-import { ConfirmDialog } from '@/app/admin/_components/ConfirmDialog';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AdminPageShell } from '@/app/admin/_components/AdminPageShell';
 import { reloadAccess, useAccess } from '@/hooks/useAccess';
 import { notifyError } from '@/lib/notify';

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";

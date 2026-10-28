@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
-import { PageControls } from "@/app/admin/_components/PageControls";
+import { PageControls } from "@/components/page-controls";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TableSkeleton } from "@/components/loading-state";

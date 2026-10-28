@@ -6,7 +6,7 @@ import { ArrowDownFromLine, History, MousePointerClick, RotateCcw, Save, Undo2 }
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";

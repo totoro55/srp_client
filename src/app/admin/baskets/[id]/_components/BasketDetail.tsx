@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
-import { ConfirmDialog } from "@/app/admin/_components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ButtonSpinner, PageSkeleton } from "@/components/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";

@@ -22,10 +22,10 @@ import { emptyNewsDocument, plainTextDocument, type NewsNode } from "@/lib/news-
 import { notifySuccess } from "@/lib/notify";
 import { newsAuthorLine, type NewsStatus } from "@/lib/news";
 import { ApiResponse } from "@/types/api";
-import { NewsArticle } from "./NewsArticle";
-import { NewsEditor, type EditorMenuAction } from "./NewsEditor";
-import { RolePicker, type RoleOption } from "./RolePicker";
-import { useUnsavedChanges } from "./unsaved-changes";
+import { NewsArticle } from "../../_components/editor/NewsArticle";
+import { NewsEditor, type EditorMenuAction } from "../../_components/editor/NewsEditor";
+import { RolePicker, type RoleOption } from "../../_components/RolePicker";
+import { useUnsavedChanges } from "../../_components/unsaved-changes";
 
 interface NewsPost {
     id: number;
