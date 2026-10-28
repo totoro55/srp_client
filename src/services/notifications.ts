@@ -184,7 +184,7 @@ export async function readNotifications(access: AccessView, body: unknown): Prom
         return listNotifications(access);
     }
     const id = record?.id;
-    if (typeof id !== "number" || !Number.isInteger(id)) {
+    if (!record || typeof id !== "number" || !Number.isInteger(id)) {
         throw new ContentError("Выберите уведомление");
     }
     if (record.read === false) {
