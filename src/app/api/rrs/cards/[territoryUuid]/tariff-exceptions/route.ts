@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/require-admin";
-import { parseTariffSaveRows } from "@/lib/tariff-calculation";
+import { parseTariffReference, parseTariffSaveRows } from "@/lib/tariff-calculation";
 import { parseConnectionPeriod, parseTerritoryUuid } from "@/lib/rrs";
 import { parseTariffWeightOverride, type TariffExceptionPage } from "@/lib/tariff-exceptions";
 import { getTariffExceptions, saveTariffExceptions } from "@/services/tariff-exceptions";
@@ -44,10 +44,11 @@ export async function PUT(
         const access = await requirePermission("baskets:connect");
         const { territoryUuid: rawUuid } = await context.params;
         const territoryUuid = parseTerritoryUuid(rawUuid);
-        const body = await request.json() as { period?: unknown; rows?: unknown; weights?: unknown };
+        const body = await request.json() as { period?: unknown; rows?: unknown; weights?: unknown; reference?: unknown };
         const period = parseConnectionPeriod(body.period);
         const rows = parseTariffSaveRows(body.rows);
         const weights = parseTariffWeightOverride(body.weights);
+        const reference = parseTariffReference(body.reference);
         if (!territoryUuid || !period) {
             return NextResponse.json({
                 success: false,
@@ -66,7 +67,13 @@ export async function PUT(
                 error: { code: "BAD_REQUEST", message: weights.error },
             }, { status: 400 });
         }
-        await saveTariffExceptions(access, territoryUuid, period, rows, weights);
+        if (typeof reference !== "string") {
+            return NextResponse.json({
+                success: false,
+                error: { code: "BAD_REQUEST", message: reference.error },
+            }, { status: 400 });
+        }
+        await saveTariffExceptions(access, territoryUuid, period, rows, weights, reference);
         return NextResponse.json({ success: true, data: { saved: true } });
     } catch (error) {
         return rrsErrorResponse(error);

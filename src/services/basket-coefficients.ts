@@ -8,6 +8,9 @@ import { listEnabledBranchUuids } from "@/services/branch-motivation";
 import { db } from "@/services/db";
 import { branchListedInPeriod } from "@/services/directory-visibility";
 import type { AccessView } from "@/server/authz/resolve-access";
+import type { QueryResultRow } from "pg";
+
+type Sql = <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>;
 
 export async function getBranchCoefficients(
     access: AccessView,
@@ -369,6 +372,122 @@ function versionStartByBasket(rows: { basketId: number; versionId: number; perio
         start.set(row.basketId, row.period);
     }
     return start;
+}
+
+export async function replacePeriodCoefficients(
+    query: Sql,
+    actor: string,
+    territoryUuid: string,
+    period: string,
+    items: RrsCoefficientValue[],
+): Promise<void> {
+    const enabled = await query<{ branchUuid: string }>(
+        `
+        SELECT branch_uuid::text AS "branchUuid"
+        FROM basket_branch_motivation
+        WHERE territory_uuid = $1 AND period = $2::date AND enabled
+        `,
+        [territoryUuid, period],
+    );
+    const branchIds = new Set(enabled.map((row) => row.branchUuid.toLowerCase()));
+    const connections = await query<{ basketId: number; versionId: number }>(
+        `
+        SELECT DISTINCT ON (basket_id)
+               basket_id AS "basketId",
+               version_id AS "versionId"
+        FROM basket_connections
+        WHERE territory_uuid = $1
+          AND period <= $2::date
+          AND version_id IS NOT NULL
+        ORDER BY basket_id, period DESC
+        `,
+        [territoryUuid, period],
+    );
+    const versionIds = connections.map((row) => row.versionId);
+    const versions = versionIds.length === 0
+        ? []
+        : await query<{ id: number; basketId: number; basketName: string; settings: unknown }>(
+            `
+            SELECT version.id,
+                   basket.id AS "basketId",
+                   basket.name AS "basketName",
+                   version.settings
+            FROM basket_versions version
+            JOIN baskets basket ON basket.id = version.basket_id
+            WHERE version.id = ANY($1::int[])
+            `,
+            [versionIds],
+        );
+    const coefficients = new Map<string, { basketName: string; coefficient: BasketCoefficient }>();
+    for (const version of versions) {
+        for (const coefficient of readVersionSettings(version.settings).coefficients) {
+            coefficients.set(`${version.basketId}:${coefficient.key}`, { basketName: version.basketName, coefficient });
+        }
+    }
+    const prepared: { branchUuid: string; basketId: number; key: string; value: number }[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+        const branchUuid = item.branchUuid.toLowerCase();
+        if (!branchIds.has(branchUuid)) {
+            throw new RrsRuleError(400, "Филиал не включён в мотивацию на выбранный месяц");
+        }
+        const found = coefficients.get(`${item.basketId}:${item.key}`);
+        if (!found) {
+            throw new RrsRuleError(400, "Коэффициент не задан у подключённой версии");
+        }
+        const identity = `${branchUuid}:${item.basketId}:${item.key}`;
+        if (seen.has(identity)) {
+            throw new RrsRuleError(400, "Коэффициент филиала указан дважды");
+        }
+        seen.add(identity);
+        prepared.push({
+            branchUuid,
+            basketId: item.basketId,
+            key: item.key,
+            value: parseCoefficientValue(item.value, found.coefficient, found.basketName),
+        });
+    }
+    const expected = new Set<string>();
+    for (const version of versions) {
+        const definitions = readVersionSettings(version.settings).coefficients;
+        if (definitions.length === 0) {
+            continue;
+        }
+        for (const branchUuid of branchIds) {
+            for (const coefficient of definitions) {
+                expected.add(`${branchUuid}:${version.basketId}:${coefficient.key}`);
+            }
+        }
+    }
+    if (seen.size !== expected.size) {
+        throw new RrsRuleError(400, "Передайте коэффициенты всех включённых филиалов");
+    }
+    await query(
+        `
+        INSERT INTO basket_branch_coefficients_log (
+            territory_uuid, basket_id, period, branch_uuid, coefficient_key, value, set_at, set_by, recorded_by
+        )
+        SELECT territory_uuid, basket_id, period, branch_uuid, coefficient_key, value, set_at, set_by, $3
+        FROM basket_branch_coefficients
+        WHERE territory_uuid = $1 AND period = $2::date
+        `,
+        [territoryUuid, period, actor],
+    );
+    await query(
+        `DELETE FROM basket_branch_coefficients WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
+    );
+    for (const item of prepared) {
+        await query(
+            `
+            INSERT INTO basket_branch_coefficients (
+                territory_uuid, basket_id, period, branch_uuid, coefficient_key, value, set_by
+            )
+            VALUES ($1, $2, $3::date, $4::uuid, $5, $6, $7)
+            `,
+            [territoryUuid, item.basketId, period, item.branchUuid, item.key, item.value, actor],
+        );
+    }
 }
 
 function parseCoefficientValue(raw: string, coefficient: BasketCoefficient, basketName: string): number {

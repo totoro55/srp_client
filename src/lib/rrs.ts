@@ -1,4 +1,4 @@
-import type { BasketCoefficient, BasketParameter } from "@/lib/baskets";
+import type { BasketCoefficient, BasketParameter, TariffAxis } from "@/lib/baskets";
 import { compareCondition, conditionLabel, evaluateFormula, formatCalculated } from "@/lib/parameter-rules";
 import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
 
@@ -18,6 +18,7 @@ export interface RrsVersionOffer {
     status: "test" | "working" | "off";
     parameters: BasketParameter[];
     coefficients: BasketCoefficient[];
+    tariffAxis: TariffAxis | null;
     testTerritoryUuids: string[];
 }
 
@@ -90,6 +91,7 @@ export interface RrsHistoryChange {
     versionId: number | null;
     versionLabel: string | null;
     values: RrsHistoryValue[];
+    note: string | null;
 }
 
 export interface RrsHistoryEvent {

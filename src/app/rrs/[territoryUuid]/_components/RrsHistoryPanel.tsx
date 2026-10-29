@@ -65,6 +65,13 @@ function historyForPeriod(events: RrsHistoryEvent[], period: string) {
                     after: basket.afterVersion,
                 });
             }
+            if (basket.note) {
+                rows.push({
+                    title: `${basket.basketName} · Период`,
+                    before: "—",
+                    after: basket.note,
+                });
+            }
             for (const row of basket.rows) {
                 if (!row.changed) {
                     continue;

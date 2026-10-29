@@ -34,12 +34,13 @@ import {
     tariffRowComplete,
     type TariffChannels,
     type TariffRowDraft,
+    type TariffSaveRow,
 } from "@/lib/tariff-calculation";
 import { type TariffBaseMode, type TariffExceptionPage, type TariffExceptionWeights, type TariffSaleStat } from "@/lib/tariff-exceptions";
 import { ApiResponse } from "@/types/api";
-import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
-import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
-import { formatMonth } from "../../../_components/model";
+import { RrsPeriodControls, type PeriodHintTone } from "./RrsPeriodControls";
+import { connectionCardPeriod, RrsSectionNav } from "./RrsSectionNav";
+import { formatMonth } from "./model";
 import { cn } from "@/lib/utils";
 
 interface DraftLine extends TariffRowDraft {}
@@ -49,11 +50,27 @@ interface WeightDraft {
     priceShareWeight: number;
 }
 
-export function TariffExceptions() {
+export interface WizardTariffDraft {
+    rows: TariffSaveRow[];
+    reference: TariffReference;
+    weights: WeightDraft | null;
+    incomplete: boolean;
+}
+
+export function TariffExceptions({ embedded }: {
+    embedded?: {
+        territoryUuid: string;
+        page: TariffExceptionPage | null;
+        loading: boolean;
+        error: string | null;
+        onDraft: (draft: WizardTariffDraft | null) => void;
+    };
+} = {}) {
     const params = useParams<{ territoryUuid: string }>();
     const router = useRouter();
     const searchParams = useSearchParams();
-    const territoryUuid = params.territoryUuid;
+    const embeddedMode = embedded !== undefined;
+    const territoryUuid = embedded?.territoryUuid ?? params.territoryUuid;
     const requestedPeriod = searchParams.get("period");
     const [page, setPage] = useState<TariffExceptionPage | null>(null);
     const [lines, setLines] = useState<DraftLine[]>([]);
@@ -99,7 +116,8 @@ export function TariffExceptions() {
             }
             const next = json.data;
             const nextWeights = weightDraft(next.weights);
-            const drafts = openPeriodRows(next.stats, next.exceptions, next.editable, serviceContext(nextWeights, next, DEFAULT_TARIFF_REFERENCE));
+            const initialReference = next.reference ?? DEFAULT_TARIFF_REFERENCE;
+            const drafts = openPeriodRows(next.stats, next.exceptions, next.editable, serviceContext(nextWeights, next, initialReference));
             const keptError = revertError.current;
             revertError.current = null;
             shownPeriodRef.current = next.period;
@@ -113,7 +131,7 @@ export function TariffExceptions() {
             setWeightBaseline(nextWeights);
             setWeightsEditable(next.weights?.editable ?? false);
             setAlgorithmTitle(next.weights?.title ?? null);
-            setReference(DEFAULT_TARIFF_REFERENCE);
+            setReference(initialReference);
             setFilter("");
             setError(keptError && next.period === shownPeriodRef.current ? keptError : null);
         } catch {
@@ -127,8 +145,41 @@ export function TariffExceptions() {
     }, [requestedPeriod, territoryUuid, router]);
 
     useEffect(() => {
+        if (embeddedMode) {
+            return;
+        }
         void load();
-    }, [load]);
+    }, [load, embeddedMode]);
+
+    const externalPage = embedded?.page ?? null;
+    const externalLoading = embedded?.loading ?? false;
+    const externalError = embedded?.error ?? null;
+    useEffect(() => {
+        if (!embeddedMode) {
+            return;
+        }
+        setLoading(externalLoading);
+        setError(externalError);
+        if (!externalPage) {
+            setPage(null);
+            return;
+        }
+        const nextWeights = weightDraft(externalPage.weights);
+        const initialReference = externalPage.reference ?? DEFAULT_TARIFF_REFERENCE;
+        const drafts = openPeriodRows(externalPage.stats, externalPage.exceptions, externalPage.editable, serviceContext(nextWeights, externalPage, initialReference));
+        linesRef.current = drafts;
+        savedRef.current = drafts;
+        weightsRef.current = nextWeights;
+        setPage(externalPage);
+        setLines(drafts);
+        setSaved(drafts);
+        setWeights(nextWeights);
+        setWeightBaseline(nextWeights);
+        setWeightsEditable(externalPage.weights?.editable ?? false);
+        setAlgorithmTitle(externalPage.weights?.title ?? null);
+        setReference(initialReference);
+        setFilter("");
+    }, [embeddedMode, externalError, externalLoading, externalPage]);
 
     const commitLines = useCallback((update: (current: DraftLine[]) => DraftLine[]) => {
         const next = update(linesRef.current);
@@ -143,7 +194,7 @@ export function TariffExceptions() {
         if (!page?.editable) {
             return;
         }
-        const context = serviceContext(weights, page, page.weights?.referenceSelectable ? reference : DEFAULT_TARIFF_REFERENCE);
+        const context = serviceContext(weights, page, reference);
         const statsByCode = new Map(page.stats.map((stat) => [stat.code, stat]));
         commitLines((current) => {
             let changed = false;
@@ -179,9 +230,9 @@ export function TariffExceptions() {
     const blankPeriod = Boolean(page && page.stats.length === 0 && !currentWithoutData);
 
     const referenceSelectable = Boolean(page?.weights?.referenceSelectable);
-    const shownReference = referenceSelectable ? reference : DEFAULT_TARIFF_REFERENCE;
+    const shownReference = reference;
     const tariffContext = useMemo(() => page ? serviceContext(weights, page, shownReference) : null, [page, weights, shownReference]);
-    const referenceTest = shownReference !== DEFAULT_TARIFF_REFERENCE;
+    const referenceDirty = Boolean(page && reference !== page.reference);
 
     const applyWeights = useCallback((next: WeightDraft) => {
         weightsRef.current = next;
@@ -225,6 +276,7 @@ export function TariffExceptions() {
                 period: page.period,
                 rows,
                 weights: page.weights?.editable ? weightsRef.current : undefined,
+                reference,
             }),
         });
         const json = (await response.json()) as ApiResponse<{ saved: true }>;
@@ -237,9 +289,40 @@ export function TariffExceptions() {
         await load(page.period);
     }
 
+    const reportDraft = embedded?.onDraft;
+    useEffect(() => {
+        if (!reportDraft) {
+            return;
+        }
+        if (!page) {
+            reportDraft(null);
+            return;
+        }
+        const rows = lines.map((line) => {
+            const main = parseTariffRate(line.main);
+            const im = parseTariffRate(line.im);
+            const b2b = parseTariffRate(line.b2b);
+            return main === null || im === null || b2b === null ? null : {
+                code: line.code,
+                automatic: line.automatic,
+                baseMode: line.baseMode,
+                main,
+                im,
+                b2b,
+            };
+        });
+        const incompleteRows = rows.some((row) => row === null);
+        reportDraft({
+            rows: incompleteRows ? [] : rows.flatMap((row) => row ? [row] : []),
+            reference,
+            weights: page.weights?.editable ? weights : null,
+            incomplete: incomplete || incompleteRows,
+        });
+    }, [incomplete, lines, page, reference, reportDraft, weights]);
+
     return (
         <div className="flex flex-col gap-4">
-            <RrsSectionNav
+            {embeddedMode ? null : <RrsSectionNav
                 territoryUuid={territoryUuid}
                 territoryName={page?.territory.name}
                 active="tariffs"
@@ -260,11 +343,11 @@ export function TariffExceptions() {
                         />
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
-                            <Button type="button" size="sm" title={saveDisabledTitle(referenceTest, incomplete)} disabled={saving || referenceTest || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
+                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
                                 {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
-                            <Button type="button" size="sm" variant="outline" disabled={saving || (!dirty && !weightsDirty && !fieldEditing && !referenceTest)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => { flushEdit.current = null; weightFlush.current = null; linesRef.current = savedRef.current; setLines(savedRef.current); setFieldEditing(false); weightsRef.current = weightBaseline; setWeights(weightBaseline); setReference(DEFAULT_TARIFF_REFERENCE); }}>
+                            <Button type="button" size="sm" variant="outline" disabled={saving || (!dirty && !weightsDirty && !fieldEditing && !referenceDirty)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => { flushEdit.current = null; weightFlush.current = null; linesRef.current = savedRef.current; setLines(savedRef.current); setFieldEditing(false); weightsRef.current = weightBaseline; setWeights(weightBaseline); setReference(page.reference); }}>
                                 <Undo2 />
                                 Отменить
                             </Button>
@@ -275,8 +358,17 @@ export function TariffExceptions() {
                         )}
                     </>
                 ) : null}
-            />
+            />}
             <FormAlert message={error} />
+            {embeddedMode && !loading && page ? (
+                <p className="text-sm text-muted-foreground">
+                    {!page.connection?.axis
+                        ? "У подключённой версии нет вида расчёта тарифов. Карточку можно завершить без тарифов."
+                        : page.stats.length === 0
+                            ? "За этот месяц нет строк статистики. Карточку можно завершить без тарифов."
+                            : "Ставки, опора и исключения сохранятся вместе с карточкой."}
+                </p>
+            ) : null}
             {loading ? <TariffPageSkeleton /> : null}
             {!loading && page && !blankPeriod ? (
                 <section className="flex flex-col gap-4">
@@ -932,17 +1024,17 @@ const REFERENCE_OPTIONS: Array<{ id: TariffReference; label: string; annotation:
     {
         id: "median",
         label: "Медиана",
-        annotation: "Опора определяется как медиана значений статистики выбранного месяца. При нечётном числе строк используется центральное значение, при чётном — среднее двух центральных. Крайние значения на опору не влияют. Порядок расчёта тарифа за цену и тарифа за долю соответствует варианту «Среднее»: надбавка за малые продажи начисляется независимо от стоимости товара. Вариант предназначен для сравнения на экране и при сохранении тарифов не записывается.",
+        annotation: "Опора определяется как медиана значений статистики выбранного месяца. При нечётном числе строк используется центральное значение, при чётном — среднее двух центральных. Крайние значения на опору не влияют. Порядок расчёта тарифа за цену и тарифа за долю соответствует варианту «Среднее»: надбавка за малые продажи начисляется независимо от стоимости товара. Вариант записывается вместе с тарифами месяца и используется при пересчёте.",
     },
     {
         id: "trimmed",
         label: "Усечённое среднее",
-        annotation: `Опора определяется как среднее арифметическое после исключения ${Math.round(TRIMMED_MEAN_PROPORTION * 100)}% наименьших и ${Math.round(TRIMMED_MEAN_PROPORTION * 100)}% наибольших значений. Опора занимает промежуточное положение между средним арифметическим и медианой. Порядок расчёта тарифа соответствует варианту «Среднее». Вариант предназначен для сравнения на экране и при сохранении тарифов не записывается.`,
+        annotation: `Опора определяется как среднее арифметическое после исключения ${Math.round(TRIMMED_MEAN_PROPORTION * 100)}% наименьших и ${Math.round(TRIMMED_MEAN_PROPORTION * 100)}% наибольших значений. Опора занимает промежуточное положение между средним арифметическим и медианой. Порядок расчёта тарифа соответствует варианту «Среднее». Вариант записывается вместе с тарифами месяца и используется при пересчёте.`,
     },
     {
         id: "priceAdjusted",
         label: "Поправка на цену",
-        annotation: "Опора средней стоимости и количества продаж совпадает с вариантом «Среднее». Тариф за цену рассчитывается без изменений. Надбавка за малые продажи в тарифе за долю сохраняется полностью, если средняя стоимость строки не ниже опоры цены. При стоимости на уровне минимальной премии и ниже надбавка не начисляется: тариф за долю определяется отношением количества строки к опоре. В промежутке между этими уровнями надбавка увеличивается пропорционально стоимости. Вариант предназначен для сравнения на экране и при сохранении тарифов не записывается.",
+        annotation: "Опора средней стоимости и количества продаж совпадает с вариантом «Среднее». Тариф за цену рассчитывается без изменений. Надбавка за малые продажи в тарифе за долю сохраняется полностью, если средняя стоимость строки не ниже опоры цены. При стоимости на уровне минимальной премии и ниже надбавка не начисляется: тариф за долю определяется отношением количества строки к опоре. В промежутке между этими уровнями надбавка увеличивается пропорционально стоимости. Вариант записывается вместе с тарифами месяца и используется при пересчёте.",
     },
 ];
 
@@ -974,7 +1066,7 @@ function ReferenceSwitch({
                         Опора расчёта
                     </TooltipTrigger>
                     <TooltipContent>
-                        По умолчанию применяется среднее. Иные варианты в базу не записываются.
+                        По умолчанию применяется среднее. Выбранная опора записывается вместе с тарифами месяца.
                     </TooltipContent>
                 </Tooltip>
                 <div role="radiogroup" aria-label="Опора расчёта" className="inline-flex max-w-full flex-wrap rounded-md border p-0.5">
@@ -1200,7 +1292,7 @@ function TariffHelp({ cutoffDay, axis }: { cutoffDay: number | null; axis: Tarif
             ) : null}
             <section className="flex flex-col gap-3 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Опора расчёта</h3>
-                <p className="text-muted-foreground">По умолчанию применяется среднее. Выбор опоры доступен администратору и территории, которой это разрешено в настройках алгоритма. Иные варианты пересчитывают автоматические ставки на экране и при сохранении тарифов не записываются.</p>
+                <p className="text-muted-foreground">По умолчанию применяется среднее. Выбор опоры доступен администратору и территории, которой это разрешено в настройках алгоритма. Выбранная опора записывается вместе с тарифами месяца и используется при пересчёте.</p>
                 {REFERENCE_OPTIONS.map((option) => (
                     <div key={option.id} className="flex flex-col gap-1">
                         <h4 className="text-sm font-medium">{option.label}</h4>
@@ -1282,16 +1374,6 @@ function TariffModeToggle({
             </button>
         </div>
     );
-}
-
-function saveDisabledTitle(referenceTest: boolean, incomplete: boolean): string | undefined {
-    if (referenceTest) {
-        return "Тестовый расчёт не записывается. Для сохранения выберите среднее.";
-    }
-    if (incomplete) {
-        return EMPTY_TARIFF_SAVE_MESSAGE;
-    }
-    return undefined;
 }
 
 function periodHint(page: TariffExceptionPage, loading: boolean): { text: string; tone: PeriodHintTone } {

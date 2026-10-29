@@ -2,7 +2,7 @@ name: Update test stand
 
 on:
   push:
-    branches: [master, mvp-wave-1, session-tariff-fixes]
+    branches: [master, mvp-wave-1, session-tariff-fixes, feature/basket-wizard-cycle]
 
 jobs:
   deploy:
