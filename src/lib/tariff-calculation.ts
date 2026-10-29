@@ -104,7 +104,8 @@ export function territoryReference(values: Array<string | null>, reference: Tari
  * Тариф за долю: опора количества территории / количество строки × базовая премия × вес.
  * Поправка на цену уменьшает надбавку за малые продажи у дешёвого товара и не меняет её у товара не дешевле опоры.
  * Ниже минимальной премии × вес не опускается, выше максимальной × вес не поднимается.
- * Нет базы, границы, среднего или делителя — ячейка пустая, не ноль.
+ * Нулевое количество упирается в максимум, а не оставляет ячейку пустой.
+ * Нет базы, границы, среднего или числа строки — ячейка пустая, не ноль.
  */
 export function calculateServiceTariffs(
     stat: Pick<TariffSaleStat, "avgPrice" | "quantity">,
@@ -126,6 +127,7 @@ export function calculateServiceTariffs(
  * В ставку записывается неотформатированная доля: 0,28% хранится как 0,0028.
  * ИМ и безнал всегда равны тарифу за количество.
  * Нет одного из слагаемых — ставки пустые, не нулевые.
+ * Нулевая средняя стоимость при тарифе от цены даёт розницу 0: делить процент на ноль нельзя, поле при этом заполнено.
  */
 export function calculateAlgorithmTariffs(input: {
     stat: Pick<TariffSaleStat, "avgPrice" | "quantity">;
@@ -142,8 +144,11 @@ export function calculateAlgorithmTariffs(input: {
         return { main: perUnit, im: perUnit, b2b: perUnit };
     }
     const averagePrice = numericStat(input.stat.avgPrice);
-    if (averagePrice === null || averagePrice === 0) {
+    if (averagePrice === null) {
         return { main: null, im: perUnit, b2b: perUnit };
+    }
+    if (averagePrice === 0) {
+        return { main: "0", im: perUnit, b2b: perUnit };
     }
     const ratio = Math.round((Number(perUnit) / averagePrice) * 10_000) / 10_000;
     return { main: String(ratio), im: perUnit, b2b: perUnit };
@@ -370,17 +375,22 @@ function rarityBlend(price: number | null, context: TariffServiceContext): numbe
 }
 
 function sharePremium(price: number | null, quantity: number | null, context: TariffServiceContext): string | null {
-    if (quantity === null || context.averageQuantity === null || quantity === 0 || context.averageQuantity === 0) {
+    if (quantity === null || context.averageQuantity === null || context.averageQuantity === 0) {
         return null;
     }
-    const inverted = clampedPremium(context.averageQuantity / quantity, context.salesShareWeight, context);
+    // Нулевые продажи — предел формулы: отношение опоры к количеству уходит в бесконечность и упирается в максимум.
+    const inverted = quantity === 0
+        ? weightBound(context.max, context.salesShareWeight)
+        : clampedPremium(context.averageQuantity / quantity, context.salesShareWeight, context);
     if (inverted === null) {
         return null;
     }
     if (!context.adjustShareByPrice) {
         return String(Math.round(inverted));
     }
-    const direct = clampedPremium(quantity / context.averageQuantity, context.salesShareWeight, context);
+    const direct = quantity === 0
+        ? weightBound(context.min, context.salesShareWeight)
+        : clampedPremium(quantity / context.averageQuantity, context.salesShareWeight, context);
     if (direct === null) {
         return null;
     }
@@ -390,6 +400,14 @@ function sharePremium(price: number | null, quantity: number | null, context: Ta
         return null;
     }
     return String(Math.round(result));
+}
+
+function weightBound(bound: number | null, weightPercent: number): number | null {
+    if (bound === null || !Number.isFinite(weightPercent)) {
+        return null;
+    }
+    const result = bound * (weightPercent / 100);
+    return Number.isFinite(result) ? result : null;
 }
 
 function clampedPremium(relation: number, weightPercent: number, context: TariffServiceContext): number | null {

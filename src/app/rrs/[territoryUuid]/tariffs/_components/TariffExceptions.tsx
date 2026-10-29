@@ -260,7 +260,7 @@ export function TariffExceptions() {
                         />
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
-                            <Button type="button" size="sm" title={referenceTest ? "Тестовый расчёт не записывается. Для сохранения выберите среднее." : undefined} disabled={saving || referenceTest || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
+                            <Button type="button" size="sm" title={saveDisabledTitle(referenceTest, incomplete)} disabled={saving || referenceTest || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
                                 {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
@@ -1282,6 +1282,16 @@ function TariffModeToggle({
             </button>
         </div>
     );
+}
+
+function saveDisabledTitle(referenceTest: boolean, incomplete: boolean): string | undefined {
+    if (referenceTest) {
+        return "Тестовый расчёт не записывается. Для сохранения выберите среднее.";
+    }
+    if (incomplete) {
+        return EMPTY_TARIFF_SAVE_MESSAGE;
+    }
+    return undefined;
 }
 
 function periodHint(page: TariffExceptionPage, loading: boolean): { text: string; tone: PeriodHintTone } {

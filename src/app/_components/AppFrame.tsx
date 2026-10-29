@@ -1,6 +1,7 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import Header from '@/app/_components/header/header';
@@ -18,7 +19,20 @@ export function AppFrame({
     children: ReactNode;
 }) {
     const { status } = useSession();
+    const pathname = usePathname();
     const signedIn = status === 'loading' ? initialSignedIn : status === 'authenticated';
+    const sessionClosed = status === 'unauthenticated' && pathname !== '/login';
+
+    useEffect(() => {
+        if (!sessionClosed) {
+            return;
+        }
+        window.location.replace('/login');
+    }, [sessionClosed]);
+
+    if (sessionClosed) {
+        return null;
+    }
 
     return (
         <SidebarProvider defaultOpen={false}>
