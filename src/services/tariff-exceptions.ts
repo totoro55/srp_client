@@ -23,7 +23,8 @@ const AXIS_TABLE = {
     },
 } as const;
 
-const USABLE_STAT = `stats.avg_price IS NOT NULL AND stats.sum_quantity IS NOT NULL AND stats.avg_price >= 0 AND stats.sum_quantity >= 0`;
+/** Пустая, отрицательная или нулевая цена и количество в расчёт тарифа не входят. */
+const USABLE_STAT = `stats.avg_price IS NOT NULL AND stats.sum_quantity IS NOT NULL AND stats.avg_price > 0 AND stats.sum_quantity > 0`;
 
 async function loadSalesStats(territoryUuid: string, period: string, axis: TariffAxis): Promise<TariffExceptionPage["stats"]> {
     const source = AXIS_TABLE[axis];
