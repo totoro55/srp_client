@@ -90,6 +90,24 @@ export const PERMISSION_CATALOG = [
         title: "Обработка обращений",
         description: "Очередь обращений, статус и ответ",
     },
+    {
+        code: "branch:read",
+        group: "Филиал",
+        title: "Просмотр филиала",
+        description: "Настройки филиала, премии сотрудников и детализация",
+    },
+    {
+        code: "motivation-roles:read",
+        group: "Мотивация",
+        title: "Просмотр ролей мотивации",
+        description: "Виды ролей и автоматическое назначение по должности",
+    },
+    {
+        code: "motivation-roles:write",
+        group: "Мотивация",
+        title: "Изменение ролей мотивации",
+        description: "Новые роли и правила по должности и КТУ",
+    },
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];

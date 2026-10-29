@@ -31,11 +31,7 @@ export default async function RootLayout({
     <body
         className={cn(
             inter.className,
-            // ГЛАВНОЕ ИСПРАВЛЕНИЕ:
-            // h-full и w-full задают четкие границы 100% экрана.
-            // overflow-x-hidden полностью запрещает всему сайту улетать вправо.
-            // min-h-screen гарантирует, что фон не оборвется.
-            "h-full w-full min-h-screen bg-background text-foreground overflow-x-hidden"
+            "h-full w-full min-h-screen bg-background text-foreground overflow-x-auto"
         )}>
       <Providers>
         <AppFrame initialSignedIn={Boolean(session)} notice={<NoticeBanner />}>
