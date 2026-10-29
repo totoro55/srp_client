@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -159,6 +160,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     );
     const included = forms.filter((form) => form.connected);
     const enabledBranches = branches.filter((branch) => enabled[branch.uuid]);
+    const bonusBranches = branches.filter((branch) => baseBonus[branch.uuid] ?? false);
+    const allWithBonusOn = bonusBranches.length > 0 && bonusBranches.every((branch) => enabled[branch.uuid] ?? false);
     const coefficientLines = included.flatMap((form) => {
         const basket = visibleBaskets.find((item) => item.id === form.basketId);
         const version = basket?.versions.find((item) => item.id === form.versionId);
@@ -932,63 +935,73 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             ) : null}
             {!loading && activeKey === "motivation" ? (
                 <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm text-muted-foreground">
-                            Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. По умолчанию филиал выключен.
-                        </p>
-                        {branches.length > 0 ? (
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={saving || branches.every((branch) => !(baseBonus[branch.uuid] ?? false) || (enabled[branch.uuid] ?? false))}
-                                onClick={() => {
-                                    setEnabled((current) => {
-                                        const next = { ...current };
-                                        for (const branch of branches) {
-                                            if (baseBonus[branch.uuid]) {
-                                                next[branch.uuid] = true;
-                                            }
-                                        }
-                                        return next;
-                                    });
-                                }}
-                            >
-                                Включить все с премией
-                            </Button>
-                        ) : null}
-                    </div>
-                    {branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
-                    {branches.map((branch) => {
-                        const on = enabled[branch.uuid] ?? false;
-                        const hasBaseBonus = baseBonus[branch.uuid] ?? false;
-                        const bonus = formatBaseBonus(bonusAmount[branch.uuid] ?? null);
-                        return (
-                            <label key={branch.uuid} className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2">
-                                <span className="min-w-0 text-sm font-medium">{branch.name}</span>
-                                <span className={cn("shrink-0 text-sm tabular-nums", bonus === null && "text-muted-foreground")}>
-                                    {bonus ?? "Нет премии"}
-                                </span>
-                                <span className="flex items-center gap-2 text-sm">
-                                    <Switch
-                                        checked={on}
-                                        disabled={saving || (!hasBaseBonus && !on)}
-                                        aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
-                                        onCheckedChange={(checked) => {
-                                            if (checked && !hasBaseBonus) {
-                                                return;
-                                            }
-                                            setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
-                                        }}
-                                    />
-                                    <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
-                                        {on ? "Включена" : "Выключена"}
-                                    </span>
-                                </span>
-                            </label>
-                        );
-                    })}
+                    <p className="text-sm text-muted-foreground">
+                        Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. Переключатель в шапке включает или выключает сразу все филиалы с премией. По умолчанию филиал выключен.
+                    </p>
                     <p className="text-sm text-muted-foreground">Включено {enabledBranches.length} из {branches.length}</p>
+                    {branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
+                    {branches.length > 0 ? (
+                        <Table containerClassName="rounded-lg border">
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Филиал</TableHead>
+                                    <TableHead className="w-44 text-right">Базовая премия</TableHead>
+                                    <TableHead className="w-48">
+                                        <span className="flex items-center gap-2">
+                                            <Switch
+                                                checked={allWithBonusOn}
+                                                disabled={saving || bonusBranches.length === 0}
+                                                aria-label={allWithBonusOn ? "Выключить филиалы с премией" : "Включить филиалы с премией"}
+                                                onCheckedChange={(checked) => {
+                                                    setEnabled((current) => {
+                                                        const next = { ...current };
+                                                        for (const branch of bonusBranches) {
+                                                            next[branch.uuid] = checked;
+                                                        }
+                                                        return next;
+                                                    });
+                                                }}
+                                            />
+                                            Участие
+                                        </span>
+                                    </TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {branches.map((branch) => {
+                                    const on = enabled[branch.uuid] ?? false;
+                                    const hasBaseBonus = baseBonus[branch.uuid] ?? false;
+                                    const bonus = formatBaseBonus(bonusAmount[branch.uuid] ?? null);
+                                    return (
+                                        <TableRow key={branch.uuid} className={cn(on && "bg-emerald-50 dark:bg-emerald-950/30")}>
+                                            <TableCell className="font-medium">{branch.name}</TableCell>
+                                            <TableCell className={cn("text-right tabular-nums", bonus === null && "text-muted-foreground")}>
+                                                {bonus ?? "Нет"}
+                                            </TableCell>
+                                            <TableCell>
+                                                <label className="flex items-center gap-2 text-sm">
+                                                    <Switch
+                                                        checked={on}
+                                                        disabled={saving || (!hasBaseBonus && !on)}
+                                                        aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked && !hasBaseBonus) {
+                                                                return;
+                                                            }
+                                                            setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
+                                                        }}
+                                                    />
+                                                    <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
+                                                        {on ? "Включена" : "Выключена"}
+                                                    </span>
+                                                </label>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
+                            </TableBody>
+                        </Table>
+                    ) : null}
                 </div>
             ) : null}
             </div>
