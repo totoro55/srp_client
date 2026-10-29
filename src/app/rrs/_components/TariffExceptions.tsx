@@ -1292,7 +1292,7 @@ function TariffHelp({ cutoffDay, axis }: { cutoffDay: number | null; axis: Tarif
             ) : null}
             <section className="flex flex-col gap-3 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Опора расчёта</h3>
-                <p className="text-muted-foreground">По умолчанию применяется среднее. Выбор опоры доступен администратору и территории, которой это разрешено в настройках алгоритма. Выбранная опора записывается вместе с тарифами месяца и используется при пересчёте.</p>
+                <p className="text-muted-foreground">По умолчанию применяется среднее. Выбор иной опоры доступен администратору и территории, для которой разрешение задано в настройках алгоритма. Выбранная опора записывается для территории и месяца и применяется при последующем пересчёте. Без разрешения сохраняются среднее и ранее записанная опора. Аналитика премии использует сохранённые ставки и опору заново не рассчитывает.</p>
                 {REFERENCE_OPTIONS.map((option) => (
                     <div key={option.id} className="flex flex-col gap-1">
                         <h4 className="text-sm font-medium">{option.label}</h4>
@@ -1306,7 +1306,7 @@ function TariffHelp({ cutoffDay, axis }: { cutoffDay: number | null; axis: Tarif
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Сохранение</h3>
-                <p className="text-muted-foreground">Кнопка «Сохранить» записывает тарифы выбранного месяца. «Отменить» возвращает последние сохранённые значения.</p>
+                <p className="text-muted-foreground">Кнопка «Сохранить» записывает тарифы и опору расчёта выбранного месяца. Запись с незаполненной ставкой не выполняется. «Отменить» возвращает последние сохранённые значения. При смене версии корзины продаж в открытом месяце тарифы, исключения и опора этого месяца удаляются. Более ранние месяцы не изменяются.</p>
             </section>
         </div>
     );
