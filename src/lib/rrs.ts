@@ -146,6 +146,21 @@ export interface RrsCoefficientPage {
 export interface RrsMotivationItem {
     branchUuid: string;
     enabled: boolean;
+    /** За выбранный месяц в выгрузке есть непустая базовая премия. */
+    hasBaseBonus: boolean;
+    /** Текст премии из выгрузки. Пусто, если строки за месяц нет. */
+    baseBonus: string | null;
+}
+
+export function formatBaseBonus(value: string | null): string | null {
+    if (value === null || value.trim() === "") {
+        return null;
+    }
+    const number = Number(value.trim().replace(",", "."));
+    if (!Number.isFinite(number)) {
+        return value.trim();
+    }
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(number);
 }
 
 export interface RrsMotivationPage {

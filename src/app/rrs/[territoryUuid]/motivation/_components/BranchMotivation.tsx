@@ -13,7 +13,7 @@ import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { notifySuccess } from "@/lib/notify";
-import type { RrsMotivationPage } from "@/lib/rrs";
+import { formatBaseBonus, type RrsMotivationPage } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
 import { PeriodChangeHistory } from "../../../_components/PeriodChangeHistory";
@@ -67,6 +67,10 @@ export function BranchMotivation() {
     const enabledCount = page
         ? page.branches.filter((branch) => isEnabled(enabled, branch.uuid)).length
         : 0;
+    const bonusBranches = page
+        ? page.branches.filter((branch) => page.items.find((row) => row.branchUuid === branch.uuid)?.hasBaseBonus)
+        : [];
+    const allWithBonusOn = bonusBranches.length > 0 && bonusBranches.every((branch) => isEnabled(enabled, branch.uuid));
 
     function requestSave() {
         if (!page) {
@@ -191,7 +195,7 @@ export function BranchMotivation() {
                 )}
             />
             <FormAlert message={error} />
-            {loading && !page ? <DataTableSkeleton columns={2} rows={8} /> : null}
+            {loading && !page ? <DataTableSkeleton columns={3} rows={8} /> : null}
             {page ? (
                 <>
                     <TabsContent value="participation" className="flex flex-col gap-4">
@@ -204,23 +208,51 @@ export function BranchMotivation() {
                     <TableHeader className="sticky top-0 z-10 bg-background">
                         <TableRow>
                             <TableHead>Филиал</TableHead>
-                            <TableHead className="w-48">Участие</TableHead>
+                            <TableHead className="w-44 text-right">Базовая премия</TableHead>
+                            <TableHead className="w-48">
+                                <span className="flex items-center gap-2">
+                                    <Switch
+                                        checked={allWithBonusOn}
+                                        disabled={!page.editable || saving || bonusBranches.length === 0}
+                                        aria-label={allWithBonusOn ? "Выключить филиалы с премией" : "Включить филиалы с премией"}
+                                        onCheckedChange={(checked) => {
+                                            setEnabled((current) => {
+                                                const next = { ...current };
+                                                for (const branch of bonusBranches) {
+                                                    next[branch.uuid] = checked;
+                                                }
+                                                return next;
+                                            });
+                                        }}
+                                    />
+                                    Участие
+                                </span>
+                            </TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {page.branches.map((branch) => {
                             const on = isEnabled(enabled, branch.uuid);
                             const dirty = on !== isEnabled(saved, branch.uuid);
+                            const item = page.items.find((row) => row.branchUuid === branch.uuid);
+                            const hasBaseBonus = item?.hasBaseBonus ?? false;
+                            const bonus = formatBaseBonus(item?.baseBonus ?? null);
                             return (
                                 <TableRow key={branch.uuid} className={cn(on && "bg-emerald-50 dark:bg-emerald-950/30", dirty && "bg-amber-50 dark:bg-amber-950/30")}>
                                     <TableCell className="font-medium">{branch.name}</TableCell>
+                                    <TableCell className={cn("text-right tabular-nums", bonus === null && "text-muted-foreground")}>
+                                        {bonus ?? "Нет"}
+                                    </TableCell>
                                     <TableCell>
                                         <label className="flex items-center gap-2 text-sm">
                                             <Switch
                                                 checked={on}
-                                                disabled={!page.editable || saving}
+                                                disabled={!page.editable || saving || (!hasBaseBonus && !on)}
                                                 aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
                                                 onCheckedChange={(checked) => {
+                                                    if (checked && !hasBaseBonus) {
+                                                        return;
+                                                    }
                                                     setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
                                                 }}
                                             />
@@ -287,7 +319,7 @@ function MotivationHelp({ cutoffDay }: { cutoffDay: number | null }) {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Участие</h3>
                 <p className="text-muted-foreground">
-                    Мотивация филиала по умолчанию выключена. Новый филиал нужно включить вручную и сохранить на нужный месяц.
+                    Мотивация филиала по умолчанию выключена. В колонке «Базовая премия» показана сумма из выгрузки за выбранный месяц. Филиал можно подключить, только если сумма есть. Переключатель в шапке колонки «Участие» включает или выключает сразу все филиалы с премией и не меняет филиалы без неё. Изменение записывается кнопкой «Сохранить».
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">

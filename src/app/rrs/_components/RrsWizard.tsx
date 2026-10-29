@@ -14,7 +14,7 @@ import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { useSession } from "next-auth/react";
-import { withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
+import { formatBaseBonus, withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
     closedPeriodMessage,
     monthIsOpen,
@@ -62,6 +62,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [error, setError] = useState<string | null>(null);
     const [branches, setBranches] = useState<RrsBranch[]>([]);
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+    const [baseBonus, setBaseBonus] = useState<Record<string, boolean>>({});
+    const [bonusAmount, setBonusAmount] = useState<Record<string, string | null>>({});
     const [coefficientValues, setCoefficientValues] = useState<Record<string, string>>({});
     const [coefficientSaved, setCoefficientSaved] = useState<Record<string, string>>({});
     const [tailReady, setTailReady] = useState(false);
@@ -447,8 +449,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 }
                 const nextBranches = motivationJson.data.branches;
                 const nextEnabled: Record<string, boolean> = {};
+                const nextBonus: Record<string, boolean> = {};
+                const nextAmount: Record<string, string | null> = {};
                 for (const branch of nextBranches) {
-                    nextEnabled[branch.uuid] = motivationJson.data.items.find((item) => item.branchUuid === branch.uuid)?.enabled ?? false;
+                    const item = motivationJson.data.items.find((row) => row.branchUuid === branch.uuid);
+                    nextEnabled[branch.uuid] = item?.enabled ?? false;
+                    nextBonus[branch.uuid] = item?.hasBaseBonus ?? false;
+                    nextAmount[branch.uuid] = item?.baseBonus ?? null;
                 }
                 const nextCoefficients: Record<string, string> = {};
                 if (coefficientJson.success) {
@@ -458,6 +465,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 }
                 setBranches(nextBranches);
                 setEnabled(nextEnabled);
+                setBaseBonus(nextBonus);
+                setBonusAmount(nextAmount);
                 setCoefficientValues(nextCoefficients);
                 setCoefficientSaved({ ...nextCoefficients });
                 if (username && !finishedRef.current) {
@@ -557,7 +566,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             return;
         }
         acceptingDraftRef.current = true;
-        const restored = restoreDraft(resumeDraft, baskets, forms, branches);
+        const restored = restoreDraft(resumeDraft, baskets, forms, branches, enabled, baseBonus);
         setForms(restored.forms);
         setEnabled(restored.enabled);
         setCoefficientValues(restored.coefficients);
@@ -821,21 +830,54 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             ) : null}
             {!loading && stepKey === "motivation" ? (
                 <div className="flex flex-col gap-3">
-                    <p className="text-sm text-muted-foreground">
-                        Включите филиалы, которые участвуют в мотивации в выбранном месяце. По умолчанию филиал выключен.
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm text-muted-foreground">
+                            Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. По умолчанию филиал выключен.
+                        </p>
+                        {branches.length > 0 ? (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={saving || branches.every((branch) => !(baseBonus[branch.uuid] ?? false) || (enabled[branch.uuid] ?? false))}
+                                onClick={() => {
+                                    setEnabled((current) => {
+                                        const next = { ...current };
+                                        for (const branch of branches) {
+                                            if (baseBonus[branch.uuid]) {
+                                                next[branch.uuid] = true;
+                                            }
+                                        }
+                                        return next;
+                                    });
+                                }}
+                            >
+                                Включить все с премией
+                            </Button>
+                        ) : null}
+                    </div>
                     {branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
                     {branches.map((branch) => {
                         const on = enabled[branch.uuid] ?? false;
+                        const hasBaseBonus = baseBonus[branch.uuid] ?? false;
+                        const bonus = formatBaseBonus(bonusAmount[branch.uuid] ?? null);
                         return (
                             <label key={branch.uuid} className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2">
-                                <span className="text-sm font-medium">{branch.name}</span>
+                                <span className="min-w-0 text-sm font-medium">{branch.name}</span>
+                                <span className={cn("shrink-0 text-sm tabular-nums", bonus === null && "text-muted-foreground")}>
+                                    {bonus ?? "Нет премии"}
+                                </span>
                                 <span className="flex items-center gap-2 text-sm">
                                     <Switch
                                         checked={on}
-                                        disabled={saving}
+                                        disabled={saving || (!hasBaseBonus && !on)}
                                         aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
-                                        onCheckedChange={(checked) => setEnabled((current) => ({ ...current, [branch.uuid]: checked }))}
+                                        onCheckedChange={(checked) => {
+                                            if (checked && !hasBaseBonus) {
+                                                return;
+                                            }
+                                            setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
+                                        }}
                                     />
                                     <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
                                         {on ? "Включена" : "Выключена"}

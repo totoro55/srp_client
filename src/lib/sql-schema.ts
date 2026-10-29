@@ -29,6 +29,7 @@ const EXTERNAL_TABLES = new Set([
     "product_kinds",
     "basket_category_stats",
     "basket_kind_stats",
+    "basic_bonuses",
 ]);
 
 function skipString(text: string, start: number): number {

@@ -44,6 +44,8 @@ export function restoreDraft(
     baskets: RrsBasketOffer[],
     baseForms: BasketForm[],
     branches: RrsBranch[],
+    savedEnabled: Record<string, boolean> = {},
+    baseBonus: Record<string, boolean> = {},
 ): DraftRestore {
     const notes: string[] = [];
     const basketById = new Map(baskets.map((basket) => [basket.id, basket]));
@@ -87,9 +89,18 @@ export function restoreDraft(
     });
     const knownBranches = new Set(branches.map((branch) => branch.uuid.toLowerCase()));
     let droppedBranches = 0;
+    let blockedByBonus = 0;
     const enabled: Record<string, boolean> = {};
     for (const branch of branches) {
-        enabled[branch.uuid] = draft.enabled[branch.uuid] ?? draft.enabled[branch.uuid.toLowerCase()] ?? false;
+        const wanted = draft.enabled[branch.uuid] ?? draft.enabled[branch.uuid.toLowerCase()] ?? false;
+        const savedOn = savedEnabled[branch.uuid] ?? savedEnabled[branch.uuid.toLowerCase()] ?? false;
+        const hasBaseBonus = baseBonus[branch.uuid] ?? baseBonus[branch.uuid.toLowerCase()] ?? false;
+        if (wanted && !hasBaseBonus && !savedOn) {
+            enabled[branch.uuid] = false;
+            blockedByBonus += 1;
+            continue;
+        }
+        enabled[branch.uuid] = wanted;
     }
     for (const uuid of Object.keys(draft.enabled)) {
         if (!knownBranches.has(uuid.toLowerCase())) {
@@ -132,6 +143,11 @@ export function restoreDraft(
     }
     if (droppedBranches > 0) {
         notes.push("Участие филиалов, которых больше нет на территории, не восстановлено.");
+    }
+    if (blockedByBonus > 0) {
+        notes.push(blockedByBonus === 1
+            ? "Филиал без базовой премии за выбранный месяц не включён."
+            : "Филиалы без базовой премии за выбранный месяц не включены.");
     }
     if (droppedCoefficients > 0) {
         notes.push("Коэффициенты, которых нет у выбранных версий или у выключенных филиалов, не восстановлены.");

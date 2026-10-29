@@ -144,4 +144,23 @@ BEGIN
             ADD CONSTRAINT basket_kind_stats_territory_uuid_fkey
             FOREIGN KEY (territory_uuid) REFERENCES dictionaries.territories (uuid) ON DELETE CASCADE;
     END IF;
+
+    IF to_regclass('raw.basic_bonuses') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'basic_bonuses_pkey' AND conrelid = 'raw.basic_bonuses'::regclass
+       ) THEN
+        ALTER TABLE raw.basic_bonuses
+            ADD CONSTRAINT basic_bonuses_pkey PRIMARY KEY (branch_uuid, period);
+    END IF;
+
+    IF to_regclass('raw.basic_bonuses') IS NOT NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'basic_bonuses_branch_uuid_fkey' AND conrelid = 'raw.basic_bonuses'::regclass
+       ) THEN
+        ALTER TABLE raw.basic_bonuses
+            ADD CONSTRAINT basic_bonuses_branch_uuid_fkey
+            FOREIGN KEY (branch_uuid) REFERENCES dictionaries.branches (uuid);
+    END IF;
 END $$;

@@ -74,15 +74,19 @@ export async function getBranchMotivation(
         [territoryUuid, period],
     );
     const enabledByBranch = new Map(stored.map((item) => [item.branchUuid.toLowerCase(), item.enabled]));
+    const listed = branches.map((branch) => ({ ...branch, uuid: branch.uuid.toLowerCase() }));
+    const withBonus = await branchesWithBaseBonus(period, listed.map((branch) => branch.uuid));
     return {
         territory: card.territory,
         period,
         editable: monthIsOpen(period.slice(0, 7), card.editPolicy),
-        branches: branches.map((branch) => ({ ...branch, uuid: branch.uuid.toLowerCase() })),
-        items: branches.map((branch) => {
-            const branchUuid = branch.uuid.toLowerCase();
-            return { branchUuid, enabled: enabledByBranch.get(branchUuid) ?? DEFAULT_ENABLED };
-        }),
+        branches: listed,
+        items: listed.map((branch) => ({
+            branchUuid: branch.uuid,
+            enabled: enabledByBranch.get(branch.uuid) ?? DEFAULT_ENABLED,
+            hasBaseBonus: withBonus.has(branch.uuid),
+            baseBonus: withBonus.get(branch.uuid) ?? null,
+        })),
         savedPeriods: card.savedPeriods.map((item) => item.period),
         appliedPeriod: card.appliedPeriod,
         editPolicy: card.editPolicy,
@@ -111,7 +115,13 @@ export async function saveBranchMotivation(
             throw new RrsRuleError(400, "Филиал указан дважды");
         }
         seen.add(branchUuid);
-        prepared.push({ branchUuid, enabled: item.enabled });
+        const current = page.items.find((row) => row.branchUuid === branchUuid);
+        prepared.push({
+            branchUuid,
+            enabled: item.enabled,
+            hasBaseBonus: current?.hasBaseBonus ?? false,
+            baseBonus: current?.baseBonus ?? null,
+        });
     }
     if (seen.size !== expected.size) {
         throw new RrsRuleError(400, "Передайте участие каждого филиала");
@@ -131,6 +141,10 @@ export async function saveBranchMotivation(
         if (item.enabled && removedIds.has(item.branchUuid) && !current?.enabled) {
             const branch = page.branches.find((row) => row.uuid === item.branchUuid);
             throw new RrsRuleError(400, `Филиал «${branch?.name ?? item.branchUuid}» помечен на удаление, подключить его нельзя`);
+        }
+        if (item.enabled && !item.hasBaseBonus && !current?.enabled) {
+            const branch = page.branches.find((row) => row.uuid === item.branchUuid);
+            throw new RrsRuleError(400, `Филиал «${branch?.name ?? item.branchUuid}» нельзя подключить: за выбранный месяц нет базовой премии`);
         }
     }
 
@@ -222,4 +236,22 @@ export async function listMotivationHistory(
 
 function participationLabel(enabled: boolean): string {
     return enabled ? "Включена" : "Выключена";
+}
+
+async function branchesWithBaseBonus(period: string, branchUuids: string[]): Promise<Map<string, string>> {
+    if (branchUuids.length === 0) {
+        return new Map();
+    }
+    const rows = await db.query<{ branchUuid: string; baseBonus: string }>(
+        `
+        SELECT branch_uuid::text AS "branchUuid",
+               btrim(base_bonus) AS "baseBonus"
+        FROM basic_bonuses
+        WHERE period = $1::date
+          AND branch_uuid = ANY($2::uuid[])
+          AND btrim(base_bonus) <> ''
+        `,
+        [period, branchUuids],
+    );
+    return new Map(rows.map((row) => [row.branchUuid.toLowerCase(), row.baseBonus]));
 }

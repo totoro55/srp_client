@@ -71,7 +71,7 @@ function readItems(value: unknown): RrsMotivationItem[] | null {
         if (typeof record.branchUuid !== "string" || typeof record.enabled !== "boolean") {
             return null;
         }
-        items.push({ branchUuid: record.branchUuid, enabled: record.enabled });
+        items.push({ branchUuid: record.branchUuid, enabled: record.enabled, hasBaseBonus: false, baseBonus: null });
     }
     return items;
 }
