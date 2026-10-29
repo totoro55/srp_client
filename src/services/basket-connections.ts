@@ -1,4 +1,4 @@
-import { readVersionSettings, type BasketParameter } from "@/lib/baskets";
+import { readVersionSettings, SALES_INDICATOR_NAME, type BasketParameter } from "@/lib/baskets";
 import {
     buildRrsEditPolicy,
     closedPeriodMessage,
@@ -214,7 +214,8 @@ export async function listRrsHistory(access: AccessView, territoryUuid: string):
                c.connected_by AS "savedBy",
                c.basket_id AS "basketId",
                b.name AS "basketName",
-               c.version_id AS "versionId"
+               c.version_id AS "versionId",
+               c.change_note AS note
         FROM basket_connections c
         JOIN baskets b ON b.id = c.basket_id
         WHERE c.territory_uuid = $1
@@ -225,7 +226,8 @@ export async function listRrsHistory(access: AccessView, territoryUuid: string):
                l.recorded_by,
                l.basket_id,
                b.name,
-               l.version_id
+               l.version_id,
+               l.change_note
         FROM basket_connections_log l
         JOIN baskets b ON b.id = l.basket_id
         WHERE l.territory_uuid = $1
@@ -254,6 +256,7 @@ export async function listRrsHistory(access: AccessView, territoryUuid: string):
             versionId: row.versionId,
             versionLabel: version ? `№ ${version.versionNo} ${version.name}` : null,
             values,
+            note: row.note,
         });
     }
     return [...groups.values()]
@@ -277,6 +280,13 @@ export async function saveRrsMonth(
     period: string,
     items: RrsConnectionInput[],
 ): Promise<void> {
+    await guardRrsMonth(access, territoryUuid, period);
+    await db.transaction(async (query) => {
+        await applyRrsMonth(query, access, territoryUuid, period, items);
+    });
+}
+
+export async function guardRrsMonth(access: AccessView, territoryUuid: string, period: string): Promise<void> {
     const territory = await db.query<{ deleted: boolean; linked: boolean }>(
         `
         SELECT deleted,
@@ -297,14 +307,23 @@ export async function saveRrsMonth(
         throw new RrsRuleError(400, "Территория помечена на удаление, подключить её нельзя");
     }
     await assertTerritory(access, territoryUuid);
+    await assertMonthOpen(period);
+}
+
+export async function applyRrsMonth(
+    query: Sql,
+    access: AccessView,
+    territoryUuid: string,
+    period: string,
+    items: RrsConnectionInput[],
+): Promise<void> {
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
     const targetMonth = period.slice(0, 7);
     if (!monthIsOpen(targetMonth, policy)) {
         throw new RrsRuleError(400, closedPeriodMessage(policy));
     }
-    await db.transaction(async (query) => {
-        const baskets = await loadOffers(query);
+    const baskets = await loadOffers(query);
         const versions = await loadVersions(query, baskets.map((basket) => basket.id));
         const latest = await loadLatest(query, territoryUuid, period);
         const latestByBasket = new Map(latest.map((row) => [row.basketId, row]));
@@ -330,7 +349,7 @@ export async function saveRrsMonth(
             }
             const current = latestByBasket.get(basket.id) ?? null;
             const storedValues = current ? sliceValues.get(basket.id) ?? null : null;
-            if (item.connected && !versionChangeOpen(targetMonth, policy)) {
+            if (item.connected && !versionChangeOpen(targetMonth, policy) && !access.actorFullAccess) {
                 const requiredVersionId = lockedVersionId(targetMonth, current, headByBasket.get(basket.id) ?? null);
                 if (requiredVersionId !== null && item.versionId !== requiredVersionId) {
                     throw new RrsRuleError(400, versionLockedMessage(basket.name));
@@ -349,7 +368,14 @@ export async function saveRrsMonth(
                 await writeDisconnected(query, access.username, territoryUuid, period, basket, current, versions);
             }
         }
-    });
+}
+
+async function assertMonthOpen(period: string): Promise<void> {
+    const settings = await getAppSettings();
+    const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    if (!monthIsOpen(period.slice(0, 7), policy)) {
+        throw new RrsRuleError(400, closedPeriodMessage(policy));
+    }
 }
 
 async function assertTerritory(access: AccessView, territoryUuid: string): Promise<void> {
@@ -415,6 +441,7 @@ async function loadOffers(query: Sql): Promise<RrsBasketOffer[]> {
                 status: row.versionStatus,
                 parameters: settings.parameters,
                 coefficients: settings.coefficients,
+                tariffAxis: settings.tariffAxis,
                 testTerritoryUuids: [],
             };
             basket.versions.push(version);
@@ -459,6 +486,7 @@ interface HistoryRow {
     basketId: number;
     basketName: string;
     versionId: number | null;
+    note: string | null;
 }
 
 interface HistoryVersion {
@@ -679,7 +707,12 @@ async function writeConnected(
     }
 
     const editingThisMonth = current?.period === period;
+    const versionChanged = current?.versionId != null && current.versionId !== version.id;
     const recordedAt = new Date();
+    const note = versionChanged ? versionChangeNote(basket) : null;
+    if (versionChanged) {
+        await clearBasketPeriod(query, actor, territoryUuid, period, basket, recordedAt);
+    }
     if (editingThisMonth && current) {
         await logRegistry(query, actor, territoryUuid, basket.id, period, recordedAt);
         if (current.versionId !== null && current.versionId !== version.id) {
@@ -688,12 +721,20 @@ async function writeConnected(
             await logParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, recordedAt);
         }
         await query(
+            versionChanged
+                ? `
+            UPDATE basket_connections
+            SET version_id = $4, connected_at = $6, connected_by = $5, change_note = $7
+            WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
             `
+                : `
             UPDATE basket_connections
             SET version_id = $4, connected_at = $6, connected_by = $5
             WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
             `,
-            [territoryUuid, basket.id, period, version.id, actor, recordedAt],
+            versionChanged
+                ? [territoryUuid, basket.id, period, version.id, actor, recordedAt, note]
+                : [territoryUuid, basket.id, period, version.id, actor, recordedAt],
         );
         if (current.versionId === version.id) {
             await updateParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, parsed, recordedAt);
@@ -702,10 +743,10 @@ async function writeConnected(
     } else {
         await query(
             `
-            INSERT INTO basket_connections (territory_uuid, basket_id, period, version_id, connected_by)
-            VALUES ($1, $2, $3::date, $4, $5)
+            INSERT INTO basket_connections (territory_uuid, basket_id, period, version_id, connected_by, change_note)
+            VALUES ($1, $2, $3::date, $4, $5, $6)
             `,
-            [territoryUuid, basket.id, period, version.id, actor],
+            [territoryUuid, basket.id, period, version.id, actor, note],
         );
     }
     await insertParameters(query, actor, territoryUuid, period, storedVersion.dataTable, version.parameters, parsed);
@@ -726,26 +767,100 @@ async function writeDisconnected(
     if (!current || current.versionId === null) {
         return;
     }
+    const recordedAt = new Date();
+    const note = disconnectNote(basket);
+    await clearBasketPeriod(query, actor, territoryUuid, period, basket, recordedAt);
     if (current.period === period) {
-        const recordedAt = new Date();
         await logRegistry(query, actor, territoryUuid, basket.id, period, recordedAt);
         await logAndDeleteParameters(query, actor, territoryUuid, period, versions, current.versionId, recordedAt);
         await query(
             `
             UPDATE basket_connections
-            SET version_id = NULL, connected_at = $5, connected_by = $4
+            SET version_id = NULL, connected_at = $5, connected_by = $4, change_note = $6
             WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
             `,
-            [territoryUuid, basket.id, period, actor, recordedAt],
+            [territoryUuid, basket.id, period, actor, recordedAt, note],
         );
         return;
     }
     await query(
         `
-        INSERT INTO basket_connections (territory_uuid, basket_id, period, version_id, connected_by)
-        VALUES ($1, $2, $3::date, NULL, $4)
+        INSERT INTO basket_connections (territory_uuid, basket_id, period, version_id, connected_by, change_note)
+        VALUES ($1, $2, $3::date, NULL, $4, $5)
         `,
-        [territoryUuid, basket.id, period, actor],
+        [territoryUuid, basket.id, period, actor, note],
+    );
+}
+
+function versionChangeNote(basket: RrsBasketOffer): string {
+    if (basket.indicatorName === SALES_INDICATOR_NAME) {
+        return `Версия корзины «${basket.name}» изменена. За этот месяц удалены настройки корзины, коэффициенты филиалов, тарифы и исключения.`;
+    }
+    return `Версия корзины «${basket.name}» изменена. За этот месяц удалены настройки корзины и коэффициенты филиалов.`;
+}
+
+function disconnectNote(basket: RrsBasketOffer): string {
+    if (basket.indicatorName === SALES_INDICATOR_NAME) {
+        return `Корзина «${basket.name}» отключена. За этот месяц удалены настройки корзины, коэффициенты филиалов, тарифы и исключения.`;
+    }
+    return `Корзина «${basket.name}» отключена. За этот месяц удалены настройки корзины и коэффициенты филиалов.`;
+}
+
+async function clearBasketPeriod(
+    query: Sql,
+    actor: string,
+    territoryUuid: string,
+    period: string,
+    basket: RrsBasketOffer,
+    recordedAt: Date,
+): Promise<void> {
+    await query(
+        `
+        INSERT INTO basket_branch_coefficients_log (
+            territory_uuid, basket_id, period, branch_uuid, coefficient_key, value, set_at, set_by, recorded_by, recorded_at
+        )
+        SELECT territory_uuid, basket_id, period, branch_uuid, coefficient_key, value, set_at, set_by, $4, $5
+        FROM basket_branch_coefficients
+        WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
+        `,
+        [territoryUuid, basket.id, period, actor, recordedAt],
+    );
+    await query(
+        `
+        DELETE FROM basket_branch_coefficients
+        WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
+        `,
+        [territoryUuid, basket.id, period],
+    );
+    if (basket.indicatorName !== SALES_INDICATOR_NAME) {
+        return;
+    }
+    await query(
+        `
+        INSERT INTO basket_tariff_exceptions_log (
+            territory_uuid, period, axis, code, title, base_mode, automatic, main, im, b2b, removed, set_at, set_by, recorded_by, recorded_at
+        )
+        SELECT territory_uuid, period, axis, code, title, base_mode, automatic, main, im, b2b, removed, set_at, set_by, $3, $4
+        FROM basket_tariff_exceptions
+        WHERE territory_uuid = $1 AND period = $2::date
+        `,
+        [territoryUuid, period, actor, recordedAt],
+    );
+    await query(
+        `DELETE FROM basket_tariff_exceptions WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
+    );
+    await query(
+        `DELETE FROM basket_category_tariffs WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
+    );
+    await query(
+        `DELETE FROM basket_kind_tariffs WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
+    );
+    await query(
+        `DELETE FROM basket_tariff_month WHERE territory_uuid = $1 AND period = $2::date`,
+        [territoryUuid, period],
     );
 }
 
@@ -753,9 +868,9 @@ async function logRegistry(query: Sql, actor: string, territoryUuid: string, bas
     await query(
         `
         INSERT INTO basket_connections_log (
-            territory_uuid, basket_id, period, version_id, connected_at, connected_by, recorded_by, recorded_at
+            territory_uuid, basket_id, period, version_id, connected_at, connected_by, recorded_by, recorded_at, change_note
         )
-        SELECT territory_uuid, basket_id, period, version_id, connected_at, connected_by, $4, $5
+        SELECT territory_uuid, basket_id, period, version_id, connected_at, connected_by, $4, $5, change_note
         FROM basket_connections
         WHERE territory_uuid = $1 AND basket_id = $2 AND period = $3::date
         `,

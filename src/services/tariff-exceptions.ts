@@ -1,11 +1,12 @@
 import type { QueryResultRow } from "pg";
 import { SALES_INDICATOR_NAME, isTariffAxis, readVersionSettings, TARIFF_BOUND_KEYS, type TariffAxis } from "@/lib/baskets";
 import { resolveConnectionValues } from "@/lib/rrs";
-import { closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
-import { calculateAlgorithmTariffs, calculateServiceTariffs, rowBecomesException, tariffRowComplete, territoryMean, type TariffSaveRow, type TariffServiceContext } from "@/lib/tariff-calculation";
+import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
+import { calculateAlgorithmTariffs, calculateServiceTariffs, DEFAULT_TARIFF_REFERENCE, isTariffReference, rowBecomesException, tariffRowComplete, territoryMean, territoryReference, type TariffReference, type TariffSaveRow, type TariffServiceContext } from "@/lib/tariff-calculation";
 import { isTariffBaseMode, type TariffCategoryFolder, type TariffExceptionInput, type TariffExceptionLine, type TariffExceptionPage, type TariffExceptionReport, type TariffExceptionReportRow, type TariffSegmentMatch, type CalculatedTariffRow } from "@/lib/tariff-exceptions";
 import type { AccessView } from "@/server/authz/resolve-access";
-import { getRrsCard, RrsRuleError } from "@/services/basket-connections";
+import { getRrsCard, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
+import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 
 const AXIS_TABLE = {
@@ -120,6 +121,7 @@ export async function getTariffExceptions(
         otherAxisTitles: other.map((row) => row.title),
         weights: axis === null ? null : await loadAlgorithmWeights(access, territoryUuid, axis),
         bounds: connection?.versionId ? await loadTariffBounds(territoryUuid, card.period, connection.versionId) : emptyTariffBounds(),
+        reference: await loadMonthReference(territoryUuid, card.period),
     };
 }
 
@@ -138,6 +140,7 @@ function emptyTariffPage(card: Awaited<ReturnType<typeof getRrsCard>>, period: s
         otherAxisTitles: [],
         weights: null,
         bounds: emptyTariffBounds(),
+        reference: DEFAULT_TARIFF_REFERENCE,
     };
 }
 
@@ -197,6 +200,7 @@ export async function saveTariffExceptions(
     period: string,
     rows: TariffSaveRow[],
     weights: { salesShareWeight: number; priceShareWeight: number } | null = null,
+    reference: TariffReference = DEFAULT_TARIFF_REFERENCE,
 ): Promise<void> {
     const page = await getTariffExceptions(access, territoryUuid, period);
     if (!page.connection?.axis) {
@@ -220,8 +224,10 @@ export async function saveTariffExceptions(
     if (missing) {
         throw new RrsRuleError(400, "Код тарифа не найден в справочнике этого вида расчета");
     }
+    assertTariffReference(page.weights?.referenceSelectable ?? false, page.reference, reference);
     const source = AXIS_TABLE[axis];
     await db.transaction(async (query) => {
+        await writeMonthReference(query, territoryUuid, period, reference);
         if (weights && page.weights?.editable) {
             await query(
                 `
@@ -315,7 +321,7 @@ export async function saveTariffExceptions(
                 [territoryUuid, period, axis, item.code, titles.get(item.code), item.baseMode, item.automatic, item.main, item.im, item.b2b, access.username],
             );
         }
-        const effective = await loadSlices(territoryUuid, period);
+        const effective = await loadSlices(territoryUuid, period, query);
         for (const row of effective) {
             if (row.axis !== axis || row.removed || wanted.has(row.code) || !expected.has(row.code)) {
                 continue;
@@ -478,8 +484,8 @@ async function loadSalesConnection(territoryUuid: string, period: string): Promi
     };
 }
 
-async function loadSlices(territoryUuid: string, period: string): Promise<SliceRow[]> {
-    return db.query<SliceRow>(
+async function loadSlices(territoryUuid: string, period: string, query: Sql = db.query.bind(db)): Promise<SliceRow[]> {
+    return query<SliceRow>(
         `
         SELECT DISTINCT ON (exception.axis, exception.code)
                exception.axis,
@@ -601,15 +607,19 @@ export async function previewRecalculatedTariffs(
     access: AccessView,
     territoryUuid: string,
     period: string,
+    reference?: TariffReference,
 ): Promise<CalculatedTariffRow[]> {
     const page = await openTariffPeriod(access, territoryUuid, period);
-    return calculatePeriodTariffs(page);
+    const chosen = reference ?? page.reference;
+    assertTariffReference(page.weights?.referenceSelectable ?? false, page.reference, chosen);
+    return calculatePeriodTariffs(page, chosen);
 }
 
 export async function saveRecalculatedTariffs(
     access: AccessView,
     territoryUuid: string,
     period: string,
+    reference?: TariffReference,
 ): Promise<{ saved: number }> {
     const page = await openTariffPeriod(access, territoryUuid, period);
     const axis = page.connection?.axis;
@@ -617,7 +627,9 @@ export async function saveRecalculatedTariffs(
     if (!axis || versionId === undefined) {
         throw new RrsRuleError(400, "У подключённой версии продаж не выбран вид расчета тарифов");
     }
-    const rows = calculatePeriodTariffs(page);
+    const chosen = reference ?? page.reference;
+    assertTariffReference(page.weights?.referenceSelectable ?? false, page.reference, chosen);
+    const rows = calculatePeriodTariffs(page, chosen);
     if (rows.length === 0) {
         throw new RrsRuleError(400, "В статистике этого месяца нет категорий для расчёта");
     }
@@ -626,6 +638,7 @@ export async function saveRecalculatedTariffs(
     }
     const source = AXIS_TABLE[axis];
     await db.transaction(async (query) => {
+        await writeMonthReference(query, territoryUuid, period, chosen);
         for (const row of rows) {
             await query(
                 `
@@ -649,6 +662,200 @@ export async function saveRecalculatedTariffs(
     return { saved: rows.length };
 }
 
+export async function previewConnectionTariffs(
+    access: AccessView,
+    territoryUuid: string,
+    period: string,
+    versionId: number,
+    values: Record<string, string>,
+): Promise<TariffExceptionPage> {
+    await guardRrsMonth(access, territoryUuid, period);
+    const territory = (await listRrsTerritories(access)).find((item) => item.uuid.toLowerCase() === territoryUuid.toLowerCase());
+    if (!territory) {
+        throw new RrsRuleError(403, "Эта РРС вам не назначена");
+    }
+    const settings = await getAppSettings();
+    const editPolicy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    const versionRows = await db.query<{ versionNo: number; name: string; status: string; tariffAxis: string | null; versionSettings: unknown }>(
+        `
+        SELECT version_no AS "versionNo", name, status, tariff_axis AS "tariffAxis", settings AS "versionSettings"
+        FROM basket_versions
+        WHERE id = $1
+        `,
+        [versionId],
+    );
+    const version = versionRows[0];
+    if (!version) {
+        throw new RrsRuleError(400, "Выберите версию корзины продаж");
+    }
+    const versionSettings = readVersionSettings(version.versionSettings);
+    const resolved = resolveConnectionValues(versionSettings.parameters, values);
+    const issue = resolved.issues[0];
+    if (issue) {
+        throw new RrsRuleError(400, issue.message);
+    }
+    const axis = isTariffAxis(version.tariffAxis) ? version.tariffAxis : null;
+    const saved = await loadSalesConnection(territoryUuid, period);
+    const keepExceptions = saved?.versionId === versionId && saved.axis === axis;
+    const slices = axis && keepExceptions ? await loadSlices(territoryUuid, period) : [];
+    const current = axis === null ? [] : slices.filter((row) => row.axis === axis && !row.removed);
+    const inStats = axis === null ? new Set<string>() : await statsCodes(territoryUuid, period, axis, current.map((row) => row.code));
+    const savedPeriods = await db.query<{ period: string }>(
+        `SELECT to_char(period, 'YYYY-MM-DD') AS period FROM basket_connections WHERE territory_uuid = $1 GROUP BY period ORDER BY period DESC`,
+        [territoryUuid],
+    );
+    return {
+        territory,
+        period,
+        appliedPeriod: null,
+        savedPeriods: savedPeriods.map((item) => item.period),
+        editable: axis !== null && monthIsOpen(period.slice(0, 7), editPolicy),
+        editPolicy,
+        connection: {
+            versionId,
+            versionNo: version.versionNo,
+            versionName: version.name,
+            versionStatus: version.status,
+            axis,
+        },
+        exceptions: current.map((row) => toLine(row, inStats.has(row.code))),
+        stats: axis === null ? [] : await loadSalesStats(territoryUuid, period, axis),
+        otherAxis: null,
+        otherAxisTitles: [],
+        weights: axis === null ? null : await loadAlgorithmWeights(access, territoryUuid, axis),
+        bounds: TARIFF_BOUND_KEYS.map((key) => {
+            const parameter = versionSettings.parameters.find((item) => item.key === key);
+            const value = resolved.values[key];
+            return {
+                key,
+                title: parameter?.title.trim() || key,
+                value: typeof value === "number" ? String(value) : null,
+            };
+        }),
+        reference: keepExceptions ? await loadMonthReference(territoryUuid, period) : DEFAULT_TARIFF_REFERENCE,
+    };
+}
+
+export async function writeWizardTariffs(
+    query: Sql,
+    access: AccessView,
+    territoryUuid: string,
+    period: string,
+    tariffs: { rows: TariffSaveRow[]; reference: TariffReference; weights: { salesShareWeight: number; priceShareWeight: number } | null } | null,
+): Promise<void> {
+    const connection = await loadSalesConnectionWith(query, territoryUuid, period);
+    if (!connection?.axis || connection.versionId === null) {
+        if (tariffs && tariffs.rows.length > 0) {
+            throw new RrsRuleError(400, "У подключённой версии продаж не выбран вид расчета тарифов");
+        }
+        return;
+    }
+    const axis = connection.axis;
+    const stats = await loadSalesStats(territoryUuid, period, axis);
+    if (stats.length === 0) {
+        if (tariffs && tariffs.rows.length > 0) {
+            throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой этого месяца");
+        }
+        return;
+    }
+    if (!tariffs) {
+        throw new RrsRuleError(400, "Сохраните тарифы месяца");
+    }
+    const weights = connection.versionId ? await loadAlgorithmWeights(access, territoryUuid, axis) : null;
+    const stored = await loadMonthReference(territoryUuid, period, query);
+    assertTariffReference(weights?.referenceSelectable ?? false, stored, tariffs.reference);
+    const expected = new Set(stats.map((stat) => stat.code));
+    if (tariffs.rows.length !== expected.size || tariffs.rows.some((row) => !expected.has(row.code))) {
+        throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой этого месяца");
+    }
+    if (tariffs.rows.some((row) => !Number.isFinite(row.main) || !Number.isFinite(row.im) || !Number.isFinite(row.b2b))) {
+        throw new RrsRuleError(400, "Нельзя сохранить тарифы, пока хотя бы одно поле пустое");
+    }
+    const titles = await titlesOf(axis, tariffs.rows.map((row) => row.code));
+    const missing = tariffs.rows.find((row) => !titles.has(row.code));
+    if (missing) {
+        throw new RrsRuleError(400, "Код тарифа не найден в справочнике этого вида расчета");
+    }
+    const source = AXIS_TABLE[axis];
+    if (tariffs.weights && weights?.editable) {
+        await query(
+            `
+            INSERT INTO tariff_algorithm_territory_weights (
+                algorithm_code, territory_uuid, sales_share_weight, price_share_weight
+            )
+            VALUES ($1::varchar, $2::uuid, $3::smallint, $4::smallint)
+            ON CONFLICT (algorithm_code, territory_uuid) DO UPDATE
+            SET sales_share_weight = EXCLUDED.sales_share_weight,
+                price_share_weight = EXCLUDED.price_share_weight
+            `,
+            [axis, territoryUuid, tariffs.weights.salesShareWeight, tariffs.weights.priceShareWeight],
+        );
+    }
+    await writeMonthReference(query, territoryUuid, period, tariffs.reference);
+    for (const row of tariffs.rows) {
+        await query(
+            `
+            INSERT INTO ${source.tariffs} (
+                territory_uuid, period, version_id, code, title, base_mode, main, im, b2b
+            )
+            VALUES ($1, $2::date, $3, $4::uuid, $5, $6, $7, $8, $9)
+            ON CONFLICT (territory_uuid, period, code) DO UPDATE
+            SET version_id = EXCLUDED.version_id,
+                title = EXCLUDED.title,
+                base_mode = EXCLUDED.base_mode,
+                main = EXCLUDED.main,
+                im = EXCLUDED.im,
+                b2b = EXCLUDED.b2b,
+                calculated_at = NOW()
+            `,
+            [territoryUuid, period, connection.versionId, row.code, titles.get(row.code), row.baseMode, row.main, row.im, row.b2b],
+        );
+    }
+    await writeExceptionRules(
+        query,
+        access.username,
+        territoryUuid,
+        period,
+        axis,
+        expected,
+        titles,
+        exceptionItems(tariffs.rows),
+    );
+}
+
+async function loadSalesConnectionWith(query: Sql, territoryUuid: string, period: string): Promise<TariffExceptionPage["connection"]> {
+    const rows = await query<{ versionId: number | null; versionNo: number | null; versionName: string | null; versionStatus: string | null; tariffAxis: string | null }>(
+        `
+        SELECT connection.version_id AS "versionId",
+               version.version_no AS "versionNo",
+               version.name AS "versionName",
+               version.status AS "versionStatus",
+               version.tariff_axis AS "tariffAxis"
+        FROM basket_connections connection
+        JOIN baskets basket ON basket.id = connection.basket_id
+        JOIN indicators indicator ON indicator.id = basket.indicator_id
+        LEFT JOIN basket_versions version ON version.id = connection.version_id
+        WHERE connection.territory_uuid = $1
+          AND connection.period <= $2::date
+          AND indicator.name = $3
+        ORDER BY connection.period DESC
+        LIMIT 1
+        `,
+        [territoryUuid, period, SALES_INDICATOR_NAME],
+    );
+    const row = rows[0];
+    if (!row?.versionId || row.versionNo === null || !row.versionName || !row.versionStatus) {
+        return null;
+    }
+    return {
+        versionId: row.versionId,
+        versionNo: row.versionNo,
+        versionName: row.versionName,
+        versionStatus: row.versionStatus,
+        axis: isTariffAxis(row.tariffAxis) ? row.tariffAxis : null,
+    };
+}
+
 async function openTariffPeriod(access: AccessView, territoryUuid: string, period: string): Promise<TariffExceptionPage> {
     const page = await getTariffExceptions(access, territoryUuid, period);
     if (!page.editable) {
@@ -657,8 +864,8 @@ async function openTariffPeriod(access: AccessView, territoryUuid: string, perio
     return page;
 }
 
-function calculatePeriodTariffs(page: TariffExceptionPage): CalculatedTariffRow[] {
-    const context = tariffServiceContext(page);
+function calculatePeriodTariffs(page: TariffExceptionPage, reference: TariffReference = page.reference): CalculatedTariffRow[] {
+    const context = tariffServiceContext(page, reference);
     const byCode = new Map(page.exceptions.map((line) => [line.code, line]));
     return page.stats.map((stat) => {
         const exception = byCode.get(stat.code) ?? null;
@@ -688,7 +895,7 @@ function calculatePeriodTariffs(page: TariffExceptionPage): CalculatedTariffRow[
     });
 }
 
-function tariffServiceContext(page: TariffExceptionPage): TariffServiceContext | null {
+function tariffServiceContext(page: TariffExceptionPage, reference: TariffReference = page.reference): TariffServiceContext | null {
     if (!page.weights) {
         return null;
     }
@@ -698,9 +905,41 @@ function tariffServiceContext(page: TariffExceptionPage): TariffServiceContext |
         min: boundNumber(page.bounds, "min"),
         base: boundNumber(page.bounds, "base"),
         max: boundNumber(page.bounds, "max"),
-        averagePrice: territoryMean(page.stats.map((stat) => stat.avgPrice)),
-        averageQuantity: territoryMean(page.stats.map((stat) => stat.quantity)),
+        averagePrice: territoryReference(page.stats.map((stat) => stat.avgPrice), reference),
+        averageQuantity: territoryReference(page.stats.map((stat) => stat.quantity), reference),
+        adjustShareByPrice: reference === "priceAdjusted",
     };
+}
+
+function assertTariffReference(selectable: boolean, stored: TariffReference, requested: TariffReference): void {
+    if (requested === "mean" || requested === stored || selectable) {
+        return;
+    }
+    throw new RrsRuleError(400, "Выбор опоры расчёта для этой территории не разрешён");
+}
+
+async function loadMonthReference(territoryUuid: string, period: string, query: Sql = db.query.bind(db)): Promise<TariffReference> {
+    const rows = await query<{ reference: string }>(
+        `
+        SELECT reference
+        FROM basket_tariff_month
+        WHERE territory_uuid = $1 AND period = $2::date
+        `,
+        [territoryUuid, period],
+    );
+    return isTariffReference(rows[0]?.reference) ? rows[0].reference : DEFAULT_TARIFF_REFERENCE;
+}
+
+async function writeMonthReference(query: Sql, territoryUuid: string, period: string, reference: TariffReference): Promise<void> {
+    await query(
+        `
+        INSERT INTO basket_tariff_month (territory_uuid, period, reference)
+        VALUES ($1, $2::date, $3)
+        ON CONFLICT (territory_uuid, period) DO UPDATE
+        SET reference = EXCLUDED.reference
+        `,
+        [territoryUuid, period, reference],
+    );
 }
 
 function boundNumber(bounds: TariffExceptionPage["bounds"], key: "min" | "base" | "max"): number | null {
@@ -781,7 +1020,7 @@ async function writeExceptionRules(
             [territoryUuid, period, axis, item.code, title, item.baseMode, item.automatic, item.main, item.im, item.b2b, actor],
         );
     }
-    const effective = await loadSlices(territoryUuid, period);
+    const effective = await loadSlices(territoryUuid, period, query);
     for (const row of effective) {
         if (row.axis !== axis || row.removed || wanted.has(row.code) || !expected.has(row.code)) {
             continue;

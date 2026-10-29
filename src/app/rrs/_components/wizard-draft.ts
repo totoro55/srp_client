@@ -8,6 +8,7 @@ export interface WizardDraft {
     territoryUuid: string;
     month: string;
     step: number;
+    stepKey?: string;
     forms: BasketForm[];
     enabled: Record<string, boolean>;
     coefficients: Record<string, string>;
@@ -18,7 +19,8 @@ export interface DraftRestore {
     forms: BasketForm[];
     enabled: Record<string, boolean>;
     coefficients: Record<string, string>;
-    step: number;
+    stepKey: string | null;
+    legacyStep: number;
     notes: string[];
 }
 
@@ -152,7 +154,14 @@ export function restoreDraft(
     if (droppedCoefficients > 0) {
         notes.push("Коэффициенты, которых нет у выбранных версий или у выключенных филиалов, не восстановлены.");
     }
-    return { forms, enabled, coefficients, step: draft.step, notes };
+    return {
+        forms,
+        enabled,
+        coefficients,
+        stepKey: typeof draft.stepKey === "string" ? draft.stepKey : null,
+        legacyStep: draft.step,
+        notes,
+    };
 }
 
 function readKey(key: string): WizardDraft | null {
@@ -170,6 +179,7 @@ function readKey(key: string): WizardDraft | null {
             territoryUuid: parsed.territoryUuid,
             month: parsed.month,
             step: typeof parsed.step === "number" ? parsed.step : 0,
+            stepKey: typeof parsed.stepKey === "string" ? parsed.stepKey : undefined,
             forms: parsed.forms,
             enabled: parsed.enabled ?? {},
             coefficients: parsed.coefficients ?? {},

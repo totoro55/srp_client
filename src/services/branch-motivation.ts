@@ -4,6 +4,9 @@ import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage, RrsTerr
 import { getAppSettings } from "@/services/app-settings";
 import { getRrsCard, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { db } from "@/services/db";
+import type { QueryResultRow } from "pg";
+
+type Sql = <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>;
 import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
 import type { AccessView } from "@/server/authz/resolve-access";
 
@@ -99,6 +102,18 @@ export async function saveBranchMotivation(
     period: string,
     items: RrsMotivationItem[],
 ): Promise<void> {
+    const prepared = await prepareBranchMotivation(access, territoryUuid, period, items);
+    await db.transaction(async (query) => {
+        await writeBranchMotivation(query, access.username, territoryUuid, prepared.period, prepared.items);
+    });
+}
+
+export async function prepareBranchMotivation(
+    access: AccessView,
+    territoryUuid: string,
+    period: string,
+    items: RrsMotivationItem[],
+): Promise<{ period: string; items: RrsMotivationItem[] }> {
     const page = await getBranchMotivation(access, territoryUuid, period);
     if (!page.editable) {
         throw new RrsRuleError(400, closedPeriodMessage(page.editPolicy));
@@ -147,37 +162,44 @@ export async function saveBranchMotivation(
             throw new RrsRuleError(400, `Филиал «${branch?.name ?? item.branchUuid}» нельзя подключить: за выбранный месяц нет базовой премии`);
         }
     }
+    return { period: page.period, items: prepared };
+}
 
-    await db.transaction(async (query) => {
-        await query(
-            `
-            INSERT INTO basket_branch_motivation_log (
-                territory_uuid, period, branch_uuid, enabled, set_at, set_by, recorded_by
-            )
-            SELECT territory_uuid, period, branch_uuid, enabled, set_at, set_by, $3
-            FROM basket_branch_motivation
-            WHERE territory_uuid = $1 AND period = $2::date
-            `,
-            [territoryUuid, page.period, access.username],
-        );
-        await query(
-            "DELETE FROM basket_branch_motivation WHERE territory_uuid = $1 AND period = $2::date",
-            [territoryUuid, page.period],
-        );
-        if (prepared.length === 0) {
-            return;
-        }
-        await query(
-            `
-            INSERT INTO basket_branch_motivation (
-                territory_uuid, period, branch_uuid, enabled, set_by
-            )
-            SELECT $1, $2::date, branch_uuid, enabled, $3
-            FROM unnest($4::uuid[], $5::boolean[]) AS row(branch_uuid, enabled)
-            `,
-            [territoryUuid, page.period, access.username, prepared.map((item) => item.branchUuid), prepared.map((item) => item.enabled)],
-        );
-    });
+export async function writeBranchMotivation(
+    query: Sql,
+    actor: string,
+    territoryUuid: string,
+    period: string,
+    prepared: RrsMotivationItem[],
+): Promise<void> {
+    await query(
+        `
+        INSERT INTO basket_branch_motivation_log (
+            territory_uuid, period, branch_uuid, enabled, set_at, set_by, recorded_by
+        )
+        SELECT territory_uuid, period, branch_uuid, enabled, set_at, set_by, $3
+        FROM basket_branch_motivation
+        WHERE territory_uuid = $1 AND period = $2::date
+        `,
+        [territoryUuid, period, actor],
+    );
+    await query(
+        "DELETE FROM basket_branch_motivation WHERE territory_uuid = $1 AND period = $2::date",
+        [territoryUuid, period],
+    );
+    if (prepared.length === 0) {
+        return;
+    }
+    await query(
+        `
+        INSERT INTO basket_branch_motivation (
+            territory_uuid, period, branch_uuid, enabled, set_by
+        )
+        SELECT $1, $2::date, branch_uuid, enabled, $3
+        FROM unnest($4::uuid[], $5::boolean[]) AS row(branch_uuid, enabled)
+        `,
+        [territoryUuid, period, actor, prepared.map((item) => item.branchUuid), prepared.map((item) => item.enabled)],
+    );
 }
 
 export async function listMotivationHistory(

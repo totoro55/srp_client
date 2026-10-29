@@ -80,6 +80,8 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
             { path: "/api/rrs/cards/[territoryUuid]/readiness", description: "GET показывает, чего не хватает в настройке территории." },
             { path: "/api/rrs/setup", description: "GET отдаёт территории без карточки, корзины для подключения и окно правки месяца." },
             { path: "/api/rrs/connections", description: "GET читает подключённые корзины месяца. PUT сохраняет подключение." },
+            { path: "/api/rrs/wizard", description: "POST записывает подключения корзин, участие филиалов, коэффициенты и тарифы выбранного месяца одной операцией. Требуется право baskets:connect." },
+            { path: "/api/rrs/wizard/tariffs", description: "POST рассчитывает тарифы по переданному, ещё не записанному подключению корзины продаж. Результат не сохраняется." },
             { path: "/api/rrs/cards/[territoryUuid]/motivation", description: "GET читает участие филиалов в мотивации. Подключить филиал можно, если за выбранный месяц у него есть базовая премия. PUT сохраняет участие." },
             { path: "/api/rrs/cards/[territoryUuid]/motivation/history", description: "GET возвращает журнал участия филиалов." },
             { path: "/api/rrs/cards/[territoryUuid]/coefficients", description: "GET читает коэффициенты филиалов. PUT сохраняет их." },

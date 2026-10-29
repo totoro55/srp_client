@@ -101,7 +101,9 @@ const NOTES: Record<string, string> = {
     "basket_version_test_territories.version_id": "Тестовая версия",
 
     "basket_connections.version_id": "Версия корзины. Пусто — с этого месяца корзина отключена",
+    "basket_connections.change_note": "Пояснение к смене версии или отключению: какие данные месяца удалены. Пусто, если такой операции не было",
     "basket_connections_log.version_id": "Версия в снимке до исправления. Пусто — корзина была отключена",
+    "basket_connections_log.change_note": "Пояснение к смене версии или отключению в снимке до исправления",
     "basket_connections_log.connected_at": "Когда было записано прежнее подключение",
     "basket_connections_log.connected_by": "Кто записал прежнее подключение",
 
@@ -150,6 +152,9 @@ const NOTES: Record<string, string> = {
     "basket_kind_tariffs.im": "Ставка интернет-магазина. Пусто — ещё не посчитана",
     "basket_kind_tariffs.b2b": "Ставка безнала. Пусто — ещё не посчитана",
     "basket_kind_tariffs.calculated_at": "Когда посчитали снимок",
+    "basket_tariff_month.territory_uuid": "Территория, для которой записана опора расчёта",
+    "basket_tariff_month.period": "Месяц, на который действует опора расчёта",
+    "basket_tariff_month.reference": "Опора расчёта: mean, median, trimmed или priceAdjusted. По умолчанию mean",
 
     "basket_branch_motivation.enabled": "Филиал участвует в мотивации",
     "basket_branch_motivation_log.enabled": "Участие в снимке до исправления",
@@ -260,6 +265,7 @@ const INTRO: Record<string, string> = {
     basket_branch_motivation_log: "Предыдущий снимок участия филиала перед исправлением.",
     basket_branch_coefficients_log: "Предыдущий снимок коэффициента перед исправлением.",
     basket_tariff_exceptions_log: "Предыдущий снимок исключения тарифа перед исправлением.",
+    basket_tariff_month: "Опора расчёта тарифов территории за месяц. На территорию и месяц приходится одна запись. По умолчанию применяется среднее.",
 };
 
 export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
@@ -281,7 +287,7 @@ export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
             "basket_connections", "basket_connections_log",
             "tariff_algorithms", "tariff_algorithm_weight_grants", "tariff_algorithm_territory_weights", "tariff_algorithm_reference_grants",
             "basket_tariff_exceptions", "basket_tariff_exceptions_log",
-            "basket_category_tariffs", "basket_kind_tariffs",
+            "basket_category_tariffs", "basket_kind_tariffs", "basket_tariff_month",
         ],
     },
     {

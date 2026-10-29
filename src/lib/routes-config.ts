@@ -71,7 +71,7 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 href: "/rrs",
                 icon: Building2,
                 title: "Настройки РРС",
-                description: "Карточки настроек территорий",
+                description: "Карточки территорий: состав корзин, участие филиалов, коэффициенты и тарифы",
                 permission: "baskets:connect",
             },
         ],

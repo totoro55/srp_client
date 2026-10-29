@@ -13,12 +13,26 @@ export interface TariffServiceColumns {
     shareTariff: string | null;
 }
 
-/** Вариант расчёта на экране тарифов. В базу не пишется, сохранение идёт от среднего. */
+/** Опора расчёта тарифов месяца. Пишется в снимок месяца и участвует в пересчёте. */
 export const TARIFF_REFERENCES = ["mean", "median", "trimmed", "priceAdjusted"] as const;
 
 export type TariffReference = (typeof TARIFF_REFERENCES)[number];
 
 export const DEFAULT_TARIFF_REFERENCE: TariffReference = "mean";
+
+export function isTariffReference(value: unknown): value is TariffReference {
+    return typeof value === "string" && (TARIFF_REFERENCES as readonly string[]).includes(value);
+}
+
+export function parseTariffReference(value: unknown): TariffReference | { error: string } {
+    if (value === undefined || value === null || value === "") {
+        return DEFAULT_TARIFF_REFERENCE;
+    }
+    if (isTariffReference(value)) {
+        return value;
+    }
+    return { error: "Выберите опору расчёта" };
+}
 
 /** Доля крайних значений, которую усечённое среднее отбрасывает с каждого края. */
 export const TRIMMED_MEAN_PROPORTION = 0.1;

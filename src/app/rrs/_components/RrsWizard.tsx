@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Asterisk, Check, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
@@ -12,7 +12,9 @@ import { Switch } from "@/components/ui/switch";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SALES_INDICATOR_NAME } from "@/lib/baskets";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
+import { useAccess } from "@/hooks/useAccess";
 import { useSession } from "next-auth/react";
 import { formatBaseBonus, withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
@@ -28,6 +30,8 @@ import { deleteDraft, readDraft, restoreDraft, writeDraft, type WizardDraft } fr
 import { cn } from "@/lib/utils";
 import { ParameterField } from "./ParameterField";
 import { VersionChoice } from "./VersionChoice";
+import { WizardTariffStep } from "./WizardTariffStep";
+import type { WizardTariffDraft } from "./TariffExceptions";
 import {
     basketsForTerritory,
     currentMonth,
@@ -56,7 +60,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [policy, setPolicy] = useState<RrsEditPolicy | null>(null);
     const [periodNote, setPeriodNote] = useState<string | null>(null);
     const [forms, setForms] = useState<BasketForm[]>([]);
-    const [step, setStep] = useState(0);
+    const [stepKey, setStepKey] = useState("place");
+    const [tariffDraft, setTariffDraft] = useState<WizardTariffDraft | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -74,12 +79,21 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const loadedTailKey = useRef("");
     const finishedRef = useRef(false);
     const advancingRef = useRef(false);
-    const allowSaveRef = useRef(false);
     const restoredRef = useRef(false);
     const acceptingDraftRef = useRef(false);
     const baselineRef = useRef("");
+    const frameRef = useRef<HTMLDivElement>(null);
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const barRef = useRef<HTMLDivElement>(null);
+    const [actionsPinned, setActionsPinned] = useState(false);
+    const [actionsHeight, setActionsHeight] = useState(0);
     const { data: session } = useSession();
     const username = session?.user?.username ?? "";
+    const access = useAccess();
+    const versionAdmin = access.actorFullAccess && access.has("baskets:connect");
+    const reportTariffDraft = useCallback((draft: WizardTariffDraft | null) => {
+        setTariffDraft(draft);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -176,6 +190,10 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             coefficients,
         }];
     });
+    const salesTariffStep = included.some((form) => {
+        const basket = visibleBaskets.find((item) => item.id === form.basketId);
+        return basket?.indicatorName === SALES_INDICATOR_NAME && form.versionId !== null;
+    });
     const steps = [
         { key: "place", label: editing ? "Период" : "РРС" },
         { key: "set", label: "Состав" },
@@ -185,11 +203,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         }),
         { key: "motivation", label: "Участие" },
         ...(coefficientLines.length > 0 ? [{ key: "coefficients", label: "Коэффициенты" }] : []),
+        ...(salesTariffStep ? [{ key: "tariffs", label: "Тарифы" }] : []),
     ];
-    const safeStep = Math.min(step, Math.max(steps.length - 1, 0));
-    const stepKey = steps[safeStep]?.key ?? "place";
+    const foundStep = steps.findIndex((item) => item.key === stepKey);
+    const safeStep = foundStep >= 0 ? foundStep : Math.max(0, steps.findIndex((item) => item.key === "set"));
+    const activeKey = steps[safeStep]?.key ?? "place";
     const basketOffset = safeStep - 2;
-    const onBasketStep = stepKey.startsWith("basket-");
+    const onBasketStep = activeKey.startsWith("basket-");
     const currentBasket = onBasketStep ? visibleBaskets.find((basket) => basket.id === included[basketOffset]?.basketId) : undefined;
     const currentForm = currentBasket ? forms.find((form) => form.basketId === currentBasket.id) : undefined;
     const currentVersion = currentBasket?.versions.find((version) => version.id === currentForm?.versionId);
@@ -209,12 +229,15 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         if (!policy || versionChangeOpen(targetMonth, policy)) {
             return false;
         }
+        if (versionAdmin && monthIsOpen(targetMonth, policy)) {
+            return false;
+        }
         return connections.some((item) => item.basketId === basketId && item.versionId != null);
     }
 
     function applyMonth(next: string) {
         setMonth(next);
-        if (!policy || versionChangeOpen(next, policy)) {
+        if (!policy || versionChangeOpen(next, policy) || (versionAdmin && monthIsOpen(next, policy))) {
             return;
         }
         setForms((current) => current.map((form) => {
@@ -243,6 +266,17 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         }
         const values = withCalculatedValues(version?.parameters ?? [], {});
         updateForm(basket.id, { versionId, values });
+        setCoefficientValues((current) => {
+            const next: Record<string, string> = {};
+            for (const [key, value] of Object.entries(current)) {
+                const basketId = Number(key.split(":")[1]);
+                if (basketId !== basket.id) {
+                    next[key] = value;
+                }
+            }
+            return next;
+        });
+        setTariffDraft(null);
     }
 
     function selectionBlocked(): boolean {
@@ -262,8 +296,23 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         return parameterIssues.length > 0;
     }
 
+    function basketSetIssue(): string | null {
+        for (const form of included) {
+            const basket = visibleBaskets.find((item) => item.id === form.basketId);
+            const version = basket?.versions.find((item) => item.id === form.versionId);
+            if (!basket || !version) {
+                return "У включённой корзины нет версии для подключения";
+            }
+            const issue = connectionIssues(version.parameters, form.values)[0];
+            if (issue) {
+                return `${basket.name}: ${issue.message}`;
+            }
+        }
+        return null;
+    }
+
     function coefficientsInvalid(): boolean {
-        return stepKey === "coefficients" && coefficientIssues.length > 0;
+        return activeKey === "coefficients" && coefficientIssues.length > 0;
     }
 
     function goNext() {
@@ -279,7 +328,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             setError(included.length === 0 ? "Включите хотя бы одну корзину" : "У включённой корзины нет версии для подключения");
             return;
         }
-        if (onBasketStep && basketStepInvalid()) {
+        const nextKey = steps[safeStep + 1]?.key;
+        if (nextKey === "motivation" || nextKey === "coefficients" || nextKey === "tariffs") {
+            const issue = basketSetIssue();
+            if (issue) {
+                setError(issue);
+                return;
+            }
+        } else if (onBasketStep && basketStepInvalid()) {
             setError("Заполните все параметры корзины");
             return;
         }
@@ -288,80 +344,65 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             return;
         }
         setError(null);
-        allowSaveRef.current = false;
         advancingRef.current = true;
-        setStep(safeStep + 1);
+        setStepKey(nextKey ?? activeKey);
         queueMicrotask(() => {
             advancingRef.current = false;
         });
     }
 
     async function saveCard() {
-        if (basketStepInvalid()) {
-            setError("Заполните все параметры корзины");
+        const basketIssue = basketSetIssue();
+        if (basketIssue) {
+            setError(basketIssue);
             return;
         }
-        if (coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient))) {
-            setError("Проверьте коэффициенты филиалов");
+        const coefficientIssue = coefficientLines.map((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient)).find((message) => message);
+        if (coefficientIssue) {
+            setError(coefficientIssue);
+            return;
+        }
+        if (salesTariffStep && (!tariffDraft || tariffDraft.incomplete)) {
+            setError("Заполните тарифы месяца");
             return;
         }
         setSaving(true);
         setError(null);
         const period = `${month}-01`;
+        const items = forms.map((form) => ({
+            basketId: form.basketId,
+            connected: form.connected,
+            versionId: form.connected ? form.versionId : null,
+            values: form.connected ? form.values : {},
+        }));
         try {
-            const connectionResponse = await fetch("/api/rrs/connections", {
-                method: "PUT",
+            const response = await fetch("/api/rrs/wizard", {
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     territoryUuid,
                     period,
-                    items: forms.map((form) => ({
-                        basketId: form.basketId,
-                        connected: form.connected,
-                        versionId: form.connected ? form.versionId : null,
-                        values: form.connected ? form.values : {},
+                    items,
+                    motivation: branches.map((branch) => ({
+                        branchUuid: branch.uuid,
+                        enabled: enabled[branch.uuid] ?? false,
                     })),
-                }),
-            });
-            const connectionJson = (await connectionResponse.json()) as ApiResponse<{ saved: true }>;
-            if (!connectionJson.success) {
-                setError(`${connectionJson.error.message} Черновик сохранён в этом браузере.`);
-                return;
-            }
-            if (branches.length > 0) {
-                const motivationResponse = await fetch(`/api/rrs/cards/${territoryUuid}/motivation`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        period,
-                        items: branches.map((branch) => ({
-                            branchUuid: branch.uuid,
-                            enabled: enabled[branch.uuid] ?? false,
-                        })),
-                    }),
-                });
-                const motivationJson = (await motivationResponse.json()) as ApiResponse<{ saved: true }>;
-                if (!motivationJson.success) {
-                    setError(`${motivationJson.error.message} Черновик сохранён в этом браузере.`);
-                    return;
-                }
-            }
-            const coefficientResponse = await fetch(`/api/rrs/cards/${territoryUuid}/coefficients`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    period,
-                    items: coefficientLines.map((line) => ({
+                    coefficients: coefficientLines.map((line) => ({
                         branchUuid: line.branch.uuid,
                         basketId: line.basketId,
                         key: line.coefficient.key,
                         value: (coefficientValues[line.id] ?? "1").trim() || "1",
                     })),
+                    tariffs: salesTariffStep && tariffDraft && !tariffDraft.incomplete ? {
+                        rows: tariffDraft.rows,
+                        reference: tariffDraft.reference,
+                        weights: tariffDraft.weights,
+                    } : null,
                 }),
             });
-            const coefficientJson = (await coefficientResponse.json()) as ApiResponse<{ saved: true }>;
-            if (!coefficientJson.success) {
-                setError(`${coefficientJson.error.message} Черновик сохранён в этом браузере.`);
+            const json = (await response.json()) as ApiResponse<{ saved: true }>;
+            if (!json.success) {
+                setError(`${json.error.message} Черновик сохранён в этом браузере.`);
                 return;
             }
             finishedRef.current = true;
@@ -378,11 +419,6 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
 
     function onSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        if (allowSaveRef.current) {
-            allowSaveRef.current = false;
-            void saveCard();
-            return;
-        }
         if (advancingRef.current || safeStep >= steps.length - 1) {
             return;
         }
@@ -391,32 +427,43 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
 
     const versionFrozen = currentBasket ? versionFrozenFor(currentBasket.id) : false;
     const versionChangeAllowed = policy ? versionChangeOpen(month, policy) : false;
-    const stepTitle = stepKey === "place"
+    const stepTitle = activeKey === "place"
         ? (editing ? "Период" : "Территория и месяц")
-        : stepKey === "set"
+        : activeKey === "set"
             ? "Состав корзин"
-            : stepKey === "motivation"
+            : activeKey === "motivation"
                 ? "Участие филиалов"
-                : stepKey === "coefficients"
+                : activeKey === "coefficients"
                     ? "Коэффициенты филиалов"
-                    : currentBasket?.name ?? "Корзина";
+                    : activeKey === "tariffs"
+                        ? "Тарифы"
+                        : currentBasket?.name ?? "Корзина";
     const stepHint = safeStep === 0
         ? editing
             ? "Изменение РРС недоступно. Укажите месяц начала действия настроек."
             : "Укажите РРС и месяц начала действия настроек."
         : "";
     const archivedVersion = currentVersion?.status === "off";
+    const adminVersionHint = versionAdmin && policy && monthIsOpen(month, policy) && !versionChangeAllowed
+        ? currentBasket?.indicatorName === SALES_INDICATOR_NAME
+            ? "При смене версии в открытом месяце удаляются параметры этой корзины, коэффициенты филиалов, тарифы, исключения и опора расчёта этого месяца. Более ранние месяцы не изменяются."
+            : "При смене версии в открытом месяце удаляются параметры этой корзины и коэффициенты филиалов. Более ранние месяцы не изменяются."
+        : null;
     const versionHint = versionFrozen
         ? archivedVersion
-            ? "Версия в архиве и для выбранного месяца зафиксирована. Выбор другой версии недоступен. Параметры можно изменить."
-            : "Версия для выбранного месяца зафиксирована. Выбор другой версии недоступен. Допускается изменение значений параметров."
-        : archivedVersion
-            ? "Эта версия в архиве, её параметры можно изменить. С выбранного месяца допускается смена версии."
-            : versionChangeAllowed
-                ? "С выбранного месяца допускается смена версии. Сравните описания и выберите одну версию."
-                : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
+            ? "Версия находится в архиве и для выбранного месяца зафиксирована. Выбор другой версии недоступен. Допускается изменение параметров."
+            : "Версия для выбранного месяца зафиксирована. Выбор другой версии недоступен. Допускается изменение параметров."
+        : adminVersionHint
+            ? archivedVersion
+                ? `Версия находится в архиве. ${adminVersionHint}`
+                : adminVersionHint
+            : archivedVersion
+                ? "Версия находится в архиве. Допускается изменение параметров. С выбранного месяца допускается смена версии."
+                : versionChangeAllowed
+                    ? "С выбранного месяца допускается смена версии. Ознакомьтесь с описанием версий и выберите одну."
+                    : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
 
-    const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, forms, enabled, coefficientValues });
+    const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, stepKey: activeKey, forms, enabled, coefficientValues });
     const unfinished = !finishedRef.current && !loading && tailReady && resumeDraft === null && (restoredRef.current || draftSnapshot !== baselineRef.current);
 
     useEffect(() => {
@@ -482,7 +529,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 baselineRef.current = JSON.stringify({
                     territoryUuid,
                     month,
-                    step: safeStep,
+                    step: safeStep, stepKey: activeKey,
                     forms,
                     enabled: nextEnabled,
                     coefficientValues: nextCoefficients,
@@ -512,7 +559,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             writeDraft(username, {
                 territoryUuid,
                 month,
-                step: safeStep,
+                step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
                 coefficients: coefficientValues,
@@ -545,7 +592,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             writeDraft(username, {
                 territoryUuid,
                 month,
-                step: safeStep,
+                step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
                 coefficients: coefficientValues,
@@ -567,17 +614,29 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         }
         acceptingDraftRef.current = true;
         const restored = restoreDraft(resumeDraft, baskets, forms, branches, enabled, baseBonus);
+        const restoredKeys = [
+            "place",
+            "set",
+            ...restored.forms.filter((form) => form.connected).map((form) => `basket-${form.basketId}`),
+            "motivation",
+            "coefficients",
+            "tariffs",
+        ];
+        const restoredKey = restored.stepKey && restoredKeys.includes(restored.stepKey)
+            ? restored.stepKey
+            : restoredKeys[restored.legacyStep] ?? "place";
         setForms(restored.forms);
         setEnabled(restored.enabled);
         setCoefficientValues(restored.coefficients);
         setCoefficientSaved({ ...restored.coefficients });
-        setStep(restored.step);
+        setStepKey(restoredKey);
         setRestoreNotes(restored.notes);
         restoredRef.current = true;
         baselineRef.current = JSON.stringify({
             territoryUuid,
             month,
-            step: restored.step,
+            step: restoredKeys.indexOf(restoredKey),
+            stepKey: restoredKey,
             forms: restored.forms,
             enabled: restored.enabled,
             coefficientValues: restored.coefficients,
@@ -599,7 +658,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             writeDraft(username, {
                 territoryUuid,
                 month,
-                step: safeStep,
+                step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
                 coefficients: coefficientValues,
@@ -611,8 +670,45 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         router.push(href);
     }
 
+    useLayoutEffect(() => {
+        const frame = frameRef.current;
+        const body = bodyRef.current;
+        const bar = barRef.current;
+        if (!frame || !body || !bar) {
+            return;
+        }
+        const measure = () => {
+            const layout = frame.parentElement?.parentElement;
+            const paddingBottom = layout ? Number.parseFloat(getComputedStyle(layout).paddingBottom) || 0 : 0;
+            const top = frame.getBoundingClientRect().top + window.scrollY;
+            const available = Math.round(Math.max(0, window.innerHeight - top - paddingBottom));
+            const gap = Number.parseFloat(getComputedStyle(frame).rowGap) || 0;
+            const needed = body.scrollHeight + gap + bar.offsetHeight;
+            const next = needed > available + 1;
+            setActionsPinned((current) => {
+                if (current === next) {
+                    return current;
+                }
+                if (next) {
+                    window.scrollTo(0, 0);
+                }
+                return next;
+            });
+            setActionsHeight((current) => !next || current === available ? current : available);
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(body);
+        observer.observe(bar);
+        window.addEventListener("resize", measure);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", measure);
+        };
+    }, [activeKey, loading, steps.length]);
+
     return (
-        <form className="flex w-full flex-col gap-6" onSubmit={onSubmit}>
+        <form className="flex w-full flex-col" onSubmit={onSubmit}>
             <ConfirmDialog
                 open={resumeDraft !== null}
                 title="Найден черновик"
@@ -645,6 +741,12 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     }
                 }}
             />
+            <div
+                ref={frameRef}
+                className={cn("flex min-h-0 flex-col gap-6", actionsPinned && "overflow-hidden")}
+                style={actionsPinned ? { height: actionsHeight } : undefined}
+            >
+            <div ref={bodyRef} className={cn("flex min-h-0 flex-col gap-6 [&>*]:shrink-0", actionsPinned && "flex-1 overflow-y-auto")}>
             {territoryName ? (
                 <PageHeading trail={[
                     { href: "/rrs", label: "Настройки РРС" },
@@ -668,7 +770,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                 disabled={saving || index > safeStep}
                                 onClick={() => {
                                     setError(null);
-                                    setStep(index);
+                                    setStepKey(item.key);
                                 }}
                                 className={cn(
                                     "inline-flex h-8 items-center gap-2 rounded-full border pr-3 pl-1 text-sm",
@@ -691,7 +793,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     );
                 })}
             </ol>
-            <div className={cn("flex flex-col gap-6", stepKey !== "coefficients" && "max-w-3xl")}>
+            <div className={cn("flex flex-col gap-6", activeKey !== "coefficients" && activeKey !== "tariffs" && "max-w-3xl")}>
             <div>
                 <h2 className="text-lg font-semibold">{stepTitle}</h2>
                 {stepHint ? <p className="mt-1 text-sm text-muted-foreground">{stepHint}</p> : null}
@@ -709,7 +811,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             {loading ? <FormSkeleton fields={4} /> : null}
             {!loading && safeStep === 0 && policy ? (
                 <div className="flex flex-col gap-4">
-                    <PeriodDisclaimer policy={policy} periodNote={periodNote} />
+                    <PeriodDisclaimer policy={policy} periodNote={periodNote} versionAdmin={versionAdmin} />
                     <div className="grid gap-4 md:grid-cols-2">
                     <div className="flex flex-col gap-1.5">
                         <Label htmlFor="rrs-territory">РРС</Label>
@@ -828,7 +930,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     ) : null}
                 </div>
             ) : null}
-            {!loading && stepKey === "motivation" ? (
+            {!loading && activeKey === "motivation" ? (
                 <div className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm text-muted-foreground">
@@ -890,7 +992,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 </div>
             ) : null}
             </div>
-            {!loading && stepKey === "coefficients" ? (
+            {!loading && activeKey === "coefficients" ? (
                 <CoefficientTable
                     branches={enabledBranches}
                     baskets={coefficientBaskets}
@@ -902,9 +1004,23 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     onChange={setCoefficientValues}
                 />
             ) : null}
-            <div className="mt-auto flex max-w-3xl items-center justify-between gap-2 border-t pt-4">
+            {!loading && activeKey === "tariffs" ? (
+                <WizardTariffStep
+                    territoryUuid={territoryUuid}
+                    period={`${month}-01`}
+                    items={forms.map((form) => ({
+                        basketId: form.basketId,
+                        connected: form.connected,
+                        versionId: form.connected ? form.versionId : null,
+                        values: form.connected ? form.values : {},
+                    }))}
+                    onDraft={reportTariffDraft}
+                />
+            ) : null}
+            </div>
+            <div ref={barRef} className={cn("flex max-w-3xl items-center justify-between gap-2 border-t bg-background pt-4", actionsPinned && "shrink-0")}>
                 {safeStep > 0 ? (
-                    <Button type="button" variant="outline" disabled={saving} onClick={() => { setError(null); setStep(safeStep - 1); }}>
+                    <Button type="button" variant="outline" disabled={saving} onClick={() => { setError(null); setStepKey(steps[safeStep - 1]?.key ?? "place"); }}>
                         <ArrowLeft />
                         Назад
                     </Button>
@@ -917,28 +1033,20 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     <Button
                         key="wizard-save"
                         type="button"
-                        disabled={saving || loading || !tailReady || !territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)) || basketStepInvalid() || coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient))}
-                        onPointerDown={() => {
-                            allowSaveRef.current = true;
-                        }}
-                        onClick={() => {
-                            if (!allowSaveRef.current) {
-                                return;
-                            }
-                            allowSaveRef.current = false;
-                            void saveCard();
-                        }}
+                        disabled={saving || loading || !tailReady || !territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)) || basketSetIssue() !== null || coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient)) || (salesTariffStep && (!tariffDraft || tariffDraft.incomplete))}
+                        onClick={() => void saveCard()}
                     >
                         {saving ? <ButtonSpinner /> : null}
                         {editing ? "Сохранить" : "Создать карточку"}
                     </Button>
                 )}
             </div>
+            </div>
         </form>
     );
 }
 
-function PeriodDisclaimer({ policy, periodNote }: { policy: RrsEditPolicy; periodNote: string | null }) {
+function PeriodDisclaimer({ policy, periodNote, versionAdmin }: { policy: RrsEditPolicy; periodNote: string | null; versionAdmin: boolean }) {
     const previousOpen = policy.earliestMonth === policy.previousMonth;
     return (
         <Alert>
@@ -951,7 +1059,11 @@ function PeriodDisclaimer({ policy, periodNote }: { policy: RrsEditPolicy; perio
                         ? `Предыдущий месяц доступен для выбора до ${policy.cutoffDay}-го числа включительно.`
                         : `Предыдущий месяц закрыт для изменения. Его выбор был доступен до ${policy.cutoffDay}-го числа включительно.`}
                 </p>
-                <p className="mt-1">Для уже подключённой корзины смена версии в текущем и предыдущем месяце недоступна. Смена версии допускается начиная со следующего месяца. Значения параметров могут быть изменены в любом открытом месяце.</p>
+                <p className="mt-1">
+                    {versionAdmin
+                        ? "Администратору доступна смена версии в открытом месяце. При смене версии за этот месяц удаляются параметры корзины и коэффициенты филиалов. Для корзины продаж дополнительно удаляются тарифы, исключения и опора расчёта. Участие филиалов сохраняется. Более ранние месяцы не изменяются."
+                        : "Для подключённой корзины смена версии в текущем и предыдущем месяце недоступна. Смена версии допускается начиная со следующего месяца. Параметры могут быть изменены в любом открытом месяце."}
+                </p>
                 {periodNote ? <p className="mt-1">{periodNote}</p> : null}
             </AlertDescription>
         </Alert>

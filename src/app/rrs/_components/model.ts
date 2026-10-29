@@ -51,6 +51,7 @@ export interface HistoryDiffBasket {
     beforeVersion: string;
     afterVersion: string;
     versionChanged: boolean;
+    note: string | null;
     rows: HistoryDiffRow[];
 }
 
@@ -119,6 +120,7 @@ function diffBasket(
         beforeVersion,
         afterVersion,
         versionChanged: (logged || carried ? beforeVersion : EMPTY_VALUE) !== afterVersion,
+        note: change.note ?? logged?.note ?? null,
         rows: titles.map((title) => {
             const before = beforeValues.get(title) ?? EMPTY_VALUE;
             const after = afterValues.get(title) ?? EMPTY_VALUE;

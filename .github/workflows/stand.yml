@@ -2,7 +2,7 @@ name: Update test stand
 
 on:
   push:
-    branches: [master, mvp-wave-1, session-tariff-fixes]
+    branches: [master]
 
 jobs:
   deploy:

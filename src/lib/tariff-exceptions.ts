@@ -1,6 +1,6 @@
 import { isTariffAxis, type TariffAxis, type TariffBoundKey } from "@/lib/baskets";
 import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
-import type { TariffServiceContext } from "@/lib/tariff-calculation";
+import type { TariffReference, TariffServiceContext } from "@/lib/tariff-calculation";
 
 export const TARIFF_BASE_MODES = [
     { code: "percent", title: "Процент от цены" },
@@ -93,6 +93,7 @@ export interface TariffExceptionPage {
     otherAxisTitles: string[];
     weights: TariffExceptionWeights | null;
     bounds: { key: TariffBoundKey; title: string; value: string | null }[];
+    reference: TariffReference;
 }
 
 export interface TariffQuote {
