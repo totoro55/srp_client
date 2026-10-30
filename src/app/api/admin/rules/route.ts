@@ -45,13 +45,14 @@ function parseRuleInput(body: {
     };
 }
 
-async function unknownLogin(rule: RuleInput): Promise<boolean> {
+async function unknownLogin(rule: RuleInput, keepMarkedLogin = false): Promise<boolean> {
     if (rule.matchType !== "login") return false;
-    const rows = await db.query<{ login: string }>(
-        "SELECT login FROM employees WHERE lower(login) = lower($1) LIMIT 1",
+    const rows = await db.query<{ login: string; deleted: boolean }>(
+        "SELECT login, deleted FROM employees WHERE lower(login) = lower($1) LIMIT 1",
         [rule.matchValue]
     );
     if (rows.length === 0) return true;
+    if (rows[0].deleted && !keepMarkedLogin) return true;
     rule.matchValue = rows[0].login.toLowerCase();
     return false;
 }
@@ -138,13 +139,18 @@ export async function PATCH(request: Request): Promise<NextResponse<ApiResponse<
         if (!id || !rule) {
             return createErrorResponse("BAD_REQUEST", "Заполните тип, значение, роль и приоритет", 400);
         }
-        if (await unknownLogin(rule)) {
-            return createErrorResponse("BAD_REQUEST", "Выберите сотрудника из списка", 400);
-        }
 
-        const existing = await db.query<{ id: number }>("SELECT id FROM role_rules WHERE id = $1", [id]);
+        const existing = await db.query<{ match_type: string; match_value: string }>(
+            "SELECT match_type, match_value FROM role_rules WHERE id = $1",
+            [id]
+        );
         if (existing.length === 0) {
             return createErrorResponse("BAD_REQUEST", "Правило не найдено", 400);
+        }
+        const keepMarked = existing[0].match_type === "login"
+            && existing[0].match_value.toLowerCase() === rule.matchValue.toLowerCase();
+        if (await unknownLogin(rule, keepMarked)) {
+            return createErrorResponse("BAD_REQUEST", "Выберите сотрудника из списка", 400);
         }
 
         const conflict = await db.query<{ id: number }>(

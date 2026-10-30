@@ -15,7 +15,9 @@ export async function GET(): Promise<NextResponse<ApiResponse<AvailablePosition[
         const positions = await db.query<AvailablePosition>(
             `SELECT btrim(title) AS title, COUNT(*)::int AS count
              FROM employees
-             WHERE title IS NOT NULL AND btrim(title) <> ''
+             WHERE NOT deleted
+               AND title IS NOT NULL
+               AND btrim(title) <> ''
              GROUP BY btrim(title)
              ORDER BY btrim(title) ASC`
         );

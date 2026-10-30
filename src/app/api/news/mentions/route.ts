@@ -23,10 +23,13 @@ export async function GET(request: Request) {
                    employee.name,
                    employee.title
             FROM employees employee
-            WHERE $1::text = ''
-               OR lower(employee.login) LIKE $2 ESCAPE '\\'
-               OR lower(employee.name) LIKE $2 ESCAPE '\\'
-               OR lower(employee.title) LIKE $2 ESCAPE '\\'
+            WHERE NOT employee.deleted
+              AND (
+                $1::text = ''
+                OR lower(employee.login) LIKE $2 ESCAPE '\\'
+                OR lower(employee.name) LIKE $2 ESCAPE '\\'
+                OR lower(employee.title) LIKE $2 ESCAPE '\\'
+              )
             ORDER BY employee.name
             LIMIT 8
             `,

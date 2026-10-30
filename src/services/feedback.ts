@@ -467,7 +467,9 @@ export async function listFeedbackAssignees(access: AccessView, query: string): 
                 SELECT employee.login
                 FROM role_rules rr
                 JOIN roles r ON r.id = rr.role_id
-                JOIN employees employee ON employee.title = rr.match_value AND btrim(employee.login) <> ''
+                JOIN employees employee ON employee.title = rr.match_value
+                    AND btrim(employee.login) <> ''
+                    AND NOT employee.deleted
                 WHERE rr.match_type = 'title'
                   AND (rr.expires_at IS NULL OR rr.expires_at > NOW())
                   AND (
@@ -902,7 +904,9 @@ async function processorLogin(access: AccessView, body: unknown): Promise<string
             SELECT employee.login
             FROM role_rules rr
             JOIN roles r ON r.id = rr.role_id
-            JOIN employees employee ON employee.title = rr.match_value AND btrim(employee.login) <> ''
+            JOIN employees employee ON employee.title = rr.match_value
+                AND btrim(employee.login) <> ''
+                AND NOT employee.deleted
             WHERE rr.match_type = 'title'
               AND (rr.expires_at IS NULL OR rr.expires_at > NOW())
               AND (

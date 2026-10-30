@@ -60,7 +60,7 @@ export async function decideAccess(username: string, title: string): Promise<Acc
     }
 
     const employees = await db.query<{ uuid: string }>(
-        "SELECT uuid FROM employees WHERE lower(login) = lower($1) LIMIT 1",
+        "SELECT uuid FROM employees WHERE lower(login) = lower($1) AND NOT deleted LIMIT 1",
         [username]
     );
     if (employees.length > 0) {

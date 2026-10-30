@@ -3,7 +3,7 @@
 -- уже созданные таблицы из public, если загрузка успела положить их туда.
 --
 -- Ожидаемые колонки со стороны приложения:
---   employees:   uuid, login, name, title, branch_uuid
+--   employees:   uuid, login, name, title, branch_uuid, deleted
 --   territories: uuid, code, name, deleted
 --   branches:    uuid, code, name, territory_uuid, deleted
 
@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS dictionaries.employees (
     name VARCHAR(255) NOT NULL,
     title VARCHAR(255),
     branch_uuid UUID REFERENCES dictionaries.branches (uuid) ON DELETE SET NULL,
+    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

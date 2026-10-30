@@ -30,7 +30,7 @@ export function EmployeeCard({ login }: { login: string }) {
         if (!open || !needle) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
-            const params = new URLSearchParams({ q: login.trim() });
+            const params = new URLSearchParams({ q: login.trim(), includeDeleted: "1" });
             void fetch(`/api/admin/employees?${params.toString()}`, { signal: controller.signal })
                 .then((response) => response.json())
                 .then((json: { success?: boolean; data?: EmployeeLookup[] }) => {
