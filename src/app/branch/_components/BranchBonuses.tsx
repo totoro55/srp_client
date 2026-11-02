@@ -228,6 +228,17 @@ function columnIndex(column: BonusColumn, brigadeOn: boolean): number {
     return order.indexOf(column);
 }
 
+function pointerOverScrollbar(scroller: HTMLElement, clientX: number, clientY: number): boolean {
+    const rect = scroller.getBoundingClientRect();
+    const overVertical = scroller.offsetWidth > scroller.clientWidth
+        && clientX >= rect.left + scroller.clientWidth
+        && clientX < rect.right;
+    const overHorizontal = scroller.offsetHeight > scroller.clientHeight
+        && clientY >= rect.top + scroller.clientHeight
+        && clientY < rect.bottom;
+    return overVertical || overHorizontal;
+}
+
 function aimClass(hover: CellHover | null, row: string, column: number, pin?: AimPin): string | undefined {
     if (!hover || (hover.row !== row && hover.column !== column)) {
         return undefined;
@@ -396,6 +407,20 @@ export function BranchBonuses() {
                 className="relative hidden min-h-0 flex-1 flex-col sm:flex"
                 onMouseLeave={() => setHover((current) => current === null ? current : null)}
                 onWheel={() => setHover((current) => current === null ? current : null)}
+                onMouseMove={(event) => {
+                    const scroller = tableFrame.current?.querySelector<HTMLElement>("[data-slot=table-container]");
+                    if (!scroller || !pointerOverScrollbar(scroller, event.clientX, event.clientY)) {
+                        return;
+                    }
+                    setHover((current) => current === null ? current : null);
+                }}
+                onMouseDown={(event) => {
+                    const scroller = tableFrame.current?.querySelector<HTMLElement>("[data-slot=table-container]");
+                    if (!scroller || !pointerOverScrollbar(scroller, event.clientX, event.clientY)) {
+                        return;
+                    }
+                    setHover((current) => current === null ? current : null);
+                }}
             >
             <AimFrame hover={hover} root={tableFrame} />
             <Table containerClassName="min-h-0 max-w-full flex-1" className="w-max cursor-default border-separate border-spacing-0 text-xs">
