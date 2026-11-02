@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDownFromLine, RotateCcw } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { coefficientRangeLabel, coefficientValueIssue } from "@/lib/coefficient-value";
 import type { BasketCoefficient } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
@@ -94,7 +94,6 @@ export function CoefficientTable({
     const headerRowRef = useRef<HTMLTableRowElement>(null);
     const [tableMaxHeight, setTableMaxHeight] = useState<number | null>(null);
     const [headerOffset, setHeaderOffset] = useState(0);
-    const [focusedId, setFocusedId] = useState<string | null>(null);
     const [hover, setHover] = useState<{ row: string | null; column: string } | null>(null);
     const [cellMenu, setCellMenu] = useState<CellMenu | null>(null);
     const locked = disabled || !editable;
@@ -154,7 +153,6 @@ export function CoefficientTable({
             return;
         }
         event.preventDefault();
-        setFocusedId(null);
         const width = 280;
         const height = 84;
         setCellMenu({
@@ -200,6 +198,7 @@ export function CoefficientTable({
 
     return (
         <>
+            <TooltipProvider delay={300}>
             <div
                 ref={containerRef}
                 className="overflow-auto rounded-lg"
@@ -279,7 +278,7 @@ export function CoefficientTable({
                                             onMouseEnter={() => setHover({ row: branch.uuid, column: columnKey(basket.id, coefficient.key) })}
                                             onContextMenu={(event) => openCellMenu(event, branch.uuid, basket.id, coefficient.key)}
                                         >
-                                            <Tooltip open={focusedId === id}>
+                                            <Tooltip>
                                                 <TooltipTrigger
                                                     render={
                                                         <input
@@ -306,9 +305,7 @@ export function CoefficientTable({
                                                                 event.preventDefault();
                                                                 event.currentTarget.blur();
                                                             }}
-                                                            onFocus={() => setFocusedId(id)}
                                                             onBlur={() => {
-                                                                setFocusedId((current) => current === id ? null : current);
                                                                 onChange?.((current) => {
                                                                     if ((current[id] ?? "").trim() !== "") {
                                                                         return current;
@@ -323,13 +320,16 @@ export function CoefficientTable({
                                                         />
                                                     }
                                                 />
-                                                <TooltipContent className="max-w-[min(14rem,calc(100vw-1.5rem))] text-left whitespace-normal">
-                                                    {issue ? <span className="block">{issue}</span> : null}
-                                                    {(coefficient.description ?? "").trim() ? <span className="block">{(coefficient.description ?? "").trim()}</span> : null}
-                                                    <span className="block">{coefficientRangeLabel(coefficient)}</span>
-                                                    {dirty && !issue ? <span className="block">Значение изменено и ещё не сохранено</span> : null}
-                                                    {savedSide === "below" ? <span className="block">Сохранённое значение меньше 1</span> : null}
-                                                    {savedSide === "above" ? <span className="block">Сохранённое значение больше 1</span> : null}
+                                                <TooltipContent
+                                                    collisionBoundary={typeof document !== "undefined" ? document.documentElement : undefined}
+                                                    className="flex max-w-[min(20rem,calc(100vw-1.5rem))] flex-col items-start gap-1 text-left whitespace-normal"
+                                                >
+                                                    {issue ? <span>{issue}</span> : null}
+                                                    {(coefficient.description ?? "").trim() ? <span>{(coefficient.description ?? "").trim()}</span> : null}
+                                                    <span>{coefficientRangeLabel(coefficient)}</span>
+                                                    {dirty && !issue ? <span>Значение изменено и ещё не сохранено</span> : null}
+                                                    {savedSide === "below" ? <span>Сохранённое значение меньше 1</span> : null}
+                                                    {savedSide === "above" ? <span>Сохранённое значение больше 1</span> : null}
                                                 </TooltipContent>
                                             </Tooltip>
                                         </TableCell>
@@ -340,6 +340,7 @@ export function CoefficientTable({
                     </TableBody>
                 </Table>
             </div>
+            </TooltipProvider>
             {cellMenu ? (
                 <div
                     data-cell-menu

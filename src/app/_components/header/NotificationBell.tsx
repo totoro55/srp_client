@@ -7,7 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ButtonSpinner } from "@/components/loading-state";
 import { NotificationAreaFilters, NotificationCountButton, NotificationIconButton, NotificationRows, NotificationsDialog, previewNotifications, useNotificationPreview } from "@/app/_components/notification-list";
-import { announceBrowserNotification, browserNotificationsEnabled, notifyNotificationsChanged, onNotificationsChanged, setBrowserNotificationsEnabled } from "./browser-notify";
+import {
+    announceBrowserNotification,
+    browserNotificationCapability,
+    browserNotificationsEnabled,
+    notifyNotificationsChanged,
+    onNotificationsChanged,
+    requestBrowserNotificationPermission,
+    setBrowserNotificationsEnabled,
+    type BrowserNotificationCapability,
+} from "./browser-notify";
 import { ApiResponse } from "@/types/api";
 
 interface NotificationItem {
@@ -25,6 +34,7 @@ interface NotificationFeed {
 }
 
 const POLL_MS = 8000;
+const INSECURE_HINT = "Уведомления браузера доступны только по HTTPS или localhost. На стенде откройте http://localhost:3000 на самом тестовом ПК.";
 
 export function NotificationBell() {
     const router = useRouter();
@@ -36,15 +46,20 @@ export function NotificationBell() {
     const [menuOpen, setMenuOpen] = useState(false);
     const [allOpen, setAllOpen] = useState(false);
     const [browserOn, setBrowserOn] = useState(false);
-    const [permission, setPermission] = useState<NotificationPermission | "missing">("default");
+    const [permission, setPermission] = useState<BrowserNotificationCapability>("default");
+    const [browserHint, setBrowserHint] = useState<string | null>(null);
     const { count, unreadOnly, setCount, setUnreadOnly } = useNotificationPreview();
     const announced = useRef(new Set<number>());
     const primed = useRef(false);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
-            setBrowserOn(browserNotificationsEnabled());
-            setPermission(typeof Notification === "undefined" ? "missing" : Notification.permission);
+            const capability = browserNotificationCapability();
+            setPermission(capability);
+            setBrowserOn(capability === "granted" && browserNotificationsEnabled());
+            if (capability === "insecure") {
+                setBrowserHint(INSECURE_HINT);
+            }
         }, 0);
         return () => window.clearTimeout(timer);
     }, []);
@@ -158,20 +173,34 @@ export function NotificationBell() {
     }
 
     async function enableBrowser() {
-        if (typeof Notification === "undefined") {
-            setPermission("missing");
+        setBrowserHint(null);
+        const next = await requestBrowserNotificationPermission();
+        setPermission(next);
+        if (next === "insecure") {
+            setBrowserHint(INSECURE_HINT);
+            setBrowserNotificationsEnabled(false);
+            setBrowserOn(false);
             return;
         }
-        const next = Notification.permission === "granted"
-            ? "granted"
-            : await Notification.requestPermission();
-        setPermission(next);
-        const enabled = next === "granted";
-        setBrowserNotificationsEnabled(enabled);
-        setBrowserOn(enabled);
+        if (next === "missing") {
+            setBrowserHint("Этот браузер не поддерживает уведомления.");
+            setBrowserNotificationsEnabled(false);
+            setBrowserOn(false);
+            return;
+        }
+        if (next === "denied") {
+            setBrowserHint("Браузер запретил уведомления. Разрешите их в настройках сайта.");
+            setBrowserNotificationsEnabled(false);
+            setBrowserOn(false);
+            return;
+        }
+        setBrowserNotificationsEnabled(true);
+        setBrowserOn(true);
+        announceBrowserNotification("Уведомления СРП включены", { force: true });
     }
 
     function disableBrowser() {
+        setBrowserHint(null);
         setBrowserNotificationsEnabled(false);
         setBrowserOn(false);
     }
@@ -180,11 +209,16 @@ export function NotificationBell() {
     const allItems = feed?.items ?? [];
     const items = previewNotifications(allItems, count, unreadOnly);
     const label = unread > 0 ? `Уведомления, непрочитанных: ${unread > 9 ? "9+" : unread}` : "Уведомления";
-    const browserLabel = permission === "denied"
-        ? "Браузер запретил уведомления"
-        : browserOn
-            ? "Выключить уведомления браузера"
-            : "Включить уведомления браузера";
+    const browserBlocked = permission === "denied" || permission === "insecure" || permission === "missing";
+    const browserLabel = permission === "insecure"
+        ? "Уведомления браузера недоступны по HTTP"
+        : permission === "missing"
+            ? "Уведомления браузера недоступны"
+            : permission === "denied"
+                ? "Браузер запретил уведомления"
+                : browserOn
+                    ? "Выключить уведомления браузера"
+                    : "Включить уведомления браузера";
 
     return (
         <>
@@ -209,22 +243,28 @@ export function NotificationBell() {
                                 {pending ? <ButtonSpinner /> : <CheckCheck />}
                             </NotificationIconButton>
                         ) : null}
-                        {permission === "missing" ? null : (
-                            <NotificationIconButton
-                                label={browserLabel}
-                                onClick={() => {
-                                    if (permission === "denied") {
-                                        return;
-                                    }
-                                    void (browserOn ? disableBrowser() : enableBrowser());
-                                }}
-                            >
-                                {permission === "denied" ? <BellOff /> : browserOn ? <BellRing className="text-primary" /> : <Bell />}
-                            </NotificationIconButton>
-                        )}
+                        <NotificationIconButton
+                            label={browserLabel}
+                            onClick={() => {
+                                if (browserBlocked && !browserOn) {
+                                    setBrowserHint(
+                                        permission === "insecure"
+                                            ? INSECURE_HINT
+                                            : permission === "denied"
+                                                ? "Браузер запретил уведомления. Разрешите их в настройках сайта."
+                                                : "Этот браузер не поддерживает уведомления.",
+                                    );
+                                    return;
+                                }
+                                void (browserOn ? disableBrowser() : enableBrowser());
+                            }}
+                        >
+                            {browserBlocked ? <BellOff /> : browserOn ? <BellRing className="text-primary" /> : <Bell />}
+                        </NotificationIconButton>
                         <NotificationAreaFilters unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} />
                         <NotificationCountButton count={count} onCount={setCount} />
                     </div>
+                    {browserHint ? <p className="px-2 text-xs text-muted-foreground">{browserHint}</p> : null}
                     {error ? <p className="px-2 text-xs text-destructive">{error}</p> : null}
                     {feed === null && error === null ? (
                         <div className="flex flex-col gap-2 px-2 py-2" aria-hidden>
