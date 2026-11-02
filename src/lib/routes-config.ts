@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -81,19 +81,27 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         label: "Филиал",
         items: [
             {
+                name: "Кабинет филиала",
+                href: "/branch/bonuses",
+                icon: Wallet,
+                title: "Кабинет филиала",
+                description: "Суммы сотрудников филиала за месяц",
+                permissionAny: ["branch:read", "baskets:connect"],
+            },
+            {
+                name: "Тарифы",
+                href: "/branch/tariffs",
+                icon: Tags,
+                title: "Тарифы",
+                description: "Тарифы продажи товара и корзин филиала",
+                permissionAny: ["branch:read", "baskets:connect"],
+            },
+            {
                 name: "Настройки филиала",
                 href: "/branch",
                 icon: Store,
                 title: "Настройки филиала",
-                description: "Ставки месяца, роли сотрудников и бригады",
-                permissionAny: ["branch:read", "baskets:connect"],
-            },
-            {
-                name: "Премии",
-                href: "/branch/bonuses",
-                icon: Wallet,
-                title: "Премии",
-                description: "Суммы сотрудников филиала за месяц",
+                description: "Роли сотрудников и бригады",
                 permissionAny: ["branch:read", "baskets:connect"],
             },
         ],
@@ -127,7 +135,7 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
             {
                 name: "Роли мотивации",
                 href: "/admin/motivation-roles",
-                icon: Tags,
+                icon: UserCog,
                 title: "Роли мотивации",
                 description: "Виды ролей и автоматическое назначение по должности",
                 permission: "motivation-roles:read",

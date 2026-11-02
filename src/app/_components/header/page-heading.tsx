@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
+import { Check, ChevronDown } from "lucide-react";
 import {
     Breadcrumb,
     BreadcrumbItem,
@@ -10,11 +11,21 @@ import {
     BreadcrumbPage,
     BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+export type PageHeadingMenuItem = {
+    id: string;
+    label: string;
+};
 
 export type PageHeadingCrumb = {
     label: string;
     compactLabel?: string;
     href?: string;
+    menuKey?: string;
+    menuValue?: string;
+    menu?: PageHeadingMenuItem[];
+    omitWhenTight?: boolean;
 };
 
 type Entry = {
@@ -29,13 +40,19 @@ type PageHeadingActions = {
 
 const PageHeadingActionsContext = createContext<PageHeadingActions | null>(null);
 const PageHeadingTrailContext = createContext<PageHeadingCrumb[] | null>(null);
+const PageHeadingMenuContext = createContext<RefObject<((key: string, id: string) => void) | null> | null>(null);
+
+function menuSignature(item: PageHeadingCrumb): string {
+    return `${item.menuKey ?? ""}\0${item.menuValue ?? ""}\0${(item.menu ?? []).map((entry) => `${entry.id}:${entry.label}`).join(",")}`;
+}
 
 function sameTrail(left: PageHeadingCrumb[], right: PageHeadingCrumb[]): boolean {
-    return left.length === right.length && left.every((item, index) => item.label === right[index]?.label && item.compactLabel === right[index]?.compactLabel && item.href === right[index]?.href);
+    return left.length === right.length && left.every((item, index) => item.label === right[index]?.label && item.compactLabel === right[index]?.compactLabel && item.href === right[index]?.href && item.omitWhenTight === right[index]?.omitWhenTight && menuSignature(item) === menuSignature(right[index] ?? item));
 }
 
 export function PageHeadingProvider({ children }: { children: ReactNode }) {
     const [entries, setEntries] = useState<Entry[]>([]);
+    const menuSelect = useRef<((key: string, id: string) => void) | null>(null);
     const actions = useRef<PageHeadingActions | null>(null);
     if (!actions.current) {
         actions.current = {
@@ -62,9 +79,11 @@ export function PageHeadingProvider({ children }: { children: ReactNode }) {
 
     return (
         <PageHeadingActionsContext.Provider value={actions.current}>
-            <PageHeadingTrailContext.Provider value={trail}>
-                {children}
-            </PageHeadingTrailContext.Provider>
+            <PageHeadingMenuContext.Provider value={menuSelect}>
+                <PageHeadingTrailContext.Provider value={trail}>
+                    {children}
+                </PageHeadingTrailContext.Provider>
+            </PageHeadingMenuContext.Provider>
         </PageHeadingActionsContext.Provider>
     );
 }
@@ -72,7 +91,7 @@ export function PageHeadingProvider({ children }: { children: ReactNode }) {
 export function PageHeading({ trail }: { trail: PageHeadingCrumb[] }) {
     const actions = useContext(PageHeadingActionsContext);
     const id = useId();
-    const signature = trail.map((item) => `${item.href ?? ""}\0${item.label}\0${item.compactLabel ?? ""}`).join("\n");
+    const signature = trail.map((item) => `${item.href ?? ""}\0${item.label}\0${item.compactLabel ?? ""}\0${item.omitWhenTight ? "1" : ""}\0${menuSignature(item)}`).join("\n");
     const trailRef = useRef(trail);
     trailRef.current = trail;
 
@@ -103,23 +122,127 @@ export function usePageHeadingTrail(): PageHeadingCrumb[] | null {
     return useContext(PageHeadingTrailContext);
 }
 
+export function usePageHeadingMenu(handler: (key: string, id: string) => void) {
+    const slot = useContext(PageHeadingMenuContext);
+    const handlerRef = useRef(handler);
+    handlerRef.current = handler;
+
+    useEffect(() => {
+        if (!slot) {
+            return;
+        }
+        slot.current = (key, id) => handlerRef.current(key, id);
+        return () => {
+            slot.current = null;
+        };
+    }, [slot]);
+}
+
+function trailKey(item: PageHeadingCrumb): string {
+    return `${item.menuKey ?? item.href ?? ""}-${item.label}`;
+}
+
 export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
+    const menuSelect = useContext(PageHeadingMenuContext);
+    const rootRef = useRef<HTMLElement>(null);
+    const measureRef = useRef<HTMLDivElement>(null);
+    const canOmit = trail.some((item) => item.omitWhenTight);
+    const [tight, setTight] = useState(false);
+    const measureKey = trail.map((item) => `${item.label}\0${item.compactLabel ?? ""}\0${item.menu && item.menu.length > 1 ? "1" : ""}`).join("\n");
+
+    useLayoutEffect(() => {
+        if (!canOmit) {
+            return;
+        }
+        const root = rootRef.current;
+        const measure = measureRef.current;
+        if (!root || !measure) {
+            return;
+        }
+        let cancel = false;
+        const mobile = window.matchMedia("(max-width: 767px)");
+        const update = () => {
+            if (cancel) {
+                return;
+            }
+            const next = mobile.matches && measure.scrollWidth > root.clientWidth + 1;
+            setTight((current) => current === next ? current : next);
+        };
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(root);
+        mobile.addEventListener("change", update);
+        void document.fonts?.ready.then(update);
+        return () => {
+            cancel = true;
+            observer.disconnect();
+            mobile.removeEventListener("change", update);
+        };
+    }, [canOmit, measureKey]);
+
+    const visible = tight ? trail.filter((item) => !item.omitWhenTight) : trail;
+
     return (
-        <Breadcrumb className="min-w-0">
+        <Breadcrumb ref={rootRef} className="relative min-w-0 overflow-hidden">
+            {canOmit ? (
+                <div ref={measureRef} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 flex w-max flex-nowrap items-center gap-1.5 text-base font-semibold whitespace-nowrap sm:gap-2.5 xl:text-lg">
+                    {trail.map((item, index) => {
+                        const choices = item.menu ?? [];
+                        return (
+                            <span key={trailKey(item)} className="contents">
+                                {index > 0 ? <span className="size-3.5 shrink-0" /> : null}
+                                <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap">
+                                    <CrumbLabel item={item} />
+                                    {choices.length > 1 ? <span className="size-7 shrink-0" /> : null}
+                                </span>
+                            </span>
+                        );
+                    })}
+                </div>
+            ) : null}
             <BreadcrumbList className="w-full min-w-0 flex-nowrap gap-1.5 overflow-hidden text-base font-semibold sm:gap-2.5 xl:text-lg">
-                {trail.map((item, index) => {
-                    const last = index === trail.length - 1;
+                {visible.map((item, index) => {
+                    const last = index === visible.length - 1;
+                    const choices = item.menu ?? [];
                     return (
-                        <span key={`${item.href ?? ""}-${item.label}`} className="contents">
+                        <span key={`${item.menuKey ?? item.href ?? ""}-${item.label}`} className="contents">
                             {index > 0 ? <BreadcrumbSeparator className="shrink-0" /> : null}
-                            <BreadcrumbItem className={last ? "min-w-0 shrink" : "shrink-0 whitespace-nowrap"}>
+                            <BreadcrumbItem className="min-w-0 shrink gap-0.5">
                                 {!last && item.href ? (
-                                    <BreadcrumbLink className="whitespace-nowrap font-semibold" render={<Link href={item.href} />}>
+                                    <BreadcrumbLink className="min-w-0 truncate font-semibold" render={<Link href={item.href} />}>
                                         <CrumbLabel item={item} />
                                     </BreadcrumbLink>
-                                ) : (
+                                ) : last ? (
                                     <BreadcrumbPage className="block truncate font-semibold"><CrumbLabel item={item} /></BreadcrumbPage>
+                                ) : (
+                                    <span className="truncate font-semibold text-foreground"><CrumbLabel item={item} /></span>
                                 )}
+                                {choices.length > 1 ? (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger
+                                            type="button"
+                                            aria-label="Выбрать филиал"
+                                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:text-foreground [&_svg]:transition-transform data-popup-open:[&_svg]:rotate-180"
+                                        >
+                                            <ChevronDown className="size-3.5" />
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="start" className="w-auto min-w-56">
+                                            {choices.map((choice) => (
+                                                <DropdownMenuItem
+                                                    key={choice.id}
+                                                    onClick={() => {
+                                                        if (choice.id !== item.menuValue && item.menuKey) {
+                                                            menuSelect?.current?.(item.menuKey, choice.id);
+                                                        }
+                                                    }}
+                                                >
+                                                    <Check className={choice.id === item.menuValue ? undefined : "invisible"} />
+                                                    {choice.label}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                ) : null}
                             </BreadcrumbItem>
                         </span>
                     );

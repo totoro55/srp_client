@@ -21,14 +21,12 @@ import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
 import { KtuMark } from "./ktu-mark";
 import {
-    basketConditions,
     branchMonth,
     employeesOf,
     fixedPremium,
     formatMoney,
     inCalculation,
     roleCaption,
-    salesConditions,
     type BrigadeMode,
     type MockEmployee,
 } from "./mock";
@@ -41,15 +39,11 @@ export function BranchSettings() {
     const month = branchMonth(branchId, period);
 
     return (
-        <Tabs defaultValue="conditions" className="min-w-0 gap-4">
+        <Tabs defaultValue="staff" className="min-w-0 gap-4">
             <TabsList>
-                <TabsTrigger value="conditions">Условия</TabsTrigger>
                 <TabsTrigger value="staff">Сотрудники</TabsTrigger>
                 <TabsTrigger value="brigades">Бригады</TabsTrigger>
             </TabsList>
-            <TabsContent value="conditions">
-                <Conditions month={month} branchId={branchId} />
-            </TabsContent>
             <TabsContent value="staff">
                 <Staff branchId={branchId} period={period} closed={month.closed} inMotivation={month.inMotivation} />
             </TabsContent>
@@ -57,68 +51,6 @@ export function BranchSettings() {
                 <Brigades branchId={branchId} period={period} closed={month.closed} inMotivation={month.inMotivation} />
             </TabsContent>
         </Tabs>
-    );
-}
-
-function Conditions({ month, branchId }: { month: ReturnType<typeof branchMonth>; branchId: string }) {
-    if (!month.inMotivation) {
-        return <Notice>Филиал в этом месяце не участвует в мотивации. Ставки как действующие не показаны.</Notice>;
-    }
-    const sales = salesConditions(branchId);
-    const baskets = basketConditions(branchId);
-    return (
-        <div className="flex flex-col gap-4">
-            <Card className="min-w-0 max-w-full">
-                <CardHeader>
-                    <CardTitle>Продажа товара</CardTitle>
-                    {sales ? <p className="text-sm text-muted-foreground">{sales.version} · {sales.axis}</p> : null}
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                    {!month.tariffsSaved || !sales ? (
-                        <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
-                    ) : (
-                        <Table containerClassName="max-w-full">
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Категория</TableHead>
-                                    <TableHead>Розница</TableHead>
-                                    <TableHead>ИМ</TableHead>
-                                    <TableHead>Безнал</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {sales.rows.map((row) => (
-                                    <TableRow key={row.title}>
-                                        <TableCell className="font-medium">{row.title}</TableCell>
-                                        <TableCell>{row.retail}</TableCell>
-                                        <TableCell>{row.im}</TableCell>
-                                        <TableCell>{row.b2b}</TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    )}
-                </CardContent>
-            </Card>
-            {baskets.map((basket) => (
-                <Card key={basket.id}>
-                    <CardHeader>
-                        <CardTitle>{basket.title}</CardTitle>
-                        <p className="text-sm text-muted-foreground">{basket.version}</p>
-                    </CardHeader>
-                    <CardContent>
-                        <dl className="grid gap-3 sm:grid-cols-2">
-                            {basket.parameters.map((parameter) => (
-                                <div key={parameter.title} className="flex flex-col gap-0.5">
-                                    <dt className="text-xs text-muted-foreground">{parameter.title}</dt>
-                                    <dd>{parameter.value}</dd>
-                                </div>
-                            ))}
-                        </dl>
-                    </CardContent>
-                </Card>
-            ))}
-        </div>
     );
 }
 

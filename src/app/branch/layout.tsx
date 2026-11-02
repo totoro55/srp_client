@@ -16,7 +16,7 @@ export default async function BranchLayout({ children }: { children: React.React
     }
 
     return (
-        <div className="flex w-full min-w-0 max-w-full flex-col px-4 py-4 md:px-8 md:py-6">
+        <div className="flex w-full min-w-0 max-w-full flex-col px-3 py-4 sm:px-4 md:px-8 md:py-6 [@media(max-height:500px)]:px-3! [@media(max-height:500px)]:py-2!">
             <BranchStoreProvider>
                 <Suspense fallback={<StackSkeleton />}>
                     <BranchFrame>{children}</BranchFrame>

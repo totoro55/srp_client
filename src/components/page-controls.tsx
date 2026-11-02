@@ -36,12 +36,12 @@ export function PageControls({ page, pageSize, total, onPageChange }: PageContro
     }
 
     return (
-        <div className="flex shrink-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <p className="text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between gap-2">
+            <p className="shrink-0 text-xs text-muted-foreground">
                 {from}–{to} из {total}
             </p>
-            <Pagination className="mx-0 w-full justify-center md:w-auto md:justify-end">
-            <PaginationContent>
+            <Pagination className="mx-0 w-auto justify-end">
+            <PaginationContent className="gap-0.5 sm:gap-1">
                 <PaginationItem>
                     <PaginationPrevious
                         href="#"

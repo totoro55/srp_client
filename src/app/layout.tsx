@@ -31,7 +31,7 @@ export default async function RootLayout({
     <body
         className={cn(
             inter.className,
-            "h-full w-full min-h-screen bg-background text-foreground overflow-x-auto"
+            "h-full w-full min-h-screen bg-background text-foreground overflow-x-hidden"
         )}>
       <Providers>
         <AppFrame initialSignedIn={Boolean(session)} notice={<NoticeBanner />}>
