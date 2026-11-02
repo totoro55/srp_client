@@ -684,7 +684,7 @@ function DraggablePerson({
 }
 
 function moveDestinations(groups: { id: string; name: string }[], currentId: string | null): { id: string | null; label: string }[] {
-    const items = groups
+    const items: { id: string | null; label: string }[] = groups
         .filter((group) => group.id !== currentId)
         .map((group) => ({ id: group.id, label: group.name.trim() || "Бригада" }));
     if (currentId !== null) {

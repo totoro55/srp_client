@@ -58,7 +58,7 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
         ...Object.fromEntries(
             chartData.map((item) => [item.basket, { label: item.title, color: item.fill }]),
         ),
-    } satisfies ChartConfig;
+    } as ChartConfig;
 
     return (
         <Card className="min-w-0">
@@ -79,9 +79,8 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
                                             hideLabel
                                             formatter={(value, name) => {
                                                 const amount = typeof value === "number" ? value : Number(value) || 0;
-                                                const title =
-                                                    (typeof name === "string" && chartConfig[name]?.label) ||
-                                                    String(name);
+                                                const key = String(name);
+                                                const title = chartConfig[key]?.label ?? key;
                                                 return (
                                                     <div className="flex flex-1 items-center justify-between gap-4 leading-none">
                                                         <span className="text-muted-foreground">{title}</span>

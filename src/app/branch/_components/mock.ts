@@ -723,16 +723,17 @@ export function basketConditions(branchId: string): BasketConditions[] {
             version: PREMIUM_TARIFF[indicator.id].version,
             parameters: PREMIUM_TARIFF[indicator.id][own],
         })),
-        ...SERVICE_INDICATORS.filter((indicator): indicator is { id: ParameterServiceId; title: string } => (
-            indicator.id !== "services" && indicator.id !== "kbt"
-        )).map((indicator) => {
+        ...SERVICE_INDICATORS.flatMap((indicator) => {
+            if (indicator.id === "services" || indicator.id === "kbt") {
+                return [];
+            }
             const tariff = SERVICE_TARIFF[indicator.id];
-            return {
+            return [{
                 id: indicator.id,
                 title: indicator.title,
                 version: tariff.version,
                 parameters: tariff[own],
-            };
+            }];
         }),
     ];
 }
