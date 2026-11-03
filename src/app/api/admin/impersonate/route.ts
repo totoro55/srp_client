@@ -3,7 +3,7 @@ import { db } from "@/services/db";
 import { adminAuthErrorResponse, requireActorFullAccess } from "@/lib/require-admin";
 import { createErrorResponse } from "@/lib/api-error";
 import { getAppSettings } from "@/services/app-settings";
-import { clearImpersonationCookies, setImpersonationCookies } from "@/services/impersonation";
+import { clearImpersonationCookies, impersonationCookieSecure, setImpersonationCookies } from "@/services/impersonation";
 import { audit } from "@/server/authz/resolve-access";
 
 function parsePositiveInt(value: unknown): number | null {
@@ -19,9 +19,10 @@ export async function POST(request: Request) {
         const actor = await requireActorFullAccess();
         const body = (await request.json()) as { roleId?: unknown; reset?: unknown };
         const response = NextResponse.json({ success: true });
+        const secure = impersonationCookieSecure(request);
 
         if (body.reset === true) {
-            clearImpersonationCookies(response);
+            clearImpersonationCookies(response, secure);
             await audit(actor.username, "preview.stop", "");
             return response;
         }
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
             return createErrorResponse("BAD_REQUEST", "Эту роль нельзя открыть для просмотра", 400);
         }
 
-        setImpersonationCookies(response, role.id);
+        setImpersonationCookies(response, role.id, secure);
         await audit(actor.username, "preview.start", role.name);
         return response;
     } catch (error) {
