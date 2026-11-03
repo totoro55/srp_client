@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAccess } from "@/hooks/useAccess";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
@@ -112,7 +113,7 @@ export function MotivationRolesEditor() {
 
     return (
         <AdminPageShell>
-            <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-auto pb-6">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto pb-6">
                 <ConfirmDialog
                     open={pendingRole !== null}
                     title="Удалить роль"
@@ -191,12 +192,14 @@ export function MotivationRolesEditor() {
                     }}
                 />
 
-                <section className="flex flex-col gap-3">
+                <Tabs defaultValue="roles">
+                <TabsList>
+                    <TabsTrigger value="roles">Виды ролей</TabsTrigger>
+                    <TabsTrigger value="rules">Правила для ролей</TabsTrigger>
+                </TabsList>
+                <TabsContent value="roles" className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <h2 className="text-base font-medium">Виды ролей</h2>
-                            <p className="text-sm text-muted-foreground">Их выбирают на филиале и подставляют в правила.</p>
-                        </div>
+                        <p className="text-sm text-muted-foreground">Их выбирают на филиале и подставляют в правила.</p>
                         <Button type="button" size="sm" disabled={!canWrite} onClick={() => openRole("new")}>Добавить роль</Button>
                     </div>
                     <Table containerClassName="max-w-full">
@@ -228,14 +231,10 @@ export function MotivationRolesEditor() {
                             ))}
                         </TableBody>
                     </Table>
-                </section>
-
-                <section className="flex flex-col gap-3">
+                </TabsContent>
+                <TabsContent value="rules" className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <h2 className="text-base font-medium">Автоматическая роль</h2>
-                            <p className="text-sm text-muted-foreground">Срабатывает первое подходящее правило. На филиале его можно заменить вручную для пары сотрудник и филиал.</p>
-                        </div>
+                        <p className="text-sm text-muted-foreground">Срабатывает первое подходящее правило. На филиале его можно заменить вручную для пары сотрудник и филиал.</p>
                         <Button type="button" size="sm" disabled={!canWrite || settings.roles.length === 0} onClick={() => openRule("new")}>Добавить правило</Button>
                     </div>
                     <Table containerClassName="max-w-full">
@@ -275,7 +274,8 @@ export function MotivationRolesEditor() {
                             ))}
                         </TableBody>
                     </Table>
-                </section>
+                </TabsContent>
+                </Tabs>
             </div>
         </AdminPageShell>
     );

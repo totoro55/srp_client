@@ -7,6 +7,8 @@ import { getNews } from "@/services/news";
 import { newsAuthorLine } from "@/lib/news";
 import { HubColumn } from "../../_components/HubColumn";
 import { NewsArticle } from "../../_components/editor/NewsArticle";
+import { MarkNewsRead } from "../_components/MarkNewsRead";
+import { NewsVisibilityNote } from "../_components/NewsVisibilityNote";
 
 export default async function NewsItemPage({ params }: { params: Promise<{ id: string }> }) {
     const access = await getRequestAccess();
@@ -30,6 +32,8 @@ export default async function NewsItemPage({ params }: { params: Promise<{ id: s
     return (
         <HubColumn>
             <PageHeading trail={[{ href: "/news", label: "Новости" }, { label: post.title }]} />
+            <MarkNewsRead id={post.id} />
+            <NewsVisibilityNote status={post.status} publishedAt={post.publishedAt} />
             <NewsArticle
                 title={post.title}
                 publishedAt={post.publishedAt}

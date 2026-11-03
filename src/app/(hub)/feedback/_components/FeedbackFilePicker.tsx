@@ -145,7 +145,7 @@ export function FeedbackFilePicker({
                     <>
                         <Upload className="size-5 text-muted-foreground" aria-hidden />
                         <p className="text-sm font-medium">
-                            {dragging ? "Отпустите файлы, чтобы приложить" : "Перетащите файлы сюда"}
+                            {dragging ? "Отпустите файлы, чтобы приложить" : "Перетащите файлы сюда или вставьте из буфера"}
                         </p>
                         <p className="text-xs text-muted-foreground">или</p>
                         <Button

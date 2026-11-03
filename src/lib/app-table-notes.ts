@@ -171,6 +171,9 @@ const NOTES: Record<string, string> = {
     "news_posts.body": "Текст. У старых новостей это и есть материал",
     "news_posts.published_at": "Когда новость показана читателям",
     "news_posts.author": "Учётная запись автора",
+    "news_reads.post_id": "Новость",
+    "news_reads.username": "Кто прочитал, логин в нижнем регистре",
+    "news_reads.read_at": "Когда новость открывали в последний раз",
     "news_post_roles.post_id": "Новость",
     "news_assets.post_id": "Новость. Пусто, если файл ещё не привязан",
     "news_assets.mime": "Тип файла",
@@ -259,6 +262,7 @@ const INTRO: Record<string, string> = {
     basket_versions: "Версия корзины. Черновик один, опубликованные версии остаются.",
     basket_version_changes: "История сохранений версии: комментарий, автор и снимок параметров.",
     news_post_roles: "Роли, которым видна новость. Пустой список скрывает её от всех, кроме редакторов.",
+    news_reads: "Прочтение новости пользователем. Логин хранится в нижнем регистре.",
     wiki_group_roles: "Роли группы. Их наследуют статьи, у которых включено наследование.",
     wiki_article_roles: "Собственные роли статьи. Действуют, когда наследование ролей группы выключено.",
     feedback_messages: "Сообщение в переписке обращения.",
@@ -300,7 +304,7 @@ export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
     {
         title: "Содержание",
         tables: [
-            "news_posts", "news_post_roles", "news_assets",
+            "news_posts", "news_post_roles", "news_assets", "news_reads",
             "wiki_groups", "wiki_group_roles", "wiki_articles", "wiki_article_roles", "wiki_article_tags", "wiki_assets", "wiki_favorites",
             "roadmap_items",
             "feedback_tickets", "feedback_messages", "feedback_files",

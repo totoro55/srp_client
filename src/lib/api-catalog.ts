@@ -10,8 +10,8 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
     {
         title: "Новости",
         routes: [
-            { path: "/api/news", description: "GET возвращает новости, видимые текущей роли. POST создаёт запись, нужно право news:write." },
-            { path: "/api/news/[id]", description: "GET открывает новость. PUT сохраняет её, DELETE удаляет. Запись и удаление требуют news:write." },
+            { path: "/api/news", description: "GET возвращает новости, видимые текущей роли. PATCH с { all: true } отмечает прочитанными все видимые вышедшие новости. POST создаёт запись, нужно право news:write." },
+            { path: "/api/news/[id]", description: "GET открывает новость. PATCH с { read: true } отмечает её прочитанной, с { read: false } — непрочитанной; без тела запроса отмечает прочитанной. PATCH с { publishedAt } меняет время публикации отложенной новости и требует news:write. PUT сохраняет её, DELETE удаляет. Запись и удаление требуют news:write." },
             { path: "/api/news/assets", description: "POST принимает снимок или вложение новости. Нужно право news:write." },
             { path: "/api/news/assets/[id]", description: "GET отдаёт файл новости тому, кто видит материал. Параметр download=1 скачивает файл." },
             { path: "/api/news/mentions", description: "GET ищет сотрудников для упоминания по логину, имени или должности. Параметр q — строка поиска." },
@@ -37,7 +37,7 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
     {
         title: "Обратная связь",
         routes: [
-            { path: "/api/feedback", description: "GET возвращает свои обращения или очередь поддержки. Фильтры: q, status, kind, category. status, kind и category можно передать несколько раз. Без status остаются незавершённые, status=all снимает ограничение. kind и category принимают код или none, если значение не указано. POST создаёт обращение: вид, категория, текст и вложения, нужно право feedback:write. Из статьи категория остаётся «База знаний», и к обращению прикладывается эта статья." },
+            { path: "/api/feedback", description: "GET возвращает свои обращения или очередь поддержки и сводку: непрочитанные, не обработанные и в работе. Фильтры: q, status, kind, category. status, kind и category можно передать несколько раз. Без status остаются незавершённые, status=all снимает ограничение. kind и category принимают код или none, если значение не указано. POST создаёт обращение: вид, категория, текст и вложения, нужно право feedback:write. Из статьи категория остаётся «База знаний», и к обращению прикладывается эта статья." },
             { path: "/api/feedback/[id]", description: "GET открывает переписку. POST добавляет сообщение — текст, вложения или и то и другое — и может сменить статус. PATCH меняет ведение обращения, вид или категорию. Нужно право feedback:process." },
             { path: "/api/feedback/[id]/messages/[messageId]", description: "PATCH меняет своё сообщение: текст, список оставляемых вложений keep и новые файлы. DELETE удаляет своё сообщение вместе с вложениями. Чужие сообщения недоступны. Нужно право feedback:process." },
             { path: "/api/feedback/[id]/updates", description: "GET отдаёт новые сообщения и смену статуса после указанного номера. Ответ не кэшируется." },

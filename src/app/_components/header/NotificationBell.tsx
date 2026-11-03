@@ -230,8 +230,8 @@ export function NotificationBell() {
                 >
                     <Bell />
                     {unread > 0 ? (
-                        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-medium text-primary-foreground">
-                            {unread > 9 ? "9+" : unread}
+                        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
+                            <span className="inline-block translate-y-[0.5px] leading-none">{unread > 9 ? "9+" : unread}</span>
                         </span>
                     ) : null}
                 </PopoverTrigger>

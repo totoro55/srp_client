@@ -7,7 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LookupSkeleton } from "@/components/loading-state";
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/content";
-import { FeedbackStatusIcon } from "./FeedbackStatusBadge";
+import { FeedbackStatusIcon } from "@/components/feedback-status-badge";
 import { cn } from "@/lib/utils";
 import { useAccess } from "@/hooks/useAccess";
 import { ApiResponse } from "@/types/api";

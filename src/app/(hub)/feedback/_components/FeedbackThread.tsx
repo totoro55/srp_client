@@ -307,7 +307,6 @@ function FeedbackThreadBody({ ticketId }: { ticketId: string }) {
             setFiles([]);
             setDraft(null);
             setDraftLine(null);
-            notifySuccess(draft ? "Сообщение отправлено, обращение обновлено" : "Сообщение отправлено");
         } catch {
             setError("Не удалось отправить сообщение");
         } finally {

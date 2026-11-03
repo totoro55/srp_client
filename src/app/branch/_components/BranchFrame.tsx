@@ -6,7 +6,19 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
-import { BRANCHES, branchById, dataLoadedAt, employeeById, withBranchQuery } from "./mock";
+import {
+    BRANCHES,
+    DEFAULT_BRANCH_PERIOD,
+    branchById,
+    dataLoadedAt,
+    employeeById,
+    isBranchId,
+    isBranchPeriod,
+    ownBranchId,
+    readStoredBranchLocation,
+    withBranchQuery,
+    writeStoredBranchLocation,
+} from "./mock";
 
 export function BranchFrame({ children }: { children: ReactNode }) {
     const router = useRouter();
@@ -23,6 +35,23 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const showLoadStatus = pathname.startsWith("/branch/bonuses");
 
     useEffect(() => {
+        const requestedBranch = searchParams.get("branch");
+        const requestedPeriod = searchParams.get("period");
+        const branchFromUrl = isBranchId(requestedBranch);
+        const periodFromUrl = isBranchPeriod(requestedPeriod);
+        if (branchFromUrl && periodFromUrl) {
+            writeStoredBranchLocation(requestedBranch, requestedPeriod);
+            return;
+        }
+        const stored = readStoredBranchLocation();
+        const nextBranch = branchFromUrl ? requestedBranch : stored?.branchId ?? ownBranchId();
+        const nextPeriod = periodFromUrl ? requestedPeriod : stored?.period ?? DEFAULT_BRANCH_PERIOD;
+        writeStoredBranchLocation(nextBranch, nextPeriod);
+        const part = searchParams.get("part");
+        router.replace(withBranchQuery(pathname, nextBranch, nextPeriod, pathname.endsWith("/lines") ? part : null));
+    }, [pathname, router, searchParams]);
+
+    useEffect(() => {
         if (!employeeId) {
             return;
         }
@@ -36,6 +65,7 @@ export function BranchFrame({ children }: { children: ReactNode }) {
         const path = pathname.startsWith("/branch/bonuses/") && employee && employee.branchId !== nextBranch
             ? "/branch/bonuses"
             : pathname;
+        writeStoredBranchLocation(nextBranch, nextPeriod);
         router.replace(withBranchQuery(path, nextBranch, nextPeriod, path.endsWith("/lines") ? part : null));
     }
 
@@ -116,8 +146,10 @@ export function BranchPeriodField({ showLoadStatus = true }: { showLoadStatus?: 
                     if (!month) {
                         return;
                     }
+                    const nextPeriod = `${month}-01`;
                     const part = searchParams.get("part");
-                    router.replace(withBranchQuery(pathname, branchId, `${month}-01`, pathname.endsWith("/lines") ? part : null));
+                    writeStoredBranchLocation(branchId, nextPeriod);
+                    router.replace(withBranchQuery(pathname, branchId, nextPeriod, pathname.endsWith("/lines") ? part : null));
                 }}
             />
             {showLoadStatus ? <DataLoadStatus branchId={branchId} period={period} /> : null}
@@ -168,8 +200,9 @@ function DataLoadStatus({ branchId, period }: { branchId: string; period: string
 export function useBranchLocation(): { branchId: string; period: string } {
     const searchParams = useSearchParams();
     const requestedBranch = searchParams.get("branch");
-    const branchId = BRANCHES.some((item) => item.id === requestedBranch) ? requestedBranch ?? "lenina" : "lenina";
     const requestedPeriod = searchParams.get("period");
-    const period = /^\d{4}-\d{2}-01$/.test(requestedPeriod ?? "") ? requestedPeriod ?? "2026-10-01" : "2026-10-01";
-    return { branchId, period };
+    return {
+        branchId: isBranchId(requestedBranch) ? requestedBranch : ownBranchId(),
+        period: isBranchPeriod(requestedPeriod) ? requestedPeriod : DEFAULT_BRANCH_PERIOD,
+    };
 }

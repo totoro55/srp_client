@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { can } from "@/lib/access";
+import { granted } from "@/lib/access";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 
 export default async function FeedbackLayout({ children }: { children: React.ReactNode }) {
@@ -7,7 +7,7 @@ export default async function FeedbackLayout({ children }: { children: React.Rea
     if (!access) {
         redirect("/login");
     }
-    if (!can(access, "feedback:write") && !can(access, "feedback:process")) {
+    if (!granted(access, "feedback:write") && !granted(access, "feedback:process")) {
         redirect("/forbidden");
     }
     return children;

@@ -38,7 +38,7 @@ export function AppFrame({
         <SidebarProvider defaultOpen={false}>
             {signedIn ? <AppSideBar /> : null}
             <PageHeadingProvider>
-                <main className="flex min-w-0 flex-1 flex-col">
+                <main className="flex min-h-svh min-w-0 flex-1 flex-col">
                     {notice}
                     {signedIn ? <AccessBanner /> : null}
                     {signedIn ? <Header /> : null}

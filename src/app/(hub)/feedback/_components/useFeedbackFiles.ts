@@ -131,12 +131,12 @@ export function useFeedbackFiles(files: File[], disabled: boolean, onChange: (fi
         if (!ready || disabled || !event.clipboardData) {
             return;
         }
-        const images = imagesFromClipboard(event.clipboardData);
-        if (images.length === 0) {
+        const pasted = filesFromClipboard(event.clipboardData);
+        if (pasted.length === 0) {
             return;
         }
         event.preventDefault();
-        addFiles(images);
+        addFiles(pasted);
     }
 
     const hint = !ready && notice ? notice : limits.hint;
@@ -165,19 +165,41 @@ function carriesFiles(transfer: DataTransfer | null): boolean {
     return transfer !== null && Array.from(transfer.types).includes("Files");
 }
 
-function imagesFromClipboard(data: DataTransfer): File[] {
-    const images: File[] = [];
+function filesFromClipboard(data: DataTransfer): File[] {
+    const files: File[] = [];
+    const seen = new Set<string>();
     for (const item of data.items) {
-        if (item.kind !== "file" || !item.type.startsWith("image/")) {
+        if (item.kind !== "file") {
             continue;
         }
         const file = item.getAsFile();
         if (!file || file.size === 0) {
             continue;
         }
-        images.push(namedClipboardImage(file));
+        const next = item.type.startsWith("image/") ? namedClipboardImage(file) : file;
+        const key = `${next.name}:${next.size}:${next.type}`;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        files.push(next);
     }
-    return images;
+    if (files.length > 0) {
+        return files;
+    }
+    for (const file of Array.from(data.files)) {
+        if (file.size === 0) {
+            continue;
+        }
+        const next = file.type.startsWith("image/") ? namedClipboardImage(file) : file;
+        const key = `${next.name}:${next.size}:${next.type}`;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        files.push(next);
+    }
+    return files;
 }
 
 function namedClipboardImage(file: File): File {

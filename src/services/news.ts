@@ -1,7 +1,7 @@
 import { can } from "@/lib/access";
 import { NEWS_BODY_MAX, NEWS_TITLE_MAX, boundedText } from "@/lib/content";
 import { newsAssetIds, newsPlainText, readNewsDocument, type NewsNode } from "@/lib/news-document";
-import type { NewsStatus } from "@/lib/news";
+import { newsIsLive, type NewsStatus } from "@/lib/news";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
 import { deleteContentFiles, readContentFile, storeContentFile } from "@/services/content-files";
@@ -18,6 +18,7 @@ export interface NewsPost {
     authorName: string | null;
     authorTitle: string | null;
     roleIds: number[];
+    readAt: string | null;
 }
 
 interface NewsRow {
@@ -31,6 +32,7 @@ interface NewsRow {
     author_name: string | null;
     author_title: string | null;
     role_ids: number[];
+    read_at: Date | null;
 }
 
 const DOCUMENT_LIMIT = 100_000;
@@ -44,6 +46,92 @@ export async function getNews(access: AccessView, id: number): Promise<NewsPost 
     return posts[0] ?? null;
 }
 
+export async function markAllNewsRead(access: AccessView): Promise<void> {
+    if (!canMarkNews(access)) {
+        return;
+    }
+    const writer = can(access, "news:write");
+    await db.query(
+        `
+        INSERT INTO news_reads (post_id, username, read_at)
+        SELECT post.id, lower($3), NOW()
+        FROM news_posts post
+        WHERE post.status = 'published'
+          AND post.published_at <= NOW()
+          AND (
+            $1::boolean
+            OR EXISTS (
+                SELECT 1 FROM news_post_roles visible
+                WHERE visible.post_id = post.id AND visible.role_id = $2
+            )
+          )
+        ON CONFLICT (post_id, username) DO UPDATE
+        SET read_at = NOW()
+        `,
+        [writer, access.role?.id ?? null, access.username],
+    );
+}
+
+export async function markNewsRead(access: AccessView, id: number): Promise<void> {
+    if (!canMarkNews(access)) {
+        return;
+    }
+    const post = await getNews(access, id);
+    if (!post || !newsIsLive(post)) {
+        return;
+    }
+    await db.query(
+        `
+        INSERT INTO news_reads (post_id, username, read_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (post_id, username) DO UPDATE
+        SET read_at = NOW()
+        `,
+        [id, access.username.toLowerCase()],
+    );
+}
+
+export async function rescheduleNews(access: AccessView, id: number, publishedAt: string): Promise<NewsPost> {
+    const post = await getNews(access, id);
+    if (!post) {
+        throw new ContentError("Новость не найдена");
+    }
+    if (post.status !== "published" || newsIsLive(post)) {
+        throw new ContentError("Время публикации можно изменить только у отложенной новости");
+    }
+    const when = new Date(publishedAt);
+    if (Number.isNaN(when.getTime())) {
+        throw new ContentError("Укажите дату публикации");
+    }
+    await db.query(
+        "UPDATE news_posts SET published_at = $2, updated_at = NOW() WHERE id = $1",
+        [id, when.toISOString()],
+    );
+    const updated = await getNews(access, id);
+    if (!updated) {
+        throw new ContentError("Новость не найдена");
+    }
+    return updated;
+}
+
+export async function markNewsUnread(access: AccessView, id: number): Promise<void> {
+    if (!canMarkNews(access)) {
+        return;
+    }
+    const post = await getNews(access, id);
+    if (!post || !newsIsLive(post)) {
+        return;
+    }
+    await db.query(
+        "DELETE FROM news_reads WHERE post_id = $1 AND username = $2",
+        [id, access.username.toLowerCase()],
+    );
+}
+
+function canMarkNews(access: AccessView): boolean {
+    return Boolean(access.role) && !access.conflict && !access.previewRoleName;
+}
+
 async function queryNews(access: AccessView, id: number | null, includeDocument: boolean): Promise<NewsPost[]> {
     const writer = can(access, "news:write");
     const roleId = access.role?.id ?? null;
@@ -52,7 +140,13 @@ async function queryNews(access: AccessView, id: number | null, includeDocument:
         SELECT post.id, post.title, post.body, post.status, post.published_at, post.author,
                ${includeDocument ? "post.document," : ""}
                employee.name AS author_name, employee.title AS author_title,
-               COALESCE(json_agg(link.role_id) FILTER (WHERE link.role_id IS NOT NULL), '[]') AS role_ids
+               COALESCE(json_agg(link.role_id) FILTER (WHERE link.role_id IS NOT NULL), '[]') AS role_ids,
+               CASE
+                   WHEN post.status <> 'published' OR post.published_at > NOW() THEN NULL
+                   ELSE (
+                       SELECT seen.read_at FROM news_reads seen WHERE seen.post_id = post.id AND seen.username = lower($4)
+                   )
+               END AS read_at
         FROM news_posts post
         LEFT JOIN news_post_roles link ON link.post_id = post.id
         LEFT JOIN employees employee ON lower(employee.login) = lower(post.author)
@@ -71,7 +165,7 @@ async function queryNews(access: AccessView, id: number | null, includeDocument:
         GROUP BY post.id, employee.name, employee.title
         ORDER BY post.published_at DESC, post.id DESC
         `,
-        [writer, roleId, id]
+        [writer, roleId, id, access.username]
     );
     return rows.map((row) => toNews(row, includeDocument));
 }
@@ -88,6 +182,7 @@ export async function saveNews(access: AccessView, id: number | null, body: unkn
             );
             await replaceNewsRoles(query, inserted[0].id, input.roleIds);
             await linkNewsAssets(query, inserted[0].id, input.document);
+            await rememberAuthorRead(query, inserted[0].id);
             return inserted[0].id;
         }
         const updated = await query<{ id: number }>(
@@ -101,6 +196,7 @@ export async function saveNews(access: AccessView, id: number | null, body: unkn
         }
         await replaceNewsRoles(query, id, input.roleIds);
         await linkNewsAssets(query, id, input.document);
+        await rememberAuthorRead(query, id);
         return id;
     });
     const post = await getNews(access, savedId);
@@ -189,6 +285,20 @@ async function assertRoles(
     }
 }
 
+async function rememberAuthorRead(
+    query: <T extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<T[]>,
+    postId: number
+): Promise<void> {
+    await query(
+        `INSERT INTO news_reads (post_id, username, read_at)
+         SELECT id, lower(author), NOW()
+         FROM news_posts
+         WHERE id = $1 AND status = 'published'
+         ON CONFLICT (post_id, username) DO NOTHING`,
+        [postId]
+    );
+}
+
 async function replaceNewsRoles(
     query: <T extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<T[]>,
     postId: number,
@@ -212,6 +322,7 @@ function toNews(row: NewsRow, includeDocument: boolean): NewsPost {
         authorName: row.author_name?.trim() || null,
         authorTitle: row.author_title?.trim() || null,
         roleIds: row.role_ids.map(Number),
+        readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
     };
 }
 

@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { CheckCheck, ChevronDown, Inbox, Mail, MailOpen, MessageSquareText, type LucideIcon } from "lucide-react";
+import { CheckCheck, ChevronDown, Inbox, Mail, MailCheck, MessageSquareText, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ButtonSpinner } from "@/components/loading-state";
+import { formatGroupedWhen, groupByDate, type DateGroupPrecision } from "@/lib/date-groups";
 import { cn } from "@/lib/utils";
 
 export interface NotificationEntry {
@@ -28,16 +29,13 @@ export const HOME_PREVIEW_COUNT = 5 as const;
 const COUNT_KEY = "srp:notification-preview-count";
 const UNREAD_KEY = "srp:notification-unread-only";
 const VIEW_EVENT = "srp:notification-view";
-const NEAR_DAYS = 7;
 
 export type PreviewCount = (typeof PREVIEW_COUNTS)[number];
-
-type GroupPrecision = "day" | "month" | "year";
 
 interface NotificationGroup {
     key: string;
     label: string;
-    precision: GroupPrecision;
+    precision: DateGroupPrecision;
     items: NotificationEntry[];
 }
 
@@ -106,70 +104,12 @@ function sortNotifications(items: NotificationEntry[]): NotificationEntry[] {
     });
 }
 
-function startOfDay(date: Date): Date {
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function daysBefore(date: Date, now: Date): number {
-    return Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / 86400000);
-}
-
-function capitalize(text: string): string {
-    return text.length === 0 ? text : text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function notificationGroup(createdAt: string, now: Date): Omit<NotificationGroup, "items"> {
-    const date = new Date(createdAt);
-    const age = daysBefore(date, now);
-    if (age >= 0 && age < NEAR_DAYS) {
-        const label = age === 0
-            ? "Сегодня"
-            : age === 1
-                ? "Вчера"
-                : capitalize(date.toLocaleDateString("ru-RU", date.getFullYear() === now.getFullYear()
-                    ? { day: "numeric", month: "long" }
-                    : { day: "numeric", month: "long", year: "numeric" }));
-        return {
-            key: `day:${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
-            label,
-            precision: "day",
-        };
-    }
-    const yearAgo = startOfDay(now);
-    yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-    if (startOfDay(date).getTime() < yearAgo.getTime()) {
-        return { key: `year:${date.getFullYear()}`, label: String(date.getFullYear()), precision: "year" };
-    }
-    return {
-        key: `month:${date.getFullYear()}-${date.getMonth()}`,
-        label: capitalize(date.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })),
-        precision: "month",
-    };
-}
-
 function groupNotifications(items: NotificationEntry[], now = new Date()): NotificationGroup[] {
-    const groups: NotificationGroup[] = [];
-    for (const item of items) {
-        const group = notificationGroup(item.createdAt, now);
-        const last = groups[groups.length - 1];
-        if (last && last.key === group.key) {
-            last.items.push(item);
-            continue;
-        }
-        groups.push({ ...group, items: [item] });
-    }
-    return groups;
+    return groupByDate(items, (item) => item.createdAt, now);
 }
 
-function rowWhen(createdAt: string, precision: GroupPrecision): string {
-    const date = new Date(createdAt);
-    if (precision === "day") {
-        return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-    }
-    if (precision === "month") {
-        return date.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-    }
-    return date.toLocaleString("ru-RU", { day: "numeric", month: "short" });
+function rowWhen(createdAt: string, precision: DateGroupPrecision): string {
+    return formatGroupedWhen(createdAt, precision);
 }
 
 function Segmented({ label, children }: { label: string; children: ReactNode }) {
@@ -254,21 +194,27 @@ export function NotificationCountButton({
     );
 }
 
-const SWIPE_LIMIT = 112;
-const SWIPE_COMMIT = 72;
+const SWIPE_ACTION = 44;
+const SWIPE_COMMIT = 28;
 
 function NotificationRow({
     item,
     precision,
     opening,
     toggling,
+    compact = false,
+    revealed,
+    onReveal,
     onOpen,
     onToggle,
 }: {
     item: NotificationEntry;
-    precision: GroupPrecision;
+    precision: DateGroupPrecision;
     opening: boolean;
     toggling: boolean;
+    compact?: boolean;
+    revealed: boolean;
+    onReveal: (id: number | null) => void;
     onOpen: (item: NotificationEntry) => void;
     onToggle: (item: NotificationEntry) => void;
 }) {
@@ -276,22 +222,50 @@ function NotificationRow({
     const kind = notificationKind(item.kind);
     const KindIcon = kind.icon;
     const busy = opening || toggling;
-    const statusLabel = unread ? "Прочитано" : "Не прочитано";
-    const [offset, setOffset] = useState(0);
-    const offsetRef = useRef(0);
-    const drag = useRef<{ pointerId: number; x: number; y: number; swiping: boolean } | null>(null);
+    const statusLabel = unread ? "Отметить прочитанным" : "Отметить непрочитанным";
+    const surface = unread
+        ? "bg-[color-mix(in_oklab,var(--primary)_15%,var(--background))] hover:bg-[color-mix(in_oklab,var(--primary)_20%,var(--background))]"
+        : "bg-background hover:bg-muted";
+    const [dragX, setDragX] = useState<number | null>(null);
+    const drag = useRef<{ pointerId: number; x: number; y: number; origin: number; swiping: boolean } | null>(null);
     const ignoreClick = useRef(false);
+    const shown = dragX ?? (revealed ? -SWIPE_ACTION : 0);
+    const cornerFill = revealed && dragX === null;
 
-    function moveRow(next: number) {
-        offsetRef.current = next;
-        setOffset(next);
+    useEffect(() => {
+        const media = window.matchMedia("(min-width: 640px)");
+        function close() {
+            if (!media.matches) {
+                return;
+            }
+            setDragX(null);
+            onReveal(null);
+        }
+        media.addEventListener("change", close);
+        return () => media.removeEventListener("change", close);
+    }, [onReveal]);
+
+    function move(next: number) {
+        setDragX(Math.max(-SWIPE_ACTION, Math.min(0, next)));
     }
 
     function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
         if (event.pointerType === "mouse" || busy) {
             return;
         }
-        drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, swiping: false };
+        if (window.matchMedia("(min-width: 640px)").matches) {
+            return;
+        }
+        if (!revealed) {
+            onReveal(null);
+        }
+        drag.current = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            origin: revealed ? -SWIPE_ACTION : 0,
+            swiping: false,
+        };
     }
 
     function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -306,7 +280,7 @@ function NotificationRow({
                 drag.current = null;
                 return;
             }
-            if (dx > -10) {
+            if (Math.abs(dx) < 8) {
                 return;
             }
             current.swiping = true;
@@ -316,7 +290,7 @@ function NotificationRow({
                 // The gesture can continue without capture if the pointer has already ended.
             }
         }
-        moveRow(Math.max(-SWIPE_LIMIT, Math.min(0, dx)));
+        move(current.origin + dx);
     }
 
     function endSwipe(event: ReactPointerEvent<HTMLDivElement>) {
@@ -324,50 +298,65 @@ function NotificationRow({
         if (!current || current.pointerId !== event.pointerId) {
             return;
         }
-        const commit = current.swiping && offsetRef.current <= -SWIPE_COMMIT;
         drag.current = null;
-        moveRow(0);
         if (!current.swiping) {
+            setDragX(null);
             return;
         }
+        const next = Math.max(-SWIPE_ACTION, Math.min(0, current.origin + (event.clientX - current.x)));
         ignoreClick.current = true;
         window.setTimeout(() => {
             ignoreClick.current = false;
         }, 400);
-        if (commit) {
-            onToggle(item);
-        }
+        setDragX(null);
+        onReveal(next <= -SWIPE_COMMIT ? item.id : null);
     }
 
     return (
-        <div className="relative overflow-hidden rounded-md">
-            <div
-                className={cn(
-                    "absolute inset-y-0 right-0 flex w-28 items-center justify-center px-2 text-center text-xs font-medium",
-                    unread ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
-                )}
-                aria-hidden
-            >
-                {statusLabel}
+        <div data-home-row={compact ? "" : undefined} className={cn("relative overflow-hidden rounded-xl sm:rounded-md", compact && "h-10 shrink-0 sm:h-14")}>
+            <div className="absolute inset-y-0 right-0 z-0 flex w-11 sm:hidden">
+                <button
+                    type="button"
+                    className="flex w-full items-center justify-center bg-primary text-primary-foreground disabled:opacity-60"
+                    aria-label={statusLabel}
+                    disabled={busy}
+                    onClick={() => onToggle(item)}
+                >
+                    {toggling ? <ButtonSpinner /> : unread ? <MailCheck className="size-4" /> : <Mail className="size-4" />}
+                </button>
             </div>
             <div
-                className={cn("relative bg-background touch-pan-y", offset === 0 && "transition-transform")}
-                style={offset === 0 ? undefined : { transform: `translateX(${offset}px)` }}
+                className={cn("relative z-10 touch-pan-y", surface, dragX === null && "transition-transform")}
+                style={shown === 0 ? undefined : { transform: `translateX(${shown}px)` }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={endSwipe}
                 onPointerCancel={endSwipe}
             >
+                {cornerFill ? (
+                    <>
+                        <span className="absolute top-0 right-0 z-0 size-[14px] bg-primary sm:hidden" aria-hidden />
+                        <span className="absolute bottom-0 right-0 z-0 size-[14px] bg-primary sm:hidden" aria-hidden />
+                    </>
+                ) : null}
                 <button
                     type="button"
                     className={cn(
-                        "flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left disabled:opacity-60 md:pr-10",
-                        unread ? "border-l-2 border-primary bg-primary/15 hover:bg-primary/20" : "hover:bg-muted",
+                        "relative z-10 flex w-full gap-1.5 rounded-xl text-left transition-colors disabled:opacity-60 sm:rounded-md",
+                        compact
+                            ? "h-10 items-center py-0 pr-1.5 pl-1.5 sm:h-14 sm:pr-12 sm:pl-2"
+                            : "items-start px-2 py-1.5 sm:pr-12",
+                        surface,
+                        unread && "border-l-2 border-primary",
                     )}
                     disabled={busy}
                     onClick={() => {
                         if (ignoreClick.current) {
                             ignoreClick.current = false;
+                            return;
+                        }
+                        if (revealed) {
+                            onReveal(null);
                             return;
                         }
                         onOpen(item);
@@ -381,25 +370,27 @@ function NotificationRow({
                     </span>
                     <span className="min-w-0 flex-1">
                         <span className="sr-only">{unread ? `${kind.label}. Непрочитано. ` : `${kind.label}. `}</span>
-                        <span className={cn("block text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>{item.body}</span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground" suppressHydrationWarning>
+                        <span className={cn("block text-sm", compact && "truncate text-[11px] leading-4 sm:text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>{item.body}</span>
+                        <span className={cn("mt-0.5 block text-xs text-muted-foreground", compact && "mt-0 text-[10px] leading-3 sm:mt-0.5 sm:text-xs sm:leading-4")} suppressHydrationWarning>
                             {rowWhen(item.createdAt, precision)}
                         </span>
                     </span>
                     {opening ? <ButtonSpinner /> : null}
                 </button>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="absolute top-1.5 right-1 hidden md:inline-flex"
-                    aria-label={statusLabel}
-                    title={statusLabel}
-                    disabled={busy}
-                    onClick={() => onToggle(item)}
-                >
-                    {toggling ? <ButtonSpinner /> : unread ? <MailOpen /> : <Mail />}
-                </Button>
+                <span className={cn("absolute right-1 z-10 hidden sm:inline-flex", compact ? "top-1/2 -translate-y-1/2" : "top-1.5")}>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        aria-label={statusLabel}
+                        title={statusLabel}
+                        disabled={busy}
+                        onClick={() => onToggle(item)}
+                    >
+                        {toggling ? <ButtonSpinner /> : unread ? <MailCheck /> : <Mail />}
+                    </Button>
+                </span>
             </div>
         </div>
     );
@@ -409,15 +400,40 @@ export function NotificationRows({
     items,
     openingId,
     togglingId,
+    grouped = true,
+    compact = false,
     onOpen,
     onToggle,
 }: {
     items: NotificationEntry[];
     openingId: number | null;
     togglingId: number | null;
+    grouped?: boolean;
+    compact?: boolean;
     onOpen: (item: NotificationEntry) => void;
     onToggle: (item: NotificationEntry) => void;
 }) {
+    const [openSwipeId, setOpenSwipeId] = useState<number | null>(null);
+    if (!grouped) {
+        return (
+            <>
+                {items.map((item) => (
+                    <NotificationRow
+                        key={item.id}
+                        item={item}
+                        precision="month"
+                        opening={openingId === item.id}
+                        toggling={togglingId === item.id}
+                        compact={compact}
+                        revealed={openSwipeId === item.id}
+                        onReveal={setOpenSwipeId}
+                        onOpen={onOpen}
+                        onToggle={onToggle}
+                    />
+                ))}
+            </>
+        );
+    }
     const groups = groupNotifications(items);
     return (
         <>
@@ -431,6 +447,8 @@ export function NotificationRows({
                             precision={group.precision}
                             opening={openingId === item.id}
                             toggling={togglingId === item.id}
+                            revealed={openSwipeId === item.id}
+                            onReveal={setOpenSwipeId}
                             onOpen={onOpen}
                             onToggle={onToggle}
                         />

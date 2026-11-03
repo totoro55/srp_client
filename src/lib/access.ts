@@ -7,14 +7,16 @@ export interface AccessDecision {
     previewRoleName: string | null;
 }
 
-export function can(access: AccessDecision, permission: PermissionCode): boolean {
+export function granted(access: AccessDecision, permission: PermissionCode): boolean {
     if (access.conflict || !access.role) {
         return false;
     }
+    return access.permissions.includes(permission);
+}
 
+export function can(access: AccessDecision, permission: PermissionCode): boolean {
     if (access.previewRoleName && isWritePermission(permission)) {
         return false;
     }
-
-    return access.permissions.includes(permission);
+    return granted(access, permission);
 }

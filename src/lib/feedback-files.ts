@@ -61,7 +61,7 @@ export function feedbackFileHint(maxMb: number, maxCount: number, extensions: st
         .map((kind) => kind.label);
     const kinds = labels.length > 0 ? labels.join(", ") : "файлы выбранных типов";
     const count = maxCount === 1 ? "один файл" : `не больше ${maxCount} файлов`;
-    return `Можно приложить ${kinds}. За раз ${count}, каждый не больше ${maxMb} МБ.`;
+    return `Можно приложить ${kinds}. За раз ${count}, каждый не больше ${maxMb} МБ. Можно вставить из буфера (Ctrl+V).`;
 }
 
 export function feedbackExtension(filename: string): string {

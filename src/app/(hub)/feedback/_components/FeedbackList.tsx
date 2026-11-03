@@ -5,6 +5,8 @@ import { PageControls } from "@/components/page-controls";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormAlert } from "@/components/form-alert";
 import { StackSkeleton } from "@/components/loading-state";
+import { FeedbackCountBadges } from "@/components/feedback-counts";
+import type { FeedbackCounts } from "@/services/feedback";
 import { FeedbackCreate } from "./FeedbackCreate";
 import { FeedbackFilters, OPEN_STATUSES, feedbackFiltersActive, sameMembers, type CategoryOption, type KindOption } from "./FeedbackFilters";
 import { FeedbackTicketCard, type FeedbackListItem } from "./FeedbackTicketCard";
@@ -17,6 +19,8 @@ interface TicketPage {
     page: number;
     pageSize: number;
     total: number;
+    counts: FeedbackCounts;
+    processor: boolean;
 }
 
 export function FeedbackList() {
@@ -33,6 +37,8 @@ export function FeedbackList() {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [total, setTotal] = useState(0);
+    const [counts, setCounts] = useState<FeedbackCounts | null>(null);
+    const [processor, setProcessor] = useState(false);
     const [refresh, setRefresh] = useState(0);
 
     useEffect(() => {
@@ -73,6 +79,8 @@ export function FeedbackList() {
                     setPage(json.data.page);
                     setPageSize(json.data.pageSize);
                     setTotal(json.data.total);
+                    setCounts(json.data.counts);
+                    setProcessor(json.data.processor);
                 })
                 .catch((reason: unknown) => {
                     if (reason instanceof DOMException && reason.name === "AbortError") {
@@ -109,7 +117,10 @@ export function FeedbackList() {
 
     return (
         <div className="flex flex-col gap-4">
-            <FeedbackCreate onCreated={refreshAfterCreate} />
+            <FeedbackCreate
+                onCreated={refreshAfterCreate}
+                leading={counts ? <FeedbackCountBadges counts={counts} processor={processor} size="md" /> : null}
+            />
             <FeedbackFilters
                 query={query}
                 statuses={statuses}

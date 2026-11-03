@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ButtonSpinner } from "@/components/loading-state";
 import { FeedbackDocumentLink } from "./FeedbackDocument";
 import { FeedbackFilePicker } from "./FeedbackFilePicker";
+import { useFeedbackFiles } from "./useFeedbackFiles";
 import {
     FEEDBACK_ARTICLE_CATEGORY,
     FEEDBACK_CATEGORIES,
@@ -27,7 +28,7 @@ import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
 import { ApiResponse } from "@/types/api";
 
-export function FeedbackCreate({ onCreated }: { onCreated: () => void }) {
+export function FeedbackCreate({ onCreated, leading }: { onCreated: () => void; leading?: ReactNode }) {
     const access = useAccess();
     const router = useRouter();
     const articleQuery = useSearchParams().get("article") ?? "";
@@ -49,6 +50,7 @@ export function FeedbackCreate({ onCreated }: { onCreated: () => void }) {
     const [files, setFiles] = useState<File[]>([]);
     const [formError, setFormError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const attachments = useFeedbackFiles(files, saving || !formOpen, setFiles);
     if (articleQuery !== "" && preparedQuery !== articleQuery) {
         setPreparedQuery(articleQuery);
         setDismissedQuery(null);
@@ -174,13 +176,14 @@ export function FeedbackCreate({ onCreated }: { onCreated: () => void }) {
     }
 
     if (!canWrite) {
-        return null;
+        return leading ? <div className="flex items-center">{leading}</div> : null;
     }
 
     return (
         <>
-            <div className="flex justify-end">
-                <Button type="button" size="sm" onClick={openBlank}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center">{leading}</div>
+                <Button type="button" size="sm" className="shrink-0" onClick={openBlank}>
                     Новое обращение
                 </Button>
             </div>
@@ -190,7 +193,11 @@ export function FeedbackCreate({ onCreated }: { onCreated: () => void }) {
                 }
             }}>
                 <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-4 overflow-hidden sm:max-w-lg">
-                    <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={onSubmit}>
+                    <form
+                        className="flex min-h-0 flex-1 flex-col gap-4"
+                        onSubmit={onSubmit}
+                        onPaste={attachments.canAdd ? attachments.onPaste : undefined}
+                    >
                         <DialogHeader className="shrink-0">
                             <DialogTitle>Новое обращение</DialogTitle>
                         </DialogHeader>

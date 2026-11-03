@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner } from "@/components/loading-state";
-import { HOME_PREVIEW_COUNT, NotificationIconButton, NotificationRows, NotificationsDialog, previewNotifications } from "@/app/_components/notification-list";
+import { useHomeCardLimit } from "@/app/_components/home-card-limit";
+import { NotificationIconButton, NotificationRows, NotificationsDialog } from "@/app/_components/notification-list";
 import { notifyNotificationsChanged, onNotificationsChanged } from "@/app/_components/header/browser-notify";
 import { ApiResponse } from "@/types/api";
 
@@ -32,6 +33,8 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
     const [openingId, setOpeningId] = useState<number | null>(null);
     const [togglingId, setTogglingId] = useState<number | null>(null);
     const [allOpen, setAllOpen] = useState(false);
+    const listRef = useRef<HTMLDivElement>(null);
+    const limit = useHomeCardLimit(listRef);
 
     async function refresh() {
         try {
@@ -93,16 +96,16 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
         }
     }
 
-    const shown = previewNotifications(feed.items, HOME_PREVIEW_COUNT, true);
+    const shown = homeNotifications(feed.items, limit);
 
     return (
-        <section className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-base font-semibold">
+        <section className="flex h-full min-h-0 flex-col gap-2 sm:gap-3">
+            <div className="flex min-h-6 items-center justify-between gap-3 sm:min-h-8">
+                <h2 className="flex items-center gap-2 text-xs font-semibold sm:text-base">
                     Уведомления
                     {feed.unread > 0 ? (
                         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground">
-                            {feed.unread > 9 ? "9+" : feed.unread}
+                            <span className="inline-block leading-none">{feed.unread > 9 ? "9+" : feed.unread}</span>
                         </span>
                     ) : null}
                 </h2>
@@ -115,23 +118,29 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
                 </div>
             </div>
             <FormAlert message={error} />
-            <Card>
-                <CardContent className="flex flex-col gap-1">
-                    {shown.length === 0 ? (
-                        <p className="px-2 py-2 text-sm text-muted-foreground">{feed.items.length > 0 ? "Нет непрочитанных" : "Пока нет уведомлений"}</p>
-                    ) : (
-                        <NotificationRows
-                            items={shown}
-                            openingId={openingId}
-                            togglingId={togglingId}
-                            onOpen={(item) => void openItem(item)}
-                            onToggle={(item) => void mark({ id: item.id, read: item.readAt === null })}
-                        />
-                    )}
+            <Card className="min-h-0 flex-1 gap-0 py-0! lg:h-full">
+                <CardContent className="flex h-full min-h-0 flex-col gap-1 px-2! pt-1.5 pb-0 sm:gap-2 sm:px-3! sm:pt-3">
+                    <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+                        {shown.length === 0 ? (
+                            <p className="px-2 py-1 text-xs text-muted-foreground sm:py-2 sm:text-sm">Пока нет уведомлений</p>
+                        ) : (
+                            <NotificationRows
+                                items={shown}
+                                openingId={openingId}
+                                togglingId={togglingId}
+                                grouped={false}
+                                compact
+                                onOpen={(item) => void openItem(item)}
+                                onToggle={(item) => void mark({ id: item.id, read: item.readAt === null })}
+                            />
+                        )}
+                    </div>
                     {feed.items.length > 0 ? (
-                        <button type="button" className="border-t px-2 pt-2 text-left text-sm text-muted-foreground hover:text-foreground" onClick={() => setAllOpen(true)}>
-                            Показать все
-                        </button>
+                        <div className="mt-auto flex h-8 shrink-0 items-center border-t px-1 sm:h-12 sm:px-2">
+                            <button type="button" className="text-left text-xs text-muted-foreground hover:text-foreground sm:text-sm" onClick={() => setAllOpen(true)}>
+                                Показать все
+                            </button>
+                        </div>
                     ) : null}
                 </CardContent>
             </Card>
@@ -153,4 +162,14 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
             />
         </section>
     );
+}
+
+function homeNotifications(items: HomeNotification[], limit: number): HomeNotification[] {
+    const sorted = [...items].sort((left, right) => {
+        const diff = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+        return diff !== 0 ? diff : right.id - left.id;
+    });
+    const unread = sorted.filter((item) => item.readAt === null);
+    const read = sorted.filter((item) => item.readAt !== null);
+    return [...unread, ...read].slice(0, limit);
 }

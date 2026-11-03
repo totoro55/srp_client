@@ -18,11 +18,13 @@ import {
     MenubarTrigger,
 } from "@/components/ui/menubar";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
+import { useAccess } from "@/hooks/useAccess";
 import { emptyNewsDocument, plainTextDocument, type NewsNode } from "@/lib/news-document";
 import { notifySuccess } from "@/lib/notify";
 import { newsAuthorLine, type NewsStatus } from "@/lib/news";
 import { ApiResponse } from "@/types/api";
 import { NewsArticle } from "../../_components/editor/NewsArticle";
+import { NewsVisibilityNote } from "./NewsVisibilityNote";
 import { NewsEditor, type EditorMenuAction } from "../../_components/editor/NewsEditor";
 import { RolePicker, type RoleOption } from "../../_components/RolePicker";
 import { useUnsavedChanges } from "../../_components/unsaved-changes";
@@ -40,9 +42,11 @@ interface NewsPost {
     roleIds: number[];
 }
 
-export function NewsForm({ postId = null }: { postId?: number | null }) {
+export function NewsForm({ postId = null, startInPreview = false }: { postId?: number | null; startInPreview?: boolean }) {
     const router = useRouter();
+    const access = useAccess();
     const { data: session } = useSession();
+    const canWrite = access.username === null && !access.conflict ? true : access.has("news:write");
     const savedId = useRef<number | null>(postId);
     const [storedStatus, setStoredStatus] = useState<NewsStatus>("draft");
     const [title, setTitle] = useState("");
@@ -55,7 +59,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
     const [loaded, setLoaded] = useState(postId === null);
     const [generation, setGeneration] = useState(0);
     const [missing, setMissing] = useState(false);
-    const [preview, setPreview] = useState(false);
+    const [preview, setPreview] = useState(startInPreview);
     const [previewMenu, setPreviewMenu] = useState(false);
     const [draftOpen, setDraftOpen] = useState(false);
     const [publishOpen, setPublishOpen] = useState(false);
@@ -137,6 +141,9 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
     }
 
     async function save(status: NewsStatus, fields: { title: string; publishedAt: string; roleIds: number[] }) {
+        if (!canWrite) {
+            return;
+        }
         const nextTitle = fields.title.trim();
         if (nextTitle.length === 0) {
             setError("Укажите заголовок");
@@ -215,7 +222,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
     }
 
     const editorMenu: EditorMenuAction[] = [
-        { label: "Сохранить черновик", icon: Save, disabled: saving !== null, run: openDraft },
+        { label: "Сохранить черновик", icon: Save, disabled: saving !== null || !canWrite, run: openDraft },
         { label: "Предпросмотр", icon: Eye, disabled: saving !== null, run: () => { setError(null); setPreview(true); } },
         { label: "К списку", icon: List, run: () => leave("/news") },
     ];
@@ -234,7 +241,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
                                     <PenLine />
                                     К редактированию
                                 </MenubarItem>
-                                <MenubarItem className="whitespace-nowrap" disabled={saving !== null} onClick={() => { setPreviewMenu(false); openPublish(); }}>
+                                <MenubarItem className="whitespace-nowrap" disabled={saving !== null || !canWrite} onClick={() => { setPreviewMenu(false); openPublish(); }}>
                                     <Send />
                                     Опубликовать
                                 </MenubarItem>
@@ -246,12 +253,13 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
             {preview ? (
                 <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40 px-4 py-8 sm:px-8">
                     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                        <NewsVisibilityNote status={storedStatus} publishedAt={new Date(publishedAt).toISOString()} />
                         <p className="text-sm text-muted-foreground">Так новость будет выглядеть после публикации.</p>
                         <NewsArticle
                             title={title.trim() || "Без названия"}
                             publishedAt={new Date(publishedAt).toISOString()}
                             authorLine={authorLine ?? session?.user.displayName ?? ""}
-                            status="published"
+                            status={storedStatus}
                             content={content}
                             plain=""
                         />
@@ -273,7 +281,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
                         {error ? <FormAlert message={error} /> : null}
                         <DialogFooter>
                             <Button type="button" variant="outline" disabled={saving !== null} onClick={() => setDraftOpen(false)}>Отмена</Button>
-                            <Button type="submit" disabled={saving !== null}>
+                            <Button type="submit" disabled={saving !== null || !canWrite}>
                                 {saving === "draft" ? <ButtonSpinner /> : null}
                                 Сохранить
                             </Button>
@@ -302,7 +310,7 @@ export function NewsForm({ postId = null }: { postId?: number | null }) {
                         {error ? <FormAlert message={error} /> : null}
                         <DialogFooter>
                             <Button type="button" variant="outline" disabled={saving !== null} onClick={() => setPublishOpen(false)}>Отмена</Button>
-                            <Button type="submit" disabled={saving !== null}>
+                            <Button type="submit" disabled={saving !== null || !canWrite}>
                                 {saving === "published" ? <ButtonSpinner /> : null}
                                 Опубликовать
                             </Button>

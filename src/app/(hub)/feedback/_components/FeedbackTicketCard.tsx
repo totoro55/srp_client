@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FeedbackDocumentLink } from "./FeedbackDocument";
-import { FeedbackStatusBadge } from "./FeedbackStatusBadge";
+import { FeedbackStatusBadge } from "@/components/feedback-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FEEDBACK_CATEGORY_LABELS, FEEDBACK_KIND_LABELS, type FeedbackCategory, type FeedbackKind, type FeedbackStatus } from "@/lib/content";

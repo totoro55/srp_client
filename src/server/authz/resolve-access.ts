@@ -88,7 +88,9 @@ export async function resolveAccess(
         return actor;
     }
 
-    const permissions = (await loadPermissionCodes(preview.id)).filter((code) => !isWritePermission(code));
+    const permissions = (await loadPermissionCodes(preview.id)).filter((code) =>
+        !isWritePermission(code) || code === "feedback:write" || code === "feedback:process",
+    );
 
     return {
         username,

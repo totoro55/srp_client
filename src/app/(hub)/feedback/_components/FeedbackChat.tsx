@@ -8,7 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FeedbackFileLinks } from "./FeedbackFileList";
-import { FeedbackStatusIcon } from "./FeedbackStatusBadge";
+import { FeedbackStatusIcon } from "@/components/feedback-status-badge";
 import type { FeedbackDialogColor } from "./FeedbackDialogColor";
 import { entrySpace, type SystemNote, type ThreadEntry, type TicketFile } from "./feedback-model";
 import { FEEDBACK_STATUS_LABELS, type FeedbackStatus } from "@/lib/content";

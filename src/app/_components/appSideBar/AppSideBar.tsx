@@ -30,7 +30,7 @@ export function AppSideBar() {
     }, [pathname, setOpenMobile]);
 
     const dynamicNavigation = useMemo(() => {
-        const visible = visibleNavigation((permission) => access.has(permission));
+        const visible = visibleNavigation((permission) => access.granted(permission));
         return isMobile ? visible : visible.filter((group) => group.id !== "main");
     }, [access, isMobile]);
 

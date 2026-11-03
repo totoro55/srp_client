@@ -2,6 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { can } from "@/lib/access";
 import type { PermissionCode } from "@/lib/permissions";
 import { ApiResponse } from "@/types/api";
 
@@ -99,7 +100,10 @@ function loadAccess(username: string): void {
         });
 }
 
-export function useAccess(): SessionAccess & { has: (permission: PermissionCode) => boolean } {
+export function useAccess(): SessionAccess & {
+    has: (permission: PermissionCode) => boolean;
+    granted: (permission: PermissionCode) => boolean;
+} {
     const { data: session, status } = useSession();
     const snapshot = useSyncExternalStore(subscribe, () => accessSnapshot, () => EMPTY_ACCESS);
     const username = session?.user?.username ?? null;
@@ -114,17 +118,29 @@ export function useAccess(): SessionAccess & { has: (permission: PermissionCode)
         }
     }, [status, username]);
 
+    const decision = useMemo(() => ({
+        role: snapshot.roleCode ? { code: snapshot.roleCode } : null,
+        permissions: snapshot.permissions,
+        conflict: snapshot.conflict,
+        previewRoleName: snapshot.previewRoleName,
+    }), [snapshot.conflict, snapshot.permissions, snapshot.previewRoleName, snapshot.roleCode]);
+
     const has = useCallback(
-        (permission: PermissionCode) => snapshot.permissions.includes(permission),
-        [snapshot.permissions]
+        (permission: PermissionCode) => can(decision, permission),
+        [decision]
+    );
+    const allows = useCallback(
+        (permission: PermissionCode) => !decision.conflict && decision.role !== null && decision.permissions.includes(permission),
+        [decision]
     );
 
     return useMemo(
         () => ({
             ...snapshot,
             has,
+            granted: allows,
         }),
-        [snapshot, has]
+        [snapshot, has, allows]
     );
 }
 

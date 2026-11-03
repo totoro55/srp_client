@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ButtonSpinner } from "@/components/loading-state";
 import { FeedbackDocumentLink } from "./FeedbackDocument";
 import { FeedbackDialogColorButton, type FeedbackDialogColorId } from "./FeedbackDialogColor";
-import { FeedbackStatusBadge } from "./FeedbackStatusBadge";
+import { FeedbackStatusBadge } from "@/components/feedback-status-badge";
 import type { Ticket } from "./feedback-model";
 import {
     FEEDBACK_CATEGORIES,

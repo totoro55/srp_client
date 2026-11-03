@@ -20,7 +20,7 @@ import {
     parseFeedbackExtensions,
 } from "@/lib/feedback-files";
 import { ADMIN_PAGE_SIZE, likePattern, pageCount } from "@/lib/list-page";
-import { can } from "@/lib/access";
+import { can, granted } from "@/lib/access";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { ContentError } from "@/services/content-error";
 import { db } from "@/services/db";
@@ -102,6 +102,14 @@ export interface FeedbackListPage {
     page: number;
     pageSize: number;
     total: number;
+    counts: FeedbackCounts;
+    processor: boolean;
+}
+
+export interface FeedbackCounts {
+    unread: number;
+    unprocessed: number;
+    progress: number;
 }
 
 const FEEDBACK_FILTER = `
@@ -162,6 +170,19 @@ const ASSIGNEE_NAME = `
     )
 `;
 
+const UNREAD_REPLY = `
+    EXISTS (
+        SELECT 1 FROM feedback_messages message
+        WHERE message.ticket_id = ticket.id
+          AND lower(message.author) <> lower($2)
+          AND message.id > COALESCE((
+              SELECT visit.seen_message_id
+              FROM feedback_visits visit
+              WHERE visit.ticket_id = ticket.id AND visit.username = lower($2)
+          ), 0)
+    )
+`;
+
 const UNREAD = `
     (
         EXISTS (
@@ -198,7 +219,7 @@ export async function listFeedback(
     categories: readonly string[],
     requestedPage: number,
 ): Promise<FeedbackListPage> {
-    const processor = can(access, "feedback:process");
+    const processor = granted(access, "feedback:process");
     const filterParams = [processor, access.username, query, likePattern(query), statuses, kinds, categories];
     const totals = await db.query<{ total: number }>(
         `SELECT COUNT(*)::int AS total FROM feedback_tickets ticket ${FEEDBACK_FILTER}`,
@@ -227,6 +248,101 @@ export async function listFeedback(
         page,
         pageSize: ADMIN_PAGE_SIZE,
         total,
+        counts: await feedbackCounts(access),
+        processor,
+    };
+}
+
+export async function feedbackCounts(access: AccessView): Promise<FeedbackCounts> {
+    const processor = granted(access, "feedback:process");
+    const rows = await db.query<{ unread: number; unprocessed: number; progress: number }>(
+        `
+        SELECT COUNT(*) FILTER (WHERE attention.unread)::int AS unread,
+               COUNT(*) FILTER (WHERE attention.status = 'new')::int AS unprocessed,
+               COUNT(*) FILTER (WHERE attention.status = 'progress')::int AS progress
+        FROM (
+            SELECT ticket.status, ${UNREAD} AS unread
+            FROM feedback_tickets ticket
+            WHERE $1::boolean OR lower(ticket.author) = lower($2)
+        ) attention
+        `,
+        [processor, access.username],
+    );
+    const row = rows[0];
+    return {
+        unread: row?.unread ?? 0,
+        unprocessed: row?.unprocessed ?? 0,
+        progress: row?.progress ?? 0,
+    };
+}
+
+const HOME_FEEDBACK_LIMIT = 40;
+
+export interface HomeFeedbackItem {
+    id: number;
+    subject: string;
+    status: FeedbackStatus;
+    authorName: string;
+    updatedAt: string;
+    unread: boolean;
+}
+
+export async function listHomeFeedback(access: AccessView): Promise<{ counts: FeedbackCounts; items: HomeFeedbackItem[] }> {
+    if (!granted(access, "feedback:write") && !granted(access, "feedback:process")) {
+        return { counts: { unread: 0, unprocessed: 0, progress: 0 }, items: [] };
+    }
+    const processor = granted(access, "feedback:process");
+    const where = `
+        WHERE ($1::boolean OR lower(ticket.author) = lower($2))
+          AND (ticket.status = 'new' OR ${UNREAD_REPLY})
+    `;
+    const params = [processor, access.username];
+    const totals = await db.query<{ unread: number; unprocessed: number }>(
+        `
+        SELECT COUNT(*) FILTER (WHERE ${UNREAD_REPLY})::int AS unread,
+               COUNT(*) FILTER (WHERE ticket.status = 'new')::int AS unprocessed
+        FROM feedback_tickets ticket
+        WHERE $1::boolean OR lower(ticket.author) = lower($2)
+        `,
+        params,
+    );
+    const rows = await db.query<{
+        id: number;
+        subject: string;
+        status: string;
+        author_name: string;
+        updated_at: Date;
+        unread: boolean;
+    }>(
+        `
+        SELECT ticket.id, ticket.subject, ticket.status, ${AUTHOR_NAME} AS author_name,
+               ticket.updated_at, ${UNREAD_REPLY} AS unread
+        FROM feedback_tickets ticket
+        ${where}
+        ORDER BY ${UNREAD_REPLY} DESC, ticket.updated_at DESC, ticket.id DESC
+        LIMIT ${HOME_FEEDBACK_LIMIT}
+        `,
+        params,
+    );
+    return {
+        counts: {
+            unread: totals[0]?.unread ?? 0,
+            unprocessed: totals[0]?.unprocessed ?? 0,
+            progress: 0,
+        },
+        items: rows.flatMap((row) => {
+            if (!isFeedbackStatus(row.status)) {
+                return [];
+            }
+            return [{
+                id: row.id,
+                subject: row.subject,
+                status: row.status,
+                authorName: row.author_name?.trim() || "",
+                updatedAt: new Date(row.updated_at).toISOString(),
+                unread: row.unread === true,
+            }];
+        }),
     };
 }
 
@@ -595,7 +711,7 @@ async function loadTicket(id: number): Promise<TicketRow & { messages?: never }>
 
 function canReadTicket(access: AccessView, ticket: { author: string; assignee: string | null }): boolean {
     const username = access.username.toLowerCase();
-    return can(access, "feedback:process")
+    return granted(access, "feedback:process")
         || ticket.author.toLowerCase() === username
         || ticket.assignee?.toLowerCase() === username;
 }

@@ -1126,7 +1126,7 @@ function salesChannelCalculation(rate: string, amount: number, seed: number): st
     const parsed = Number.parseInt(rate.replace(/\D/g, ""), 10);
     const unit = Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
     const count = Math.max(1, Math.round(amount / unit) + (seed % 3));
-    return `${formatPlain(unit)} ₽ × ${count}`;
+    return `${formatPlain(unit)} ₽ × ${count} шт`;
 }
 
 export type ServiceCatalogKind = "services" | "kbt";
@@ -1478,7 +1478,7 @@ function buildIssueOperationDetail(
         return {
             id: `${kind}-${title}-${categoryIndex}`,
             categoryTitle: title,
-            quantityCalculation: `${quantityCount} × ${formatPlain(rates.quantity)} ₽`,
+            quantityCalculation: `${quantityCount} шт × ${formatPlain(rates.quantity)} ₽`,
             quantityAmount,
             volumeCalculation: `${volumeUnits.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³ × ${formatPlain(rates.volume)} ₽`,
             volumeAmount,
@@ -1730,7 +1730,7 @@ function buildWarehouseOperationDetail(branchId: string, total: number, seed: nu
             title: `${docType} №${number}`,
             day: dayLabel,
             docType,
-            quantityCalculation: `${quantityCount} × ${formatPlain(rates.quantity)} ₽`,
+            quantityCalculation: `${quantityCount} шт × ${formatPlain(rates.quantity)} ₽`,
             quantityAmount,
             volumeCalculation: `${volumeUnits.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³ × ${formatPlain(rates.volume)} ₽`,
             volumeAmount,
@@ -1760,7 +1760,7 @@ function buildWarehouseOperationDetail(branchId: string, total: number, seed: nu
             return {
                 id: `warehouse-day-${day}`,
                 day,
-                quantityCalculation: `${formatPlain(quantityCount)} × ${formatPlain(rates.quantity)} ₽`,
+                quantityCalculation: `${formatPlain(quantityCount)} шт × ${formatPlain(rates.quantity)} ₽`,
                 quantityAmount,
                 volumeCalculation: `${volumeUnits.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³ × ${formatPlain(rates.volume)} ₽`,
                 volumeAmount,
@@ -1894,7 +1894,7 @@ function buildDisplayOperationDetail(branchId: string, total: number, seed: numb
             id: `display-zone-${index}`,
             title: zone,
             day: dayLabel,
-            quantityCalculation: `${quantityCount} × ${formatPlain(rates.quantity)} ₽`,
+            quantityCalculation: `${quantityCount} шт × ${formatPlain(rates.quantity)} ₽`,
             quantityAmount,
             volumeCalculation: `${volumeUnits.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³ × ${formatPlain(rates.volume)} ₽`,
             volumeAmount,
@@ -1924,7 +1924,7 @@ function buildDisplayOperationDetail(branchId: string, total: number, seed: numb
             return {
                 id: `display-day-${day}`,
                 day,
-                quantityCalculation: `${formatPlain(quantityCount)} × ${formatPlain(rates.quantity)} ₽`,
+                quantityCalculation: `${formatPlain(quantityCount)} шт × ${formatPlain(rates.quantity)} ₽`,
                 quantityAmount,
                 volumeCalculation: `${volumeUnits.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³ × ${formatPlain(rates.volume)} ₽`,
                 volumeAmount,
@@ -2188,3 +2188,50 @@ export function withBranchQuery(path: string, branchId: string, period: string, 
     }
     return `${path}?${params.toString()}`;
 }
+
+export const DEFAULT_BRANCH_PERIOD = "2026-10-01";
+const BRANCH_LOCATION_KEY = "branch-location";
+
+export function ownBranchId(): string {
+    return BRANCHES.find((item) => item.own)?.id ?? BRANCHES[0]?.id ?? "lenina";
+}
+
+export function isBranchId(value: string | null | undefined): value is string {
+    return typeof value === "string" && BRANCHES.some((item) => item.id === value);
+}
+
+export function isBranchPeriod(value: string | null | undefined): value is string {
+    return typeof value === "string" && /^\d{4}-\d{2}-01$/.test(value);
+}
+
+export function readStoredBranchLocation(): { branchId: string; period: string } | null {
+    if (typeof window === "undefined") {
+        return null;
+    }
+    try {
+        const raw = window.localStorage.getItem(BRANCH_LOCATION_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") {
+            return null;
+        }
+        const branchId = "branchId" in parsed && typeof parsed.branchId === "string" ? parsed.branchId : null;
+        const period = "period" in parsed && typeof parsed.period === "string" ? parsed.period : null;
+        if (!isBranchId(branchId) || !isBranchPeriod(period)) {
+            return null;
+        }
+        return { branchId, period };
+    } catch {
+        return null;
+    }
+}
+
+export function writeStoredBranchLocation(branchId: string, period: string) {
+    if (typeof window === "undefined" || !isBranchId(branchId) || !isBranchPeriod(period)) {
+        return;
+    }
+    window.localStorage.setItem(BRANCH_LOCATION_KEY, JSON.stringify({ branchId, period }));
+}
+
