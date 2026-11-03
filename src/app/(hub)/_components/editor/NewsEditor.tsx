@@ -201,7 +201,6 @@ export function NewsEditor({
     const [mathGap, setMathGap] = useState(FORMULA_GAP_DEFAULT);
     const contentRef = useRef(content);
     const ready = useRef(false);
-    contentRef.current = content;
     const imageInput = useRef<HTMLInputElement>(null);
     const fileInput = useRef<HTMLInputElement>(null);
     const metricSelection = useRef<Selection | null>(null);
@@ -349,6 +348,10 @@ export function NewsEditor({
     });
 
     useEffect(() => {
+        contentRef.current = content;
+    }, [content]);
+
+    useEffect(() => {
         ready.current = false;
         if (!editor) {
             return;
@@ -370,18 +373,20 @@ export function NewsEditor({
         if (!editor) {
             return;
         }
-        const storage = editor.storage as { wikiAnchor?: { pagePath: string } };
-        if (storage.wikiAnchor) {
-            storage.wikiAnchor.pagePath = anchorPage;
+        const wikiAnchor = (editor.storage as { wikiAnchor?: { pagePath: string } }).wikiAnchor;
+        if (wikiAnchor) {
+            // TipTap extension storage is intentionally mutable.
+            // eslint-disable-next-line react-hooks/immutability -- sync anchor page path with editor storage
+            wikiAnchor.pagePath = anchorPage;
         }
     }, [editor, anchorPage]);
 
+    /* eslint-disable react-hooks/immutability -- TipTap fileAttachment.rename lives on mutable extension storage */
     useEffect(() => {
         if (!editor) {
             return;
         }
-        const storage = editor.storage as { fileAttachment?: { rename: ((pos: number) => void) | null } };
-        const attachment = storage.fileAttachment;
+        const attachment = (editor.storage as { fileAttachment?: { rename: ((pos: number) => void) | null } }).fileAttachment;
         if (!attachment) {
             return;
         }
@@ -390,39 +395,78 @@ export function NewsEditor({
             attachment.rename = null;
         };
     }, [editor]);
+    /* eslint-enable react-hooks/immutability */
 
-    openMathRef.current = (kind, pos) => {
-        if (!editor) {
-            return;
-        }
-        const node = editor.state.doc.nodeAt(pos);
-        const expected = kind === "block" ? "blockMath" : "inlineMath";
-        if (!node || node.type.name !== expected) {
-            return;
-        }
-        setMathKind(kind);
-        setMathEditing(true);
-        setMathPos(pos);
-        rememberFormula(node.attrs);
-        setMathOpen(true);
-    };
+    function rememberFormula(attrs: Record<string, unknown>) {
+        setMathValue(typeof attrs.latex === "string" ? attrs.latex : "");
+        setMathSize(formulaFontSize(attrs.fontSize));
+        setMathColor(formulaColor(attrs.color));
+        setMathGap(formulaGap(attrs.gap));
+    }
 
-    openRenameRef.current = (pos) => {
-        if (!editor) {
-            return;
-        }
-        const node = editor.state.doc.nodeAt(pos);
-        if (!node || node.type.name !== "fileAttachment") {
-            return;
-        }
-        const title = typeof node.attrs.title === "string" ? node.attrs.title : "";
-        const parts = splitAttachmentName(title);
-        editor.chain().setNodeSelection(pos).run();
-        setRenamePos(pos);
-        setRenameValue(parts.base);
-        setRenameExt(parts.ext);
-        setRenameOpen(true);
-    };
+    useEffect(() => {
+        openMathRef.current = (kind, pos) => {
+            if (!editor) {
+                return;
+            }
+            const node = editor.state.doc.nodeAt(pos);
+            const expected = kind === "block" ? "blockMath" : "inlineMath";
+            if (!node || node.type.name !== expected) {
+                return;
+            }
+            setMathKind(kind);
+            setMathEditing(true);
+            setMathPos(pos);
+            rememberFormula(node.attrs);
+            setMathOpen(true);
+        };
+
+        openRenameRef.current = (pos) => {
+            if (!editor) {
+                return;
+            }
+            const node = editor.state.doc.nodeAt(pos);
+            if (!node || node.type.name !== "fileAttachment") {
+                return;
+            }
+            const title = typeof node.attrs.title === "string" ? node.attrs.title : "";
+            const parts = splitAttachmentName(title);
+            editor.chain().setNodeSelection(pos).run();
+            setRenamePos(pos);
+            setRenameValue(parts.base);
+            setRenameExt(parts.ext);
+            setRenameOpen(true);
+        };
+
+        uploadRef.current = async (kind, file) => {
+            if (!editable || !editor) {
+                return;
+            }
+            try {
+                const mime = normalizeUpload(file, kind);
+                if (!mime) {
+                    notifyError(uploadRejectMessage(kind));
+                    return;
+                }
+                const form = new FormData();
+                form.set("file", file);
+                form.set("kind", kind);
+                const response = await fetch(assetsUrl, { method: "POST", body: form });
+                const json = (await response.json()) as ApiResponse<{ src: string }>;
+                if (!json.success) {
+                    notifyError(json.error.message);
+                    return;
+                }
+                if (kind === "image") {
+                    editor.chain().focus().setImage({ src: json.data.src, alt: file.name }).run();
+                    return;
+                }
+                insertFileAttachment(editor, { src: json.data.src, title: file.name, mime });
+            } catch {
+                notifyError("Не удалось загрузить файл");
+            }
+        };
+    }, [assetsUrl, editable, editor]);
 
     function openAttachmentRename() {
         if (!editor) {
@@ -456,35 +500,6 @@ export function NewsEditor({
         editor.chain().setNodeSelection(renamePos).updateAttributes("fileAttachment", { title }).focus().run();
         setRenameOpen(false);
     }
-
-    uploadRef.current = async (kind, file) => {
-        if (!editable || !editor) {
-            return;
-        }
-        try {
-            const mime = normalizeUpload(file, kind);
-            if (!mime) {
-                notifyError(uploadRejectMessage(kind));
-                return;
-            }
-            const form = new FormData();
-            form.set("file", file);
-            form.set("kind", kind);
-            const response = await fetch(assetsUrl, { method: "POST", body: form });
-            const json = (await response.json()) as ApiResponse<{ src: string }>;
-            if (!json.success) {
-                notifyError(json.error.message);
-                return;
-            }
-            if (kind === "image") {
-                editor.chain().focus().setImage({ src: json.data.src, alt: file.name }).run();
-                return;
-            }
-            insertFileAttachment(editor, { src: json.data.src, title: file.name, mime });
-        } catch {
-            notifyError("Не удалось загрузить файл");
-        }
-    };
 
     if (!editable) {
         return (
@@ -779,13 +794,6 @@ export function NewsEditor({
         setMathPos(pos);
         rememberFormula(current ?? {});
         setMathOpen(true);
-    }
-
-    function rememberFormula(attrs: Record<string, unknown>) {
-        setMathValue(typeof attrs.latex === "string" ? attrs.latex : "");
-        setMathSize(formulaFontSize(attrs.fontSize));
-        setMathColor(formulaColor(attrs.color));
-        setMathGap(formulaGap(attrs.gap));
     }
 
     const heading = editor?.isActive("heading", { level: 2 })

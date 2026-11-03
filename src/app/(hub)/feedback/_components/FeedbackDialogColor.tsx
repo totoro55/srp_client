@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Check, Palette } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -162,19 +162,43 @@ function isDialogColor(value: string | null): value is FeedbackDialogColorId {
     return FEEDBACK_DIALOG_COLORS.some((item) => item.id === value);
 }
 
-export function useFeedbackDialogColor() {
-    const [id, setId] = useState<FeedbackDialogColorId>("sky");
+const colorListeners = new Set<() => void>();
 
-    useLayoutEffect(() => {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
-        if (isDialogColor(stored)) {
-            setId(stored);
+function subscribeFeedbackDialogColor(onStoreChange: () => void) {
+    colorListeners.add(onStoreChange);
+    const onStorage = (event: StorageEvent) => {
+        if (event.key === STORAGE_KEY) {
+            onStoreChange();
         }
-    }, []);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+        colorListeners.delete(onStoreChange);
+        window.removeEventListener("storage", onStorage);
+    };
+}
+
+function getFeedbackDialogColorSnapshot(): FeedbackDialogColorId {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return isDialogColor(stored) ? stored : "sky";
+}
+
+function notifyFeedbackDialogColor() {
+    for (const listener of colorListeners) {
+        listener();
+    }
+}
+
+export function useFeedbackDialogColor() {
+    const id = useSyncExternalStore(
+        subscribeFeedbackDialogColor,
+        getFeedbackDialogColorSnapshot,
+        () => "sky" as FeedbackDialogColorId,
+    );
 
     function choose(next: FeedbackDialogColorId) {
-        setId(next);
         window.localStorage.setItem(STORAGE_KEY, next);
+        notifyFeedbackDialogColor();
     }
 
     const color = FEEDBACK_DIALOG_COLORS.find((item) => item.id === id) ?? FEEDBACK_DIALOG_COLORS[0];

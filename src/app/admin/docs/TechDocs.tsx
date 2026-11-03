@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,20 +129,18 @@ function clustersOf(sections: DocSection[]): { key: string; title?: string; sect
 
 export function TechDocs({ groups }: { groups: DocGroup[] }) {
     const [query, setQuery] = useState("");
-    const [activeId, setActiveId] = useState(groups[0]?.sections[0]?.id ?? "");
+    const [pickedSectionId, setActiveId] = useState(groups[0]?.sections[0]?.id ?? "");
     const [matchIndex, setMatchIndex] = useState(0);
     const [matchCount, setMatchCount] = useState(0);
     const contentRef = useRef<HTMLDivElement>(null);
     const navRef = useRef<HTMLElement>(null);
     const followMatch = useRef(true);
     const needle = query.trim();
-
-    useEffect(() => {
-        const ids = groups.flatMap((group) => group.sections.map((section) => section.id));
-        if (!ids.includes(activeId)) {
-            setActiveId(ids[0] ?? "");
-        }
-    }, [groups, activeId]);
+    const sectionIds = useMemo(
+        () => groups.flatMap((group) => group.sections.map((section) => section.id)),
+        [groups],
+    );
+    const activeId = sectionIds.includes(pickedSectionId) ? pickedSectionId : (sectionIds[0] ?? "");
 
     useLayoutEffect(() => {
         const root = contentRef.current;

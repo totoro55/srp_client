@@ -66,7 +66,15 @@ export async function getBranchCoefficients(
         }))
         .filter((basket) => basket.coefficients.length > 0)
         .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ru"))
-        .map(({ sortOrder: _sortOrder, ...basket }) => basket);
+        .map(({ id, name, indicatorName, versionId, versionNo, versionName, coefficients }) => ({
+            id,
+            name,
+            indicatorName,
+            versionId,
+            versionNo,
+            versionName,
+            coefficients,
+        }));
 
     const enabledBranches = await listEnabledBranchUuids(territoryUuid, period);
     const branches = await db.query<{ uuid: string; code: string; name: string }>(

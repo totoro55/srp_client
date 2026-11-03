@@ -50,10 +50,15 @@ export function EnabledExceptions() {
     const [preview, setPreview] = useState<CalculatedTariffRow[] | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [savingTariffs, setSavingTariffs] = useState(false);
-
-    const load = useCallback(async (period?: string) => {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
         setError(null);
+    }
+
+    const fetchExceptions = useCallback(async (period?: string) => {
         const chosen = period ?? requestedPeriod;
         const suffix = chosen ? `?period=${encodeURIComponent(chosen)}` : "";
         try {
@@ -77,9 +82,24 @@ export function EnabledExceptions() {
         }
     }, [requestedPeriod, territoryUuid]);
 
+    const load = useCallback(async (period?: string) => {
+        setLoading(true);
+        setError(null);
+        await fetchExceptions(period);
+    }, [fetchExceptions]);
+
     useEffect(() => {
-        void load();
-    }, [load]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchExceptions();
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchExceptions]);
 
     const listed = useMemo(() => (page ? enabledList(page, edits, removed, pendingAdds) : []), [page, edits, removed, pendingAdds]);
     const listedCodes = useMemo(() => new Set(listed.map((item) => item.code)), [listed]);
@@ -819,9 +839,12 @@ function RateCell({
     onCommit: (value: string | null) => void;
 }) {
     const [draft, setDraft] = useState(percent ? storedPercentToDraft(value) : (value ?? ""));
-    useEffect(() => {
+    const draftSource = `${percent ? "p" : "f"}|${value ?? ""}`;
+    const [previousDraftSource, setPreviousDraftSource] = useState(draftSource);
+    if (draftSource !== previousDraftSource) {
+        setPreviousDraftSource(draftSource);
         setDraft(percent ? storedPercentToDraft(value) : (value ?? ""));
-    }, [percent, value]);
+    }
     if (!editable) {
         const text = formatRate(value, percent);
         return (

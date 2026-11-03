@@ -39,13 +39,6 @@ export function SettingsForm() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            void load();
-        }, 0);
-        return () => window.clearTimeout(timer);
-    }, []);
-
     async function load() {
         setLoading(true);
         setError(null);
@@ -63,6 +56,13 @@ export function SettingsForm() {
             setLoading(false);
         }
     }
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void load();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     function update(patch: Partial<AppSettings>) {
         setSettings((current) => ({ ...current, ...patch }));

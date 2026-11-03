@@ -36,13 +36,6 @@ export function NewsBoard() {
     const [from, setFrom] = useState("");
     const [to, setTo] = useState("");
 
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            void load();
-        }, 0);
-        return () => window.clearTimeout(timer);
-    }, []);
-
     async function load() {
         setError(null);
         try {
@@ -59,6 +52,13 @@ export function NewsBoard() {
             setLoaded(true);
         }
     }
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void load();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     async function remove(post: NewsPost) {
         setDeletingId(post.id);

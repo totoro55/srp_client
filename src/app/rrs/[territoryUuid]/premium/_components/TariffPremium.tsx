@@ -38,10 +38,15 @@ export function TariffPremium() {
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
     const [view, setView] = useState<PremiumView>(DEFAULT_PREMIUM_VIEW);
-
-    const load = useCallback(async (period?: string) => {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
         setError(null);
+    }
+
+    const fetchPremium = useCallback(async (period?: string) => {
         const chosen = period ?? requestedPeriod;
         const suffix = chosen ? `?period=${encodeURIComponent(chosen)}` : "";
         try {
@@ -60,9 +65,24 @@ export function TariffPremium() {
         }
     }, [requestedPeriod, territoryUuid]);
 
+    const load = useCallback(async (period?: string) => {
+        setLoading(true);
+        setError(null);
+        await fetchPremium(period);
+    }, [fetchPremium]);
+
     useEffect(() => {
-        void load();
-    }, [load]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchPremium();
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchPremium]);
 
     const viewed = useMemo(
         () => page ? applyPremiumView(page.rows, view) : null,
@@ -213,7 +233,11 @@ function PremiumSettings({
 
 function MinQuantityField({ value, onChange }: { value: number; onChange: (value: number) => void }) {
     const [draft, setDraft] = useState(value === 0 ? "" : String(value));
-    useEffect(() => setDraft(value === 0 ? "" : String(value)), [value]);
+    const [committedValue, setCommittedValue] = useState(value);
+    if (value !== committedValue) {
+        setCommittedValue(value);
+        setDraft(value === 0 ? "" : String(value));
+    }
     function commit(raw: string) {
         const normalized = raw.trim().replace(",", ".");
         if (normalized === "") {
@@ -466,7 +490,11 @@ function ExpandChart({
 
 function LimitField({ value, label, onChange }: { value: number; label: string; onChange: (value: number) => void }) {
     const [draft, setDraft] = useState(String(value));
-    useEffect(() => setDraft(String(value)), [value]);
+    const [committedValue, setCommittedValue] = useState(value);
+    if (value !== committedValue) {
+        setCommittedValue(value);
+        setDraft(String(value));
+    }
     function commit(raw: string) {
         const next = Number(raw);
         if (!Number.isInteger(next) || next < 1 || next > 200) {

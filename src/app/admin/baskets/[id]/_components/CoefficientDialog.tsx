@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -20,26 +20,43 @@ export function CoefficientDialog({
     onOpenChange: (open: boolean) => void;
     onSubmit: (coefficient: BasketCoefficient) => string | null;
 }) {
-    const [title, setTitle] = useState("");
-    const [description, setDescription] = useState("");
-    const [key, setKey] = useState("");
-    const [min, setMin] = useState("");
-    const [max, setMax] = useState("");
-    const [integer, setInteger] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const formKey = coefficient?.key ?? "new";
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent>
+                {open ? (
+                    <CoefficientDialogForm
+                        key={formKey}
+                        coefficient={coefficient}
+                        onOpenChange={onOpenChange}
+                        onSubmit={onSubmit}
+                    />
+                ) : null}
+            </DialogContent>
+        </Dialog>
+    );
+}
 
-    useEffect(() => {
-        if (!open) {
-            return;
-        }
-        setTitle(coefficient?.title ?? "");
-        setDescription(coefficient?.description ?? "");
-        setKey(coefficient?.key ?? "");
-        setMin(coefficient?.min === null || coefficient?.min === undefined ? "" : String(coefficient.min));
-        setMax(coefficient?.max === null || coefficient?.max === undefined ? "" : String(coefficient.max));
-        setInteger(coefficient?.integer ?? false);
-        setError(null);
-    }, [open, coefficient]);
+function CoefficientDialogForm({
+    coefficient,
+    onOpenChange,
+    onSubmit,
+}: {
+    coefficient: BasketCoefficient | null;
+    onOpenChange: (open: boolean) => void;
+    onSubmit: (coefficient: BasketCoefficient) => string | null;
+}) {
+    const [title, setTitle] = useState(() => coefficient?.title ?? "");
+    const [description, setDescription] = useState(() => coefficient?.description ?? "");
+    const [key, setKey] = useState(() => coefficient?.key ?? "");
+    const [min, setMin] = useState(() => (
+        coefficient?.min === null || coefficient?.min === undefined ? "" : String(coefficient.min)
+    ));
+    const [max, setMax] = useState(() => (
+        coefficient?.max === null || coefficient?.max === undefined ? "" : String(coefficient.max)
+    ));
+    const [integer, setInteger] = useState(() => coefficient?.integer ?? false);
+    const [error, setError] = useState<string | null>(null);
 
     function onSave(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -69,52 +86,48 @@ export function CoefficientDialog({
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
-                <form className="flex flex-col gap-4" onSubmit={onSave}>
-                    <DialogHeader>
-                        <DialogTitle>{coefficient ? "Коэффициент" : "Новый коэффициент"}</DialogTitle>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="coefficient-title">Название</Label>
-                        <Input id="coefficient-title" value={title} maxLength={PARAMETER_TITLE_MAX} required onChange={(event) => setTitle(event.target.value)} />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="coefficient-description">Описание</Label>
-                        <Textarea
-                            id="coefficient-description"
-                            value={description}
-                            maxLength={PARAMETER_DESCRIPTION_MAX}
-                            placeholder="Зачем этот коэффициент и как его заполнять"
-                            onChange={(event) => setDescription(event.target.value)}
-                        />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="coefficient-key">Код</Label>
-                        <Input id="coefficient-key" value={key} required pattern="[A-Za-z][A-Za-z0-9_]{0,49}" onChange={(event) => setKey(event.target.value)} />
-                        <p className="text-xs text-muted-foreground">Латинские буквы, цифры и подчёркивание, с буквы.</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="coefficient-min">Минимум</Label>
-                            <Input id="coefficient-min" value={min} inputMode="decimal" onChange={(event) => setMin(event.target.value)} />
-                        </div>
-                        <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="coefficient-max">Максимум</Label>
-                            <Input id="coefficient-max" value={max} inputMode="decimal" onChange={(event) => setMax(event.target.value)} />
-                        </div>
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                        <Label htmlFor="coefficient-integer">Только целое число</Label>
-                        <Switch id="coefficient-integer" checked={integer} onCheckedChange={setInteger} />
-                    </div>
-                    {error ? <p className="text-sm text-destructive">{error}</p> : null}
-                    <DialogFooter>
-                        <Button type="submit">Сохранить</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
+        <form className="flex flex-col gap-4" onSubmit={onSave}>
+            <DialogHeader>
+                <DialogTitle>{coefficient ? "Коэффициент" : "Новый коэффициент"}</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-1.5">
+                <Label htmlFor="coefficient-title">Название</Label>
+                <Input id="coefficient-title" value={title} maxLength={PARAMETER_TITLE_MAX} required onChange={(event) => setTitle(event.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+                <Label htmlFor="coefficient-description">Описание</Label>
+                <Textarea
+                    id="coefficient-description"
+                    value={description}
+                    maxLength={PARAMETER_DESCRIPTION_MAX}
+                    placeholder="Зачем этот коэффициент и как его заполнять"
+                    onChange={(event) => setDescription(event.target.value)}
+                />
+            </div>
+            <div className="flex flex-col gap-1.5">
+                <Label htmlFor="coefficient-key">Код</Label>
+                <Input id="coefficient-key" value={key} required pattern="[A-Za-z][A-Za-z0-9_]{0,49}" onChange={(event) => setKey(event.target.value)} />
+                <p className="text-xs text-muted-foreground">Латинские буквы, цифры и подчёркивание, с буквы.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="coefficient-min">Минимум</Label>
+                    <Input id="coefficient-min" value={min} inputMode="decimal" onChange={(event) => setMin(event.target.value)} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="coefficient-max">Максимум</Label>
+                    <Input id="coefficient-max" value={max} inputMode="decimal" onChange={(event) => setMax(event.target.value)} />
+                </div>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="coefficient-integer">Только целое число</Label>
+                <Switch id="coefficient-integer" checked={integer} onCheckedChange={setInteger} />
+            </div>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <DialogFooter>
+                <Button type="submit">Сохранить</Button>
+            </DialogFooter>
+        </form>
     );
 }
 

@@ -47,6 +47,10 @@ const COMPOSER_MAX_HEIGHT = 128;
 
 export function FeedbackThread() {
     const params = useParams<{ id: string }>();
+    return <FeedbackThreadBody key={params.id} ticketId={params.id} />;
+}
+
+function FeedbackThreadBody({ ticketId }: { ticketId: string }) {
     const access = useAccess();
     const canProcess = access.has("feedback:process");
     const dialogColor = useFeedbackDialogColor();
@@ -73,7 +77,10 @@ export function FeedbackThread() {
     const ticketRef = useRef(ticket);
     const stickToBottom = useRef(true);
     const freshAfterRef = useRef<number | null>(null);
-    ticketRef.current = ticket;
+
+    useEffect(() => {
+        ticketRef.current = ticket;
+    }, [ticket]);
 
     function clearFresh() {
         if (freshAfterRef.current === null) {
@@ -115,16 +122,30 @@ export function FeedbackThread() {
         node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
     }
 
+    async function load() {
+        setError(null);
+        try {
+            const response = await fetch(`/api/feedback/${ticketId}`);
+            const json = (await response.json()) as ApiResponse<Ticket>;
+            if (!json.success) {
+                setError(json.error.message);
+                return;
+            }
+            setTicket(json.data);
+        } catch {
+            setError("Не удалось загрузить обращение");
+        } finally {
+            setLoaded(true);
+        }
+    }
+
     useEffect(() => {
         stickToBottom.current = true;
-        clearFresh();
-        setDraft(null);
-        setDraftLine(null);
         const timer = window.setTimeout(() => {
             void load();
         }, 0);
         return () => window.clearTimeout(timer);
-    }, [params.id]);
+    }, [ticketId]);
 
     useEffect(() => {
         const node = threadRef.current;
@@ -154,8 +175,8 @@ export function FeedbackThread() {
         if (!loaded) {
             return;
         }
-        const ticketId = Number(params.id);
-        if (!Number.isInteger(ticketId)) {
+        const numericTicketId = Number(ticketId);
+        if (!Number.isInteger(numericTicketId)) {
             return;
         }
         let stopped = false;
@@ -164,7 +185,7 @@ export function FeedbackThread() {
 
         async function poll() {
             const current = ticketRef.current;
-            if (stopped || !current || current.id !== ticketId || document.visibilityState === "hidden") {
+            if (stopped || !current || current.id !== numericTicketId || document.visibilityState === "hidden") {
                 return;
             }
             const query = new URLSearchParams({
@@ -173,7 +194,7 @@ export function FeedbackThread() {
                 assignee: current.assignee ?? "",
             });
             try {
-                const response = await fetch(`/api/feedback/${ticketId}/updates?${query}`, {
+                const response = await fetch(`/api/feedback/${numericTicketId}/updates?${query}`, {
                     signal: controller.signal,
                     cache: "no-store",
                 });
@@ -192,7 +213,7 @@ export function FeedbackThread() {
                     return;
                 }
                 const previous = ticketRef.current;
-                if (!previous || previous.id !== ticketId) {
+                if (!previous || previous.id !== numericTicketId) {
                     return;
                 }
                 const next = mergeTicket(previous, json.data);
@@ -241,7 +262,7 @@ export function FeedbackThread() {
             window.clearTimeout(timer);
             document.removeEventListener("visibilitychange", onVisibility);
         };
-    }, [loaded, params.id]);
+    }, [loaded, ticketId]);
 
     useEffect(() => {
         const element = composerRef.current;
@@ -251,23 +272,6 @@ export function FeedbackThread() {
         element.style.height = "auto";
         element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
     }, [body]);
-
-    async function load() {
-        setError(null);
-        try {
-            const response = await fetch(`/api/feedback/${params.id}`);
-            const json = (await response.json()) as ApiResponse<Ticket>;
-            if (!json.success) {
-                setError(json.error.message);
-                return;
-            }
-            setTicket(json.data);
-        } catch {
-            setError("Не удалось загрузить обращение");
-        } finally {
-            setLoaded(true);
-        }
-    }
 
     async function send() {
         if (!body.trim() && files.length === 0) {
@@ -290,7 +294,7 @@ export function FeedbackThread() {
             for (const file of files) {
                 form.append("file", file);
             }
-            const response = await fetch(`/api/feedback/${params.id}`, { method: "POST", body: form });
+            const response = await fetch(`/api/feedback/${ticketId}`, { method: "POST", body: form });
             const json = (await response.json()) as ApiResponse<Ticket>;
             if (!json.success) {
                 setError(json.error.message);
@@ -324,7 +328,7 @@ export function FeedbackThread() {
         setClassifying(field);
         setError(null);
         try {
-            const response = await fetch(`/api/feedback/${params.id}`, {
+            const response = await fetch(`/api/feedback/${ticketId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ [field]: value }),
@@ -396,7 +400,7 @@ export function FeedbackThread() {
             for (const file of files) {
                 form.append("file", file);
             }
-            const response = await fetch(`/api/feedback/${params.id}/messages/${messageDraft.id}`, { method: "PATCH", body: form });
+            const response = await fetch(`/api/feedback/${ticketId}/messages/${messageDraft.id}`, { method: "PATCH", body: form });
             const json = (await response.json()) as ApiResponse<Ticket>;
             if (!json.success) {
                 setError(json.error.message);
@@ -419,7 +423,7 @@ export function FeedbackThread() {
         setMessagePending("delete");
         setError(null);
         try {
-            const response = await fetch(`/api/feedback/${params.id}/messages/${removingId}`, { method: "DELETE" });
+            const response = await fetch(`/api/feedback/${ticketId}/messages/${removingId}`, { method: "DELETE" });
             const json = (await response.json()) as ApiResponse<Ticket>;
             if (!json.success) {
                 setError(json.error.message);
@@ -480,7 +484,7 @@ export function FeedbackThread() {
         void send();
     }
 
-    const headingTrail = ticketHeading(params.id, ticket);
+    const headingTrail = ticketHeading(ticketId, ticket);
 
     if (!loaded) {
         return (

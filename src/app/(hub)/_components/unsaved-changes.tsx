@@ -7,8 +7,11 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 export function useUnsavedChanges(dirty: boolean) {
     const router = useRouter();
     const dirtyRef = useRef(dirty);
-    dirtyRef.current = dirty;
     const [href, setHref] = useState<string | null>(null);
+
+    useEffect(() => {
+        dirtyRef.current = dirty;
+    }, [dirty]);
 
     useEffect(() => {
         function onUnload(event: BeforeUnloadEvent) {

@@ -137,10 +137,6 @@ export function BasketDetail() {
         fillVersion(version);
     }
 
-    useEffect(() => {
-        void load(requestedVersionId);
-    }, [basketId, requestedVersionId]);
-
     function fillVersion(version: BasketVersion | null) {
         setSelectedId(version?.id ?? null);
         setVersionName(version?.name ?? "");
@@ -284,6 +280,13 @@ export function BasketDetail() {
             setLoading(false);
         }
     }
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void load(requestedVersionId);
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [basketId, requestedVersionId]);
 
     async function mutate(
         url: string,

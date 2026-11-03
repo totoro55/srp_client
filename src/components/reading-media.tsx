@@ -36,16 +36,44 @@ function previewUrl(src: string, mode: "inline" | "download"): string {
 }
 
 export function ReadingMediaDialog({ item, onClose }: { item: ReadingMedia | null; onClose: () => void }) {
-    const kind = item ? readingMediaKind(item.mime, item.title) : "none";
+    if (!item || typeof document === "undefined") {
+        return null;
+    }
+    const kind = readingMediaKind(item.mime, item.title);
+    if (kind === "image") {
+        return createPortal(
+            <PhotoLightbox key={item.src} src={item.src} title={item.title} download={previewUrl(item.src, "download")} onClose={onClose} />,
+            document.body,
+        );
+    }
+
+    const download = previewUrl(item.src, "download");
+    return createPortal(
+        <ReadingStage title={item.title} download={download} onClose={onClose}>
+            {kind === "pdf" ? (
+                <iframe src={previewUrl(item.src, "inline")} title={item.title} className="h-[calc(100dvh-5rem)] w-full rounded-md bg-white" />
+            ) : null}
+            {kind === "text" ? <TextFilePreview key={item.src} item={item} download={download} /> : null}
+            {kind === "none" ? (
+                <div className="flex w-full max-w-md flex-col items-center rounded-md bg-background px-6 py-5 text-center text-foreground">
+                    <p className="text-sm font-medium">{item.title}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
+                    <a href={download} download={item.title} className={buttonVariants({ className: "mt-4" })}>
+                        <Download />
+                        Скачать
+                    </a>
+                </div>
+            ) : null}
+        </ReadingStage>,
+        document.body,
+    );
+}
+
+function TextFilePreview({ item, download }: { item: ReadingMedia; download: string }) {
     const [text, setText] = useState<string | null>(null);
     const [failed, setFailed] = useState(false);
 
     useEffect(() => {
-        setText(null);
-        setFailed(false);
-        if (!item || kind !== "text") {
-            return;
-        }
         const controller = new AbortController();
         void fetch(previewUrl(item.src, "inline"), { signal: controller.signal })
             .then(async (response) => {
@@ -62,51 +90,22 @@ export function ReadingMediaDialog({ item, onClose }: { item: ReadingMedia | nul
                 setFailed(true);
             });
         return () => controller.abort();
-    }, [item, kind]);
+    }, [item.src]);
 
-    if (!item || typeof document === "undefined") {
-        return null;
-    }
-    if (kind === "image") {
-        return createPortal(
-            <PhotoLightbox key={item.src} src={item.src} title={item.title} download={previewUrl(item.src, "download")} onClose={onClose} />,
-            document.body,
-        );
-    }
-
-    const download = previewUrl(item.src, "download");
-    return createPortal(
-        <ReadingStage title={item.title} download={download} onClose={onClose}>
-            {kind === "pdf" ? (
-                <iframe src={previewUrl(item.src, "inline")} title={item.title} className="h-[calc(100dvh-5rem)] w-full rounded-md bg-white" />
-            ) : null}
-            {kind === "text" ? (
-                <div className="h-[calc(100dvh-5rem)] w-full max-w-3xl overflow-auto rounded-md bg-background p-4 text-foreground">
-                    {text === null && !failed ? <StackSkeleton rows={3} /> : null}
-                    {text !== null ? <pre className="font-mono text-sm whitespace-pre-wrap">{text}</pre> : null}
-                    {failed ? (
-                        <div className="flex flex-col items-center gap-4 text-center">
-                            <p className="text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
-                            <a href={download} download={item.title} className={buttonVariants()}>
-                                <Download />
-                                Скачать
-                            </a>
-                        </div>
-                    ) : null}
-                </div>
-            ) : null}
-            {kind === "none" ? (
-                <div className="flex w-full max-w-md flex-col items-center rounded-md bg-background px-6 py-5 text-center text-foreground">
-                    <p className="text-sm font-medium">{item.title}</p>
-                    <p className="mt-2 text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
-                    <a href={download} download={item.title} className={buttonVariants({ className: "mt-4" })}>
+    return (
+        <div className="h-[calc(100dvh-5rem)] w-full max-w-3xl overflow-auto rounded-md bg-background p-4 text-foreground">
+            {text === null && !failed ? <StackSkeleton rows={3} /> : null}
+            {text !== null ? <pre className="font-mono text-sm whitespace-pre-wrap">{text}</pre> : null}
+            {failed ? (
+                <div className="flex flex-col items-center gap-4 text-center">
+                    <p className="text-sm text-muted-foreground">Предпросмотр для этого файла недоступен.</p>
+                    <a href={download} download={item.title} className={buttonVariants()}>
                         <Download />
                         Скачать
                     </a>
                 </div>
             ) : null}
-        </ReadingStage>,
-        document.body,
+        </div>
     );
 }
 

@@ -9,7 +9,7 @@ import { can } from "@/lib/access";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { listNews } from "@/services/news";
 import { listNotifications } from "@/services/notifications";
-import { newsAuthorLine } from "@/lib/news";
+import { newsAuthorLine, publishedNewsAsOf } from "@/lib/news";
 
 export default async function Home() {
     const session = await getServerSession(authOptions);
@@ -19,7 +19,7 @@ export default async function Home() {
     const access = await getRequestAccess();
     const news = access ? await listNews(access) : [];
     const notifications = access ? await listNotifications(access) : { unread: 0, items: [] };
-    const published = news.filter((post) => post.status === "published" && new Date(post.publishedAt).getTime() <= Date.now());
+    const published = publishedNewsAsOf(news);
 
     return (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-8">

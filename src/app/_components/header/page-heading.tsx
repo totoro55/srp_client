@@ -52,34 +52,31 @@ function sameTrail(left: PageHeadingCrumb[], right: PageHeadingCrumb[]): boolean
 
 export function PageHeadingProvider({ children }: { children: ReactNode }) {
     const [entries, setEntries] = useState<Entry[]>([]);
-    const menuSelect = useRef<((key: string, id: string) => void) | null>(null);
-    const actions = useRef<PageHeadingActions | null>(null);
-    if (!actions.current) {
-        actions.current = {
-            setTrail(id, trail) {
-                setEntries((current) => {
-                    const existing = current.find((item) => item.id === id);
-                    if (existing && sameTrail(existing.trail, trail)) {
-                        return current;
-                    }
-                    return [...current.filter((item) => item.id !== id), { id, trail }];
-                });
-            },
-            clearTrail(id) {
-                setEntries((current) => {
-                    if (!current.some((item) => item.id === id)) {
-                        return current;
-                    }
-                    return current.filter((item) => item.id !== id);
-                });
-            },
-        };
-    }
+    const menuSelectRef = useRef<((key: string, id: string) => void) | null>(null);
+    const [actions] = useState<PageHeadingActions>(() => ({
+        setTrail(id, trail) {
+            setEntries((current) => {
+                const existing = current.find((item) => item.id === id);
+                if (existing && sameTrail(existing.trail, trail)) {
+                    return current;
+                }
+                return [...current.filter((item) => item.id !== id), { id, trail }];
+            });
+        },
+        clearTrail(id) {
+            setEntries((current) => {
+                if (!current.some((item) => item.id === id)) {
+                    return current;
+                }
+                return current.filter((item) => item.id !== id);
+            });
+        },
+    }));
     const trail = entries.at(-1)?.trail ?? null;
 
     return (
-        <PageHeadingActionsContext.Provider value={actions.current}>
-            <PageHeadingMenuContext.Provider value={menuSelect}>
+        <PageHeadingActionsContext.Provider value={actions}>
+            <PageHeadingMenuContext.Provider value={menuSelectRef}>
                 <PageHeadingTrailContext.Provider value={trail}>
                     {children}
                 </PageHeadingTrailContext.Provider>
@@ -92,12 +89,10 @@ export function PageHeading({ trail }: { trail: PageHeadingCrumb[] }) {
     const actions = useContext(PageHeadingActionsContext);
     const id = useId();
     const signature = trail.map((item) => `${item.href ?? ""}\0${item.label}\0${item.compactLabel ?? ""}\0${item.omitWhenTight ? "1" : ""}\0${menuSignature(item)}`).join("\n");
-    const trailRef = useRef(trail);
-    trailRef.current = trail;
 
     useEffect(() => {
-        actions?.setTrail(id, trailRef.current);
-    }, [actions, id, signature]);
+        actions?.setTrail(id, trail);
+    }, [actions, id, signature, trail]);
 
     useEffect(() => {
         return () => actions?.clearTrail(id);
@@ -123,19 +118,22 @@ export function usePageHeadingTrail(): PageHeadingCrumb[] | null {
 }
 
 export function usePageHeadingMenu(handler: (key: string, id: string) => void) {
-    const slot = useContext(PageHeadingMenuContext);
+    const menuSelectRef = useContext(PageHeadingMenuContext);
     const handlerRef = useRef(handler);
-    handlerRef.current = handler;
 
     useEffect(() => {
-        if (!slot) {
+        handlerRef.current = handler;
+    }, [handler]);
+
+    useEffect(() => {
+        if (!menuSelectRef) {
             return;
         }
-        slot.current = (key, id) => handlerRef.current(key, id);
+        menuSelectRef.current = (key, id) => handlerRef.current(key, id);
         return () => {
-            slot.current = null;
+            menuSelectRef.current = null;
         };
-    }, [slot]);
+    }, [menuSelectRef]);
 }
 
 function trailKey(item: PageHeadingCrumb): string {
@@ -143,7 +141,7 @@ function trailKey(item: PageHeadingCrumb): string {
 }
 
 export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
-    const menuSelect = useContext(PageHeadingMenuContext);
+    const menuSelectRef = useContext(PageHeadingMenuContext);
     const rootRef = useRef<HTMLElement>(null);
     const measureRef = useRef<HTMLDivElement>(null);
     const canOmit = trail.some((item) => item.omitWhenTight);
@@ -232,7 +230,7 @@ export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
                                                     key={choice.id}
                                                     onClick={() => {
                                                         if (choice.id !== item.menuValue && item.menuKey) {
-                                                            menuSelect?.current?.(item.menuKey, choice.id);
+                                                            menuSelectRef?.current?.(item.menuKey, choice.id);
                                                         }
                                                     }}
                                                 >

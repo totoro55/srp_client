@@ -91,6 +91,37 @@ interface WikiOrderPayload {
     articles: { groupId: number; ids: number[] }[];
 }
 
+function readWikiTreeWidth(): number {
+    if (typeof window === "undefined") {
+        return TREE_DEFAULT;
+    }
+    const storedWidth = window.localStorage.getItem(TREE_WIDTH_KEY);
+    const width = storedWidth === null ? Number.NaN : Number(storedWidth);
+    if (!Number.isFinite(width) || width <= 0) {
+        return TREE_DEFAULT;
+    }
+    return Math.min(TREE_MAX, Math.max(TREE_MIN, Math.round(width)));
+}
+
+function readWikiClosedGroups(): Set<number> {
+    if (typeof window === "undefined") {
+        return new Set();
+    }
+    const storedClosed = window.localStorage.getItem(TREE_CLOSED_KEY);
+    if (!storedClosed) {
+        return new Set();
+    }
+    try {
+        const parsed = JSON.parse(storedClosed) as unknown;
+        if (Array.isArray(parsed)) {
+            return new Set(parsed.filter((item): item is number => typeof item === "number"));
+        }
+    } catch {
+        window.localStorage.removeItem(TREE_CLOSED_KEY);
+    }
+    return new Set();
+}
+
 export function WikiDesk() {
     const params = useParams<{ id?: string }>();
     const router = useRouter();
@@ -105,17 +136,24 @@ export function WikiDesk() {
     const groupParam = searchParams.get("group");
     const browseGroupId = articleId === null && groupParam !== null && /^\d+$/.test(groupParam) ? Number(groupParam) : null;
     const [query, setQuery] = useState(urlQuery);
+    const [syncedUrlQuery, setSyncedUrlQuery] = useState(urlQuery);
     const [groups, setGroups] = useState<WikiGroup[]>([]);
     const [articles, setArticles] = useState<WikiArticleSummary[]>([]);
     const [favorites, setFavorites] = useState<WikiArticleSummary[]>([]);
     const [favoriteBusy, setFavoriteBusy] = useState<number | null>(null);
-    const [favoritesClosed, setFavoritesClosed] = useState(false);
+    const [favoritesClosed, setFavoritesClosed] = useState(
+        () => typeof window !== "undefined" && window.localStorage.getItem(FAVORITES_CLOSED_KEY) === "1",
+    );
     const [tags, setTags] = useState<string[]>([]);
     const [article, setArticle] = useState<WikiArticle | null>(null);
-    const [closed, setClosed] = useState<Set<number>>(new Set());
-    const [treeWidth, setTreeWidth] = useState(TREE_DEFAULT);
-    const [treeCollapsed, setTreeCollapsed] = useState(false);
-    const [prefsReady, setPrefsReady] = useState(false);
+    const [closed, setClosed] = useState(readWikiClosedGroups);
+    const [treeWidth, setTreeWidth] = useState(readWikiTreeWidth);
+    const [treeCollapsed, setTreeCollapsed] = useState(
+        () => typeof window !== "undefined" && window.localStorage.getItem(TREE_COLLAPSED_KEY) === "1",
+    );
+    const [prefsReady] = useState(() => typeof window !== "undefined");
+    const [expandedForArticleId, setExpandedForArticleId] = useState<number | null>(null);
+    const [expandedForBrowseGroupId, setExpandedForBrowseGroupId] = useState<number | null>(null);
     const [loaded, setLoaded] = useState(false);
     const [articleReady, setArticleReady] = useState(articleId === null);
     const [error, setError] = useState<string | null>(null);
@@ -127,6 +165,7 @@ export function WikiDesk() {
     const [pending, setPending] = useState(false);
     const [sorting, setSorting] = useState(false);
     const [searchOpen, setSearchOpen] = useState(false);
+    const [lastArticleId, setLastArticleId] = useState(articleId);
     const articleScrollRef = useRef<HTMLDivElement>(null);
     const filterExpanded = useRef("");
     const showing = article && article.id === articleId ? article : null;
@@ -134,27 +173,48 @@ export function WikiDesk() {
     const crumbTitle = showing?.title ?? listed?.title ?? null;
     const crumbGroupId = showing?.groupId ?? listed?.groupId ?? null;
     const browseGroup = browseGroupId === null ? null : groups.find((group) => group.id === browseGroupId) ?? null;
-    useEffect(() => {
-        const storedWidth = window.localStorage.getItem(TREE_WIDTH_KEY);
-        const width = storedWidth === null ? Number.NaN : Number(storedWidth);
-        if (Number.isFinite(width) && width > 0) {
-            setTreeWidth(clampWidth(width));
-        }
-        setTreeCollapsed(window.localStorage.getItem(TREE_COLLAPSED_KEY) === "1");
-        setFavoritesClosed(window.localStorage.getItem(FAVORITES_CLOSED_KEY) === "1");
-        const storedClosed = window.localStorage.getItem(TREE_CLOSED_KEY);
-        if (storedClosed) {
-            try {
-                const parsed = JSON.parse(storedClosed) as unknown;
-                if (Array.isArray(parsed)) {
-                    setClosed(new Set(parsed.filter((item): item is number => typeof item === "number")));
+    if (urlQuery !== syncedUrlQuery) {
+        setSyncedUrlQuery(urlQuery);
+        setQuery(urlQuery);
+    }
+    if (articleId !== lastArticleId) {
+        setLastArticleId(articleId);
+        setMobileOpen(false);
+        setTocOpen(false);
+    }
+    if (prefsReady && loaded && articleId !== null && articleId !== expandedForArticleId) {
+        const current = articles.find((item) => item.id === articleId);
+        if (current) {
+            setExpandedForArticleId(articleId);
+            const chain = groupChain(current.groupId, groups);
+            setClosed((existing) => {
+                const next = new Set(existing);
+                let changed = false;
+                for (const group of chain) {
+                    if (next.delete(group.id)) {
+                        changed = true;
+                    }
                 }
-            } catch {
-                window.localStorage.removeItem(TREE_CLOSED_KEY);
-            }
+                return changed ? next : existing;
+            });
         }
-        setPrefsReady(true);
-    }, []);
+    }
+    if (prefsReady && loaded && browseGroupId !== null && browseGroupId !== expandedForBrowseGroupId) {
+        const chain = groupChain(browseGroupId, groups);
+        if (chain.length > 0) {
+            setExpandedForBrowseGroupId(browseGroupId);
+            setClosed((existing) => {
+                const next = new Set(existing);
+                let changed = false;
+                for (const group of chain) {
+                    if (next.delete(group.id)) {
+                        changed = true;
+                    }
+                }
+                return changed ? next : existing;
+            });
+        }
+    }
 
     useEffect(() => {
         if (!prefsReady) {
@@ -165,10 +225,6 @@ export function WikiDesk() {
         window.localStorage.setItem(TREE_CLOSED_KEY, JSON.stringify([...closed]));
         window.localStorage.setItem(FAVORITES_CLOSED_KEY, favoritesClosed ? "1" : "0");
     }, [prefsReady, treeWidth, treeCollapsed, closed, favoritesClosed]);
-
-    useEffect(() => {
-        setQuery(urlQuery);
-    }, [urlQuery]);
 
     useEffect(() => {
         if (query === urlQuery) {
@@ -223,11 +279,6 @@ export function WikiDesk() {
     }, [showing]);
 
     useEffect(() => {
-        setMobileOpen(false);
-        setTocOpen(false);
-    }, [articleId]);
-
-    useEffect(() => {
         const media = window.matchMedia("(min-width: 1024px)");
         function onChange() {
             if (media.matches) {
@@ -272,21 +323,6 @@ export function WikiDesk() {
         if (!prefsReady || !loaded || articleId === null) {
             return;
         }
-        const current = articles.find((item) => item.id === articleId);
-        if (!current) {
-            return;
-        }
-        const chain = groupChain(current.groupId, groups);
-        setClosed((existing) => {
-            const next = new Set(existing);
-            let changed = false;
-            for (const group of chain) {
-                if (next.delete(group.id)) {
-                    changed = true;
-                }
-            }
-            return changed ? next : existing;
-        });
         const timer = window.setTimeout(() => {
             document.getElementById(`wiki-article-${articleId}`)?.scrollIntoView({ block: "nearest" });
         }, 50);
@@ -297,20 +333,6 @@ export function WikiDesk() {
         if (!prefsReady || !loaded || browseGroupId === null) {
             return;
         }
-        const chain = groupChain(browseGroupId, groups);
-        if (chain.length === 0) {
-            return;
-        }
-        setClosed((existing) => {
-            const next = new Set(existing);
-            let changed = false;
-            for (const group of chain) {
-                if (next.delete(group.id)) {
-                    changed = true;
-                }
-            }
-            return changed ? next : existing;
-        });
         const timer = window.setTimeout(() => {
             document.getElementById(`wiki-group-${browseGroupId}`)?.scrollIntoView({ block: "nearest" });
         }, 50);
@@ -928,7 +950,10 @@ function TreeResize({
     onCollapsed: (collapsed: boolean) => void;
 }) {
     const widthRef = useRef(width);
-    widthRef.current = width;
+
+    useEffect(() => {
+        widthRef.current = width;
+    }, [width]);
 
     function apply(next: number) {
         if (next < 120) {
@@ -1126,7 +1151,11 @@ function SortDialog({
     const dragRef = useRef<SortDrag | null>(null);
     const overRef = useRef<DropSlot | null>(null);
     const groupsRef = useRef(draftGroups);
-    groupsRef.current = draftGroups;
+
+    useEffect(() => {
+        groupsRef.current = draftGroups;
+    }, [draftGroups]);
+
     const dirty = orderFingerprint(draftGroups, draftArticles) !== orderFingerprint(groups, articles);
     const roots = draftGroups.filter((group) => group.parentId === null);
 
@@ -2078,15 +2107,16 @@ function GroupDialog({
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const options = groupOptions(groups);
-
-    useEffect(() => {
-        if (!open) {
-            return;
-        }
+    const [dialogEpoch, setDialogEpoch] = useState<{ open: boolean; parentId: number | null }>({ open: false, parentId: null });
+    if (open && (dialogEpoch.open !== open || dialogEpoch.parentId !== parentId)) {
+        setDialogEpoch({ open, parentId });
         setTitle("");
         setParent(parentId);
         setError(null);
-    }, [open, parentId]);
+    }
+    if (!open && dialogEpoch.open) {
+        setDialogEpoch({ open: false, parentId });
+    }
 
     async function create() {
         setSaving(true);
@@ -2267,9 +2297,10 @@ function ArticleActions({
 }
 
 function ArticleStatus({ article }: { article: WikiArticle }) {
+    const [now] = useState(() => Date.now());
     const published = article.status !== "draft";
     const changed = Math.abs(new Date(article.updatedAt).getTime() - new Date(article.publishedAt).getTime()) > 60_000;
-    const scheduled = article.status === "published" && new Date(article.publishedAt).getTime() > Date.now();
+    const scheduled = article.status === "published" && new Date(article.publishedAt).getTime() > now;
     const author = articleAuthor(article);
     return (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

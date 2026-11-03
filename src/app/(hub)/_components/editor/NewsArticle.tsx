@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Pencil } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
@@ -34,7 +35,8 @@ export function NewsArticle({
     anchorLinks?: boolean;
     anchorPage?: string;
 }) {
-    const scheduled = status === "published" && new Date(publishedAt).getTime() > Date.now();
+    const [now] = useState(() => Date.now());
+    const scheduled = status === "published" && new Date(publishedAt).getTime() > now;
 
     return (
         <Card>

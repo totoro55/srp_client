@@ -720,10 +720,6 @@ async function requireBasket(id: number): Promise<BasketDetails> {
     return basket;
 }
 
-async function touchBasket(id: number): Promise<void> {
-    await db.query("UPDATE baskets SET updated_at = NOW() WHERE id = $1", [id]);
-}
-
 function readVersionRefs(value: unknown): BasketVersionRef[] {
     if (!Array.isArray(value)) {
         return [];

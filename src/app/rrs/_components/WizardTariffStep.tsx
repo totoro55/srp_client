@@ -21,46 +21,54 @@ export function WizardTariffStep({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const signature = JSON.stringify(items);
-
-    useEffect(() => {
-        let cancelled = false;
+    const fetchKey = `${territoryUuid}|${period}|${signature}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
         setPage(null);
         setError(null);
-        onDraft(null);
-        async function load() {
-            try {
-                const response = await fetch("/api/rrs/wizard/tariffs", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ territoryUuid, period, items: JSON.parse(signature) as RrsConnectionInput[] }),
-                });
-                const json = (await response.json()) as ApiResponse<TariffExceptionPage>;
-                if (cancelled) {
-                    return;
-                }
-                if (!json.success) {
-                    setPage(null);
-                    setError(json.error.message);
-                    return;
-                }
-                setPage(json.data);
-            } catch {
-                if (!cancelled) {
-                    setPage(null);
-                    setError("Не удалось рассчитать тарифы");
-                }
-            } finally {
-                if (!cancelled) {
-                    setLoading(false);
+    }
+
+    useEffect(() => {
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            onDraft(null);
+            async function load() {
+                try {
+                    const response = await fetch("/api/rrs/wizard/tariffs", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ territoryUuid, period, items: JSON.parse(signature) as RrsConnectionInput[] }),
+                    });
+                    const json = (await response.json()) as ApiResponse<TariffExceptionPage>;
+                    if (cancelled) {
+                        return;
+                    }
+                    if (!json.success) {
+                        setPage(null);
+                        setError(json.error.message);
+                        return;
+                    }
+                    setPage(json.data);
+                } catch {
+                    if (!cancelled) {
+                        setPage(null);
+                        setError("Не удалось рассчитать тарифы");
+                    }
+                } finally {
+                    if (!cancelled) {
+                        setLoading(false);
+                    }
                 }
             }
-        }
-        void load();
+            void load();
+        }, 0);
         return () => {
             cancelled = true;
+            window.clearTimeout(timer);
         };
-    }, [onDraft, period, signature, territoryUuid]);
+    }, [fetchKey, onDraft, period, signature, territoryUuid]);
 
     return (
         <TariffExceptions

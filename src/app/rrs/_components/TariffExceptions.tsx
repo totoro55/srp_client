@@ -43,7 +43,7 @@ import { connectionCardPeriod, RrsSectionNav } from "./RrsSectionNav";
 import { formatMonth } from "./model";
 import { cn } from "@/lib/utils";
 
-interface DraftLine extends TariffRowDraft {}
+type DraftLine = TariffRowDraft;
 
 interface WeightDraft {
     salesShareWeight: number;
@@ -78,8 +78,9 @@ export function TariffExceptions({ embedded }: {
     const linesRef = useRef<DraftLine[]>([]);
     const savedRef = useRef<DraftLine[]>([]);
     const shownPeriodRef = useRef<string | null>(null);
-    const revertError = useRef<string | null>(null);
-    const flushEdit = useRef<(() => void) | null>(null);
+    const revertErrorRef = useRef<string | null>(null);
+    const [clearErrorOnFetchPrepare, setClearErrorOnFetchPrepare] = useState(true);
+    const flushEditRef = useRef<(() => void) | null>(null);
     const [fieldEditing, setFieldEditing] = useState(false);
     const [filter, setFilter] = useState("");
     const [loading, setLoading] = useState(true);
@@ -87,17 +88,23 @@ export function TariffExceptions({ embedded }: {
     const [error, setError] = useState<string | null>(null);
     const [weights, setWeights] = useState<WeightDraft | null>(null);
     const weightsRef = useRef<WeightDraft | null>(null);
-    const weightFlush = useRef<(() => void) | null>(null);
+    const weightFlushRef = useRef<(() => void) | null>(null);
     const [weightBaseline, setWeightBaseline] = useState<WeightDraft | null>(null);
     const [weightsEditable, setWeightsEditable] = useState(false);
     const [algorithmTitle, setAlgorithmTitle] = useState<string | null>(null);
     const [reference, setReference] = useState<TariffReference>(DEFAULT_TARIFF_REFERENCE);
-
-    const load = useCallback(async (period?: string) => {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (!embeddedMode && fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
-        if (!revertError.current) {
+        if (clearErrorOnFetchPrepare) {
             setError(null);
         }
+        setClearErrorOnFetchPrepare(true);
+    }
+
+    const fetchTariffExceptions = useCallback(async (period?: string) => {
         const chosen = period ?? requestedPeriod;
         const suffix = chosen ? `?period=${encodeURIComponent(chosen)}` : "";
         try {
@@ -107,7 +114,8 @@ export function TariffExceptions({ embedded }: {
                 setError(json.error.message);
                 const shown = shownPeriodRef.current;
                 if (shown && chosen && chosen !== shown) {
-                    revertError.current = json.error.message;
+                    revertErrorRef.current = json.error.message;
+                    setClearErrorOnFetchPrepare(false);
                     router.replace(`/rrs/${territoryUuid}/tariffs?period=${shown}`);
                 } else if (!shown) {
                     setPage(null);
@@ -118,8 +126,8 @@ export function TariffExceptions({ embedded }: {
             const nextWeights = weightDraft(next.weights);
             const initialReference = next.reference ?? DEFAULT_TARIFF_REFERENCE;
             const drafts = openPeriodRows(next.stats, next.exceptions, next.editable, serviceContext(nextWeights, next, initialReference));
-            const keptError = revertError.current;
-            revertError.current = null;
+            const keptError = revertErrorRef.current;
+            revertErrorRef.current = null;
             shownPeriodRef.current = next.period;
             linesRef.current = drafts;
             savedRef.current = drafts;
@@ -144,12 +152,29 @@ export function TariffExceptions({ embedded }: {
         }
     }, [requestedPeriod, territoryUuid, router]);
 
+    const load = useCallback(async (period?: string) => {
+        setLoading(true);
+        if (clearErrorOnFetchPrepare) {
+            setError(null);
+        }
+        await fetchTariffExceptions(period);
+    }, [clearErrorOnFetchPrepare, fetchTariffExceptions]);
+
     useEffect(() => {
         if (embeddedMode) {
             return;
         }
-        void load();
-    }, [load, embeddedMode]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchTariffExceptions();
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [embeddedMode, fetchKey, fetchTariffExceptions]);
 
     const externalPage = embedded?.page ?? null;
     const externalLoading = embedded?.loading ?? false;
@@ -158,27 +183,30 @@ export function TariffExceptions({ embedded }: {
         if (!embeddedMode) {
             return;
         }
-        setLoading(externalLoading);
-        setError(externalError);
-        if (!externalPage) {
-            setPage(null);
-            return;
-        }
-        const nextWeights = weightDraft(externalPage.weights);
-        const initialReference = externalPage.reference ?? DEFAULT_TARIFF_REFERENCE;
-        const drafts = openPeriodRows(externalPage.stats, externalPage.exceptions, externalPage.editable, serviceContext(nextWeights, externalPage, initialReference));
-        linesRef.current = drafts;
-        savedRef.current = drafts;
-        weightsRef.current = nextWeights;
-        setPage(externalPage);
-        setLines(drafts);
-        setSaved(drafts);
-        setWeights(nextWeights);
-        setWeightBaseline(nextWeights);
-        setWeightsEditable(externalPage.weights?.editable ?? false);
-        setAlgorithmTitle(externalPage.weights?.title ?? null);
-        setReference(initialReference);
-        setFilter("");
+        const timer = window.setTimeout(() => {
+            setLoading(externalLoading);
+            setError(externalError);
+            if (!externalPage) {
+                setPage(null);
+                return;
+            }
+            const nextWeights = weightDraft(externalPage.weights);
+            const initialReference = externalPage.reference ?? DEFAULT_TARIFF_REFERENCE;
+            const drafts = openPeriodRows(externalPage.stats, externalPage.exceptions, externalPage.editable, serviceContext(nextWeights, externalPage, initialReference));
+            linesRef.current = drafts;
+            savedRef.current = drafts;
+            weightsRef.current = nextWeights;
+            setPage(externalPage);
+            setLines(drafts);
+            setSaved(drafts);
+            setWeights(nextWeights);
+            setWeightBaseline(nextWeights);
+            setWeightsEditable(externalPage.weights?.editable ?? false);
+            setAlgorithmTitle(externalPage.weights?.title ?? null);
+            setReference(initialReference);
+            setFilter("");
+        }, 0);
+        return () => window.clearTimeout(timer);
     }, [embeddedMode, externalError, externalLoading, externalPage]);
 
     const commitLines = useCallback((update: (current: DraftLine[]) => DraftLine[]) => {
@@ -240,8 +268,8 @@ export function TariffExceptions({ embedded }: {
     }, []);
 
     async function save() {
-        flushEdit.current?.();
-        weightFlush.current?.();
+        flushEditRef.current?.();
+        weightFlushRef.current?.();
         const current = linesRef.current;
         if (!page) {
             return;
@@ -343,11 +371,11 @@ export function TariffExceptions({ embedded }: {
                         />
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
-                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => void save()}>
+                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => void save()}>
                                 {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
-                            <Button type="button" size="sm" variant="outline" disabled={saving || (!dirty && !weightsDirty && !fieldEditing && !referenceDirty)} onMouseDown={() => { flushEdit.current?.(); weightFlush.current?.(); }} onClick={() => { flushEdit.current = null; weightFlush.current = null; linesRef.current = savedRef.current; setLines(savedRef.current); setFieldEditing(false); weightsRef.current = weightBaseline; setWeights(weightBaseline); setReference(page.reference); }}>
+                            <Button type="button" size="sm" variant="outline" disabled={saving || (!dirty && !weightsDirty && !fieldEditing && !referenceDirty)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => { flushEditRef.current = null; weightFlushRef.current = null; linesRef.current = savedRef.current; setLines(savedRef.current); setFieldEditing(false); weightsRef.current = weightBaseline; setWeights(weightBaseline); setReference(page.reference); }}>
                                 <Undo2 />
                                 Отменить
                             </Button>
@@ -383,7 +411,7 @@ export function TariffExceptions({ embedded }: {
                             reference={shownReference}
                             referenceSelectable={referenceSelectable}
                             referenceDisabled={!page.editable || saving || page.stats.length === 0}
-                            weightFlush={weightFlush}
+                            weightFlushRef={weightFlushRef}
                             onWeights={applyWeights}
                             onReference={setReference}
                         />
@@ -396,7 +424,7 @@ export function TariffExceptions({ embedded }: {
                             editable={page.editable}
                             saving={saving}
                             serviceContext={tariffContext}
-                            flushEdit={flushEdit}
+                            flushEditRef={flushEditRef}
                             onFilter={setFilter}
                             onLines={commitLines}
                             onEditing={setFieldEditing}
@@ -415,7 +443,7 @@ function StatsTable({
     editable,
     saving,
     serviceContext,
-    flushEdit,
+    flushEditRef,
     onFilter,
     onLines,
     onEditing,
@@ -426,7 +454,7 @@ function StatsTable({
     editable: boolean;
     saving: boolean;
     serviceContext: TariffServiceContext | null;
-    flushEdit: { current: (() => void) | null };
+    flushEditRef: { current: (() => void) | null };
     onFilter: (value: string) => void;
     onLines: (update: (current: DraftLine[]) => DraftLine[]) => void;
     onEditing: (editing: boolean) => void;
@@ -516,7 +544,7 @@ function StatsTable({
                             editable={editable}
                             saving={saving}
                             serviceContext={serviceContext}
-                            flushEdit={flushEdit}
+                            flushEditRef={flushEditRef}
                             onLines={onLines}
                             onEditing={onEditing}
                         />
@@ -633,7 +661,7 @@ const StatRow = memo(function StatRow({
     editable,
     saving,
     serviceContext,
-    flushEdit,
+    flushEditRef,
     onLines,
     onEditing,
 }: {
@@ -645,7 +673,7 @@ const StatRow = memo(function StatRow({
     editable: boolean;
     saving: boolean;
     serviceContext: TariffServiceContext | null;
-    flushEdit: { current: (() => void) | null };
+    flushEditRef: { current: (() => void) | null };
     onLines: (update: (current: DraftLine[]) => DraftLine[]) => void;
     onEditing: (editing: boolean) => void;
 }) {
@@ -690,9 +718,9 @@ const StatRow = memo(function StatRow({
                     />
                 </div>
             </td>
-            <RateCell stat={stat} line={line} channel="main" label="Тариф розница" editable={editable} saving={saving} flushEdit={flushEdit} onLines={onLines} onEditing={onEditing} />
-            <RateCell stat={stat} line={line} channel="im" label="Тариф ИМ" editable={editable} saving={saving} flushEdit={flushEdit} onLines={onLines} onEditing={onEditing} />
-            <RateCell stat={stat} line={line} channel="b2b" label="Тариф Безнал" editable={editable} saving={saving} flushEdit={flushEdit} onLines={onLines} onEditing={onEditing} />
+            <RateCell stat={stat} line={line} channel="main" label="Тариф розница" editable={editable} saving={saving} flushEditRef={flushEditRef} onLines={onLines} onEditing={onEditing} />
+            <RateCell stat={stat} line={line} channel="im" label="Тариф ИМ" editable={editable} saving={saving} flushEditRef={flushEditRef} onLines={onLines} onEditing={onEditing} />
+            <RateCell stat={stat} line={line} channel="b2b" label="Тариф Безнал" editable={editable} saving={saving} flushEditRef={flushEditRef} onLines={onLines} onEditing={onEditing} />
         </tr>
     );
 });
@@ -704,7 +732,7 @@ function RateCell({
     label,
     editable,
     saving,
-    flushEdit,
+    flushEditRef,
     onLines,
     onEditing,
 }: {
@@ -714,7 +742,7 @@ function RateCell({
     label: string;
     editable: boolean;
     saving: boolean;
-    flushEdit: { current: (() => void) | null };
+    flushEditRef: { current: (() => void) | null };
     onLines: (update: (current: DraftLine[]) => DraftLine[]) => void;
     onEditing: (editing: boolean) => void;
 }) {
@@ -756,19 +784,19 @@ function RateCell({
                     onKeyDown={blurOnEnter}
                     onFocus={() => {
                         focused.current = true;
-                        flushEdit.current = () => commit(draftRef.current);
+                        flushEditRef.current = () => commit(draftRef.current);
                         onEditing(true);
                     }}
                     onBlur={() => {
                         focused.current = false;
                         commit(draftRef.current);
-                        flushEdit.current = null;
+                        flushEditRef.current = null;
                         onEditing(false);
                     }}
                     onChange={(event) => {
                         draftRef.current = event.target.value;
                         setDraft(event.target.value);
-                        flushEdit.current = () => commit(draftRef.current);
+                        flushEditRef.current = () => commit(draftRef.current);
                     }}
                 />
                 {percent ? <span className="text-xs text-muted-foreground">%</span> : null}
@@ -971,7 +999,7 @@ function CalculationSettings({
     reference,
     referenceSelectable,
     referenceDisabled,
-    weightFlush,
+    weightFlushRef,
     onWeights,
     onReference,
 }: {
@@ -983,7 +1011,7 @@ function CalculationSettings({
     reference: TariffReference;
     referenceSelectable: boolean;
     referenceDisabled: boolean;
-    weightFlush: { current: (() => void) | null };
+    weightFlushRef: { current: (() => void) | null };
     onWeights: (weights: WeightDraft) => void;
     onReference: (reference: TariffReference) => void;
 }) {
@@ -999,7 +1027,7 @@ function CalculationSettings({
                     title={title}
                     weights={weights}
                     editable={weightsEditable}
-                    weightFlush={weightFlush}
+                    weightFlushRef={weightFlushRef}
                     onChange={onWeights}
                 />
                 ) : null}
@@ -1116,13 +1144,13 @@ function AlgorithmWeights({
     title,
     weights,
     editable,
-    weightFlush,
+    weightFlushRef,
     onChange,
 }: {
     title: string;
     weights: WeightDraft;
     editable: boolean;
-    weightFlush: { current: (() => void) | null };
+    weightFlushRef: { current: (() => void) | null };
     onChange: (weights: WeightDraft) => void;
 }) {
     const [salesDraft, setSalesDraft] = useState(String(weights.salesShareWeight));
@@ -1181,7 +1209,7 @@ function AlgorithmWeights({
                             onKeyDown={blurOnEnter}
                             onFocus={() => {
                                 salesFocused.current = true;
-                                weightFlush.current = () => {
+                                weightFlushRef.current = () => {
                                     salesFocused.current = false;
                                     commit("sales", salesRef.current);
                                 };
@@ -1189,7 +1217,7 @@ function AlgorithmWeights({
                             onBlur={() => {
                                 salesFocused.current = false;
                                 commit("sales", salesRef.current);
-                                weightFlush.current = null;
+                                weightFlushRef.current = null;
                             }}
                             onChange={(event) => {
                                 salesRef.current = event.target.value;
@@ -1214,7 +1242,7 @@ function AlgorithmWeights({
                             onKeyDown={blurOnEnter}
                             onFocus={() => {
                                 priceFocused.current = true;
-                                weightFlush.current = () => {
+                                weightFlushRef.current = () => {
                                     priceFocused.current = false;
                                     commit("price", priceRef.current);
                                 };
@@ -1222,7 +1250,7 @@ function AlgorithmWeights({
                             onBlur={() => {
                                 priceFocused.current = false;
                                 commit("price", priceRef.current);
-                                weightFlush.current = null;
+                                weightFlushRef.current = null;
                             }}
                             onChange={(event) => {
                                 priceRef.current = event.target.value;

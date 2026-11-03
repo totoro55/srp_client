@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
+import { FormEvent, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { FormAlert } from "@/components/form-alert";
 import { useRequiredFields } from "@/lib/required-fields";
@@ -133,11 +133,28 @@ function payloadFromForm(form: ParameterForm): { body: unknown } | { error: stri
     };
 }
 
-export function ParameterDialog({
+export function ParameterDialog(props: {
+    parameter: BasketParameter | null;
+    parameters: BasketParameter[];
+    editIndex: number | null;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onSubmit: (parameter: BasketParameter) => string | null;
+}) {
+    const sessionKey = `${props.parameter?.key ?? "new"}:${props.editIndex ?? "create"}`;
+    return (
+        <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+            <DialogContent className="top-12 max-h-[calc(100dvh-6rem)] min-w-0 -translate-y-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] sm:max-w-2xl">
+                {props.open ? <ParameterDialogBody key={sessionKey} {...props} /> : null}
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function ParameterDialogBody({
     parameter,
     parameters,
     editIndex,
-    open,
     onOpenChange,
     onSubmit,
 }: {
@@ -148,29 +165,16 @@ export function ParameterDialog({
     onOpenChange: (open: boolean) => void;
     onSubmit: (parameter: BasketParameter) => string | null;
 }) {
-    const [form, setForm] = useState<ParameterForm>(emptyForm);
-    const [editing, setEditing] = useState(false);
+    const initialForm = parameter ? formFromParameter(parameter) : emptyForm();
+    const [form, setForm] = useState<ParameterForm>(() => initialForm);
+    const editing = parameter !== null;
     const [error, setError] = useState<string | null>(null);
-    const [formulaOpen, setFormulaOpen] = useState(false);
+    const [formulaOpen, setFormulaOpen] = useState(() => initialForm.formula.trim().length > 0);
     const [hintOpen, setHintOpen] = useState(false);
-    const [conditionsOpen, setConditionsOpen] = useState(false);
+    const [conditionsOpen, setConditionsOpen] = useState(() => initialForm.conditions.length > 0);
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
     const formulaRef = useRef<HTMLInputElement>(null);
     const validateRequired = useRequiredFields();
-
-    useEffect(() => {
-        if (!open) {
-            return;
-        }
-        const next = parameter ? formFromParameter(parameter) : emptyForm();
-        setEditing(parameter !== null);
-        setForm(next);
-        setFormulaOpen(next.formula.trim().length > 0);
-        setHintOpen(false);
-        setConditionsOpen(next.conditions.length > 0);
-        setCopiedKey(null);
-        setError(null);
-    }, [open, parameter]);
 
     const earlierNumbers = (editIndex === null ? parameters : parameters.slice(0, editIndex))
         .filter((item) => item.kind === "number");
@@ -259,9 +263,7 @@ export function ParameterDialog({
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="top-12 max-h-[calc(100dvh-6rem)] min-w-0 -translate-y-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] sm:max-w-2xl">
-                <form className="flex min-w-0 flex-col gap-4" noValidate onSubmit={onSave}>
+        <form className="flex min-w-0 flex-col gap-4" noValidate onSubmit={onSave}>
                     <DialogHeader>
                         <DialogTitle>{editing ? "Параметр" : "Новый параметр"}</DialogTitle>
                     </DialogHeader>
@@ -570,9 +572,7 @@ export function ParameterDialog({
                         <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>Отмена</Button>
                         <Button type="submit" size="sm">Готово</Button>
                     </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
+        </form>
     );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -19,6 +19,7 @@ import {
     sortDetailItems,
     useBonusDetailPagination,
     useBonusDetailSort,
+    useResetWhenChanged,
 } from "./BonusDetailPager";
 import {
     detailAmountClass,
@@ -58,11 +59,11 @@ export function ServiceBonusDetail({
     const { sort, setSort, toggle } = useBonusDetailSort("amount", "desc");
     const emptyLabel = kind === "kbt" ? "Нет данных по услугам КБТ." : "Нет данных по услугам.";
 
-    useEffect(() => {
+    useResetWhenChanged(mode, () => {
         setSort({ key: mode === "document" ? "date" : "amount", dir: "desc" });
         setOpenIds([]);
         setQuery("");
-    }, [mode, setSort]);
+    });
 
     const serviceLines = useMemo(() => {
         if (!detail || mode !== "service") return [];

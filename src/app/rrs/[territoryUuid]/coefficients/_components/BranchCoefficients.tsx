@@ -36,10 +36,15 @@ export function BranchCoefficients() {
     const [error, setError] = useState<string | null>(null);
     const [confirmSave, setConfirmSave] = useState(false);
     const [historyToken, setHistoryToken] = useState(0);
-
-    const load = useCallback(async (period?: string) => {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
         setError(null);
+    }
+
+    const fetchCoefficients = useCallback(async (period?: string) => {
         const query = period ? `?period=${encodeURIComponent(period)}` : requestedPeriod ? `?period=${encodeURIComponent(requestedPeriod)}` : "";
         const response = await fetch(`/api/rrs/cards/${territoryUuid}/coefficients${query}`);
         const json = (await response.json()) as ApiResponse<RrsCoefficientPage>;
@@ -56,9 +61,24 @@ export function BranchCoefficients() {
         setLoading(false);
     }, [requestedPeriod, territoryUuid]);
 
+    const load = useCallback(async (period?: string) => {
+        setLoading(true);
+        setError(null);
+        await fetchCoefficients(period);
+    }, [fetchCoefficients]);
+
     useEffect(() => {
-        void load();
-    }, [load]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchCoefficients();
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchCoefficients]);
 
     const showSave = Boolean(page && page.baskets.length > 0);
     const hint = page ? periodHint(page, loading) : null;

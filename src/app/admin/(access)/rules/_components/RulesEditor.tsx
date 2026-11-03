@@ -64,7 +64,6 @@ export function RulesEditor() {
     const [conflicts, setConflicts] = useState<number[]>([]);
     const [matchType, setMatchType] = useState<"login" | "title">("login");
     const [matchValue, setMatchValue] = useState("");
-    const [selectedLabel, setSelectedLabel] = useState("");
     const [directoryQuery, setDirectoryQuery] = useState("");
     const [employees, setEmployees] = useState<EmployeeLookup[]>([]);
     const [positions, setPositions] = useState<PositionOption[]>([]);
@@ -105,10 +104,17 @@ export function RulesEditor() {
         return positions.filter((position) => position.title.toLowerCase().includes(needle));
     }, [positions, directoryQuery]);
 
+    const selectedLabel = useMemo(() => {
+        if (matchType !== "login" || !matchValue.trim()) {
+            return "";
+        }
+        const found = employees.find((employee) => employee.login.toLowerCase() === matchValue.toLowerCase());
+        return found?.name ?? "";
+    }, [employees, matchType, matchValue]);
+
     function resetLookup() {
         pickedLogin.current = "";
         setMatchValue("");
-        setSelectedLabel("");
         setDirectoryQuery("");
     }
 
@@ -116,7 +122,6 @@ export function RulesEditor() {
         const login = employee.login.trim();
         pickedLogin.current = login;
         setMatchValue(login);
-        setSelectedLabel(employee.name);
         setDirectoryQuery(login);
     }
 
@@ -135,7 +140,6 @@ export function RulesEditor() {
         setMatchType(rule.matchType);
         pickedLogin.current = rule.matchType === "login" ? rule.matchValue : "";
         setMatchValue(rule.matchValue);
-        setSelectedLabel("");
         setDirectoryQuery(rule.matchValue);
         setRoleId(String(rule.roleId));
         setPriority(String(rule.priority));
@@ -193,7 +197,6 @@ export function RulesEditor() {
 
     useEffect(() => {
         if (!createOpen || matchType !== "login") return;
-        setDirectoryLoading(true);
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
             const params = new URLSearchParams();
@@ -217,12 +220,6 @@ export function RulesEditor() {
             window.clearTimeout(timer);
         };
     }, [createOpen, matchType, directoryQuery]);
-
-    useEffect(() => {
-        if (matchType !== "login" || !matchValue) return;
-        const found = employees.find((employee) => employee.login.toLowerCase() === matchValue.toLowerCase());
-        if (found) setSelectedLabel(found.name);
-    }, [employees, matchType, matchValue]);
 
     async function onSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -353,7 +350,6 @@ export function RulesEditor() {
                                                 if (matchType !== "login" || next.trim().toLowerCase() === pickedLogin.current.trim().toLowerCase()) return;
                                                 pickedLogin.current = "";
                                                 setMatchValue("");
-                                                setSelectedLabel("");
                                             }}
                                             placeholder={matchType === "login" ? "Имя, логин, должность или филиал" : "Должность"}
                                             autoComplete="off"
@@ -395,7 +391,6 @@ export function RulesEditor() {
                                                     className={`flex w-full items-baseline justify-between gap-3 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted ${matchValue === position.title ? "bg-muted" : ""}`}
                                                     onClick={() => {
                                                         setMatchValue(position.title);
-                                                        setSelectedLabel(position.title);
                                                     }}
                                                 >
                                                     <span className="min-w-0">{position.title}</span>

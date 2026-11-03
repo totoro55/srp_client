@@ -1,4 +1,4 @@
-import { isTariffAxis, type TariffAxis, type TariffBoundKey } from "@/lib/baskets";
+import { type TariffAxis, type TariffBoundKey } from "@/lib/baskets";
 import type { RrsEditPolicy } from "@/lib/rrs-edit-window";
 import type { TariffReference, TariffServiceContext } from "@/lib/tariff-calculation";
 

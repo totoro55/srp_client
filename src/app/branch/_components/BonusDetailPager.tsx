@@ -179,6 +179,14 @@ export function BonusDetailShell({
     );
 }
 
+export function useResetWhenChanged<T>(value: T, onChange: () => void) {
+    const [previous, setPrevious] = useState(value);
+    if (value !== previous) {
+        setPrevious(value);
+        onChange();
+    }
+}
+
 export function useBonusDetailSort(defaultKey: string, defaultDir: SortDir = "desc") {
     const [sort, setSort] = useState<SortState>({ key: defaultKey, dir: defaultDir });
 
@@ -313,9 +321,12 @@ export function useBonusDetailPagination(itemCount: number, resetKey?: string | 
         };
     }, [itemCount, resetKey]);
 
-    useEffect(() => {
+    const paginationResetKey = `${itemCount}|${pageSize}|${resetKey ?? ""}`;
+    const [previousPaginationResetKey, setPreviousPaginationResetKey] = useState(paginationResetKey);
+    if (paginationResetKey !== previousPaginationResetKey) {
+        setPreviousPaginationResetKey(paginationResetKey);
         setPage(0);
-    }, [itemCount, pageSize, resetKey]);
+    }
 
     const pageCount = Math.max(1, Math.ceil(itemCount / pageSize));
     const safePage = Math.min(page, pageCount - 1);

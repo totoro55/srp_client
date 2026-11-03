@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -19,6 +19,7 @@ import {
     sortDetailItems,
     useBonusDetailPagination,
     useBonusDetailSort,
+    useResetWhenChanged,
 } from "./BonusDetailPager";
 import {
     detailAmountClass,
@@ -99,11 +100,11 @@ function QuantityVolumeBonusDetail({
     const [query, setQuery] = useState("");
     const { sort, setSort, toggle } = useBonusDetailSort("amount", "desc");
 
-    useEffect(() => {
+    useResetWhenChanged(mode, () => {
         setSort({ key: mode === "document" ? "date" : "amount", dir: "desc" });
         setOpenIds([]);
         setQuery("");
-    }, [mode, setSort]);
+    });
 
     const categoryLines = useMemo(() => {
         if (!detail || mode !== "category") return [];
@@ -172,7 +173,7 @@ function QuantityVolumeBonusDetail({
                             <ToggleGroupItem value="document" className={detailModeToggleItemClass}>По документам</ToggleGroupItem>
                         </ToggleGroup>
                     )}
-                    search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
+                    search={<BonusDetailSearch value={query} onChange={setQuery} placeholder={searchPlaceholder} />}
                     sort={(
                         <BonusDetailSortButton
                             sort={sort}

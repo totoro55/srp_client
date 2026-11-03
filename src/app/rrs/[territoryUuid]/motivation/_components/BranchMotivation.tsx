@@ -35,10 +35,15 @@ export function BranchMotivation() {
     const [error, setError] = useState<string | null>(null);
     const [confirmSave, setConfirmSave] = useState(false);
     const [historyToken, setHistoryToken] = useState(0);
-
-    const load = useCallback(async (period?: string) => {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
         setLoading(true);
         setError(null);
+    }
+
+    const fetchMotivation = useCallback(async (period?: string) => {
         const query = period ? `?period=${encodeURIComponent(period)}` : requestedPeriod ? `?period=${encodeURIComponent(requestedPeriod)}` : "";
         const response = await fetch(`/api/rrs/cards/${territoryUuid}/motivation${query}`);
         const json = (await response.json()) as ApiResponse<RrsMotivationPage>;
@@ -55,9 +60,24 @@ export function BranchMotivation() {
         setLoading(false);
     }, [requestedPeriod, territoryUuid]);
 
+    const load = useCallback(async (period?: string) => {
+        setLoading(true);
+        setError(null);
+        await fetchMotivation(period);
+    }, [fetchMotivation]);
+
     useEffect(() => {
-        void load();
-    }, [load]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchMotivation();
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchMotivation]);
 
     const hint = page ? periodHint(page, loading) : null;
 

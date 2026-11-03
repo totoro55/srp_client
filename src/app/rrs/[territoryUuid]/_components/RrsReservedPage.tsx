@@ -26,12 +26,17 @@ export function RrsReservedPage({ section, message }: { section: "overview" | "t
     const [card, setCard] = useState<RrsCard | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    const load = useCallback(async (period?: string) => {
-        if (!period) {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
+        if (!requestedPeriod) {
             setLoading(true);
         }
         setError(null);
+    }
+
+    const fetchCard = useCallback(async (period?: string) => {
         const query = period ? `?period=${encodeURIComponent(period)}` : "";
         const response = await fetch(`/api/rrs/cards/${territoryUuid}${query}`);
         const json = (await response.json()) as ApiResponse<RrsCard>;
@@ -48,8 +53,17 @@ export function RrsReservedPage({ section, message }: { section: "overview" | "t
     }, [territoryUuid]);
 
     useEffect(() => {
-        void load(requestedPeriod ?? undefined);
-    }, [load, requestedPeriod]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchCard(requestedPeriod ?? undefined);
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchCard, requestedPeriod]);
 
     const path = PATH[section] ?? "";
     const showsPeriod = section === "tariffs";

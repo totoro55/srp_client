@@ -29,12 +29,17 @@ export function RrsCardView() {
     const [openBasketIds, setOpenBasketIds] = useState<number[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    const load = useCallback(async (period?: string) => {
-        if (!period) {
+    const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
+    const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
+    if (fetchKey !== preparedFetchKey) {
+        setPreparedFetchKey(fetchKey);
+        if (!requestedPeriod) {
             setLoading(true);
         }
         setError(null);
+    }
+
+    const fetchCard = useCallback(async (period?: string) => {
         const query = period ? `?period=${encodeURIComponent(period)}` : "";
         const response = await fetch(`/api/rrs/cards/${territoryUuid}${query}`);
         const json = (await response.json()) as ApiResponse<RrsCard>;
@@ -52,8 +57,17 @@ export function RrsCardView() {
     }, [territoryUuid]);
 
     useEffect(() => {
-        void load(requestedPeriod ?? undefined);
-    }, [load, requestedPeriod]);
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (!cancelled) {
+                void fetchCard(requestedPeriod ?? undefined);
+            }
+        }, 0);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [fetchKey, fetchCard, requestedPeriod]);
 
     function toggleBasketDetails(basketId: number) {
         setOpenBasketIds((current) => (

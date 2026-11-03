@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -19,6 +19,7 @@ import {
     sortDetailItems,
     useBonusDetailPagination,
     useBonusDetailSort,
+    useResetWhenChanged,
 } from "./BonusDetailPager";
 import {
     detailAmountClass,
@@ -47,11 +48,11 @@ export function DisplayBonusDetail({ employeeId, period }: { employeeId: string;
     const [query, setQuery] = useState("");
     const { sort, setSort, toggle } = useBonusDetailSort("amount", "desc");
 
-    useEffect(() => {
+    useResetWhenChanged(mode, () => {
         setSort({ key: mode === "day" ? "date" : "amount", dir: "desc" });
         setOpenIds([]);
         setQuery("");
-    }, [mode, setSort]);
+    });
 
     const zoneRows = useMemo(() => {
         if (!detail || mode !== "zone") return [];

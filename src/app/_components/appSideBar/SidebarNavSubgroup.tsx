@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -31,12 +31,7 @@ export function SidebarNavSubgroup({ subgroup, pathname }: SidebarNavSubgroupPro
     const active = subgroup.items.some((item) => isRouteActive(pathname, item.href));
     const [open, setOpen] = useState(active);
     const collapsed = !isMobile && state === 'collapsed';
-
-    useEffect(() => {
-        if (active) {
-            setOpen(true);
-        }
-    }, [active]);
+    const expanded = open || active;
 
     if (collapsed) {
         return (
@@ -75,7 +70,7 @@ export function SidebarNavSubgroup({ subgroup, pathname }: SidebarNavSubgroupPro
 
     return (
         <SidebarMenuItem>
-            <Collapsible open={open} onOpenChange={setOpen} className="w-full">
+            <Collapsible open={expanded} onOpenChange={setOpen} className="w-full">
                 <CollapsibleTrigger
                     render={
                         <SidebarMenuButton

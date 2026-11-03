@@ -16,15 +16,14 @@ interface EmployeeLookup {
 type CardStatus = "idle" | "loading" | "ready" | "missing" | "error";
 
 export function EmployeeCard({ login }: { login: string }) {
+    const needle = login.trim().toLowerCase();
+    return <EmployeeCardInner key={needle} login={login} needle={needle} />;
+}
+
+function EmployeeCardInner({ login, needle }: { login: string; needle: string }) {
     const [open, setOpen] = useState(false);
     const [employee, setEmployee] = useState<EmployeeLookup | null>(null);
     const [status, setStatus] = useState<CardStatus>("idle");
-    const needle = login.trim().toLowerCase();
-
-    useEffect(() => {
-        setEmployee(null);
-        setStatus("idle");
-    }, [needle]);
 
     useEffect(() => {
         if (!open || !needle) return;

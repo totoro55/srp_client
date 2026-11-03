@@ -278,29 +278,28 @@ export function EditorHelpButton({ anchors }: { anchors: boolean }) {
 
 function EditorHelpDialog({ open, anchors, onOpenChange }: { open: boolean; anchors: boolean; onOpenChange: (open: boolean) => void }) {
     const [query, setQuery] = useState("");
-    const [activeId, setActiveId] = useState("");
+    const [pickedSectionId, setPickedSectionId] = useState("");
     const contentRef = useRef<HTMLDivElement>(null);
     const sections = useMemo(() => filterHelp(visibleHelp(anchors), query), [anchors, query]);
     const count = sections.reduce((sum, section) => sum + section.items.length, 0);
-
-    useEffect(() => {
-        if (!open) {
-            setQuery("");
-        }
-    }, [open]);
-
-    useEffect(() => {
-        if (!sections.some((section) => section.id === activeId)) {
-            setActiveId(sections[0]?.id ?? "");
-        }
-    }, [sections, activeId]);
+    const activeId = sections.some((section) => section.id === pickedSectionId)
+        ? pickedSectionId
+        : (sections[0]?.id ?? "");
 
     useEffect(() => {
         contentRef.current?.scrollTo(0, 0);
     }, [query]);
 
+    function handleOpenChange(next: boolean) {
+        if (!next) {
+            setQuery("");
+            setPickedSectionId("");
+        }
+        onOpenChange(next);
+    }
+
     function showSection(id: string) {
-        setActiveId(id);
+        setPickedSectionId(id);
         const root = contentRef.current;
         const node = root?.querySelector(`[data-help-section="${id}"]`);
         if (!root || !(node instanceof HTMLElement)) {
@@ -311,7 +310,7 @@ function EditorHelpDialog({ open, anchors, onOpenChange }: { open: boolean; anch
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="flex max-h-[min(40rem,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
                 <DialogHeader className="gap-3 border-b px-6 py-4 pr-14">
                     <DialogTitle>Справка по редактору</DialogTitle>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -20,6 +20,7 @@ import {
     sortDetailItems,
     useBonusDetailPagination,
     useBonusDetailSort,
+    useResetWhenChanged,
 } from "./BonusDetailPager";
 import {
     detailAmountClass,
@@ -55,11 +56,11 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
     const [query, setQuery] = useState("");
     const { sort, setSort, toggle } = useBonusDetailSort("amount", "desc");
 
-    useEffect(() => {
+    useResetWhenChanged(mode, () => {
         setSort({ key: mode === "document" ? "date" : "amount", dir: "desc" });
         setOpenIds([]);
         setQuery("");
-    }, [mode, setSort]);
+    });
 
     const groups = useMemo(() => {
         if (!detail) return [];

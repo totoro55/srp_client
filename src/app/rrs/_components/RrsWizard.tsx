@@ -78,11 +78,11 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [leaveHref, setLeaveHref] = useState<string | null>(null);
     const promptedDrafts = useRef(new Set<string>());
     const loadedTailKey = useRef("");
-    const finishedRef = useRef(false);
+    const [wizardFinished, setWizardFinished] = useState(false);
     const advancingRef = useRef(false);
-    const restoredRef = useRef(false);
+    const [draftRestored, setDraftRestored] = useState(false);
     const acceptingDraftRef = useRef(false);
-    const baselineRef = useRef("");
+    const [baselineSnapshot, setBaselineSnapshot] = useState("");
     const frameRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLDivElement>(null);
     const barRef = useRef<HTMLDivElement>(null);
@@ -408,7 +408,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 setError(`${json.error.message} Черновик сохранён в этом браузере.`);
                 return;
             }
-            finishedRef.current = true;
+            setWizardFinished(true);
             if (username) {
                 deleteDraft(username, territoryUuid, month);
             }
@@ -467,7 +467,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
 
     const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, stepKey: activeKey, forms, enabled, coefficientValues });
-    const unfinished = !finishedRef.current && !loading && tailReady && resumeDraft === null && (restoredRef.current || draftSnapshot !== baselineRef.current);
+    const unfinished = !wizardFinished && !loading && tailReady && resumeDraft === null && (draftRestored || draftSnapshot !== baselineSnapshot);
 
     useEffect(() => {
         if (loading || !territoryUuid || !month || !username) {
@@ -519,7 +519,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 setBonusAmount(nextAmount);
                 setCoefficientValues(nextCoefficients);
                 setCoefficientSaved({ ...nextCoefficients });
-                if (username && !finishedRef.current) {
+                if (username && !wizardFinished) {
                     const draft = readDraft(username, territoryUuid, month);
                     const promptKey = `${territoryUuid}:${month}`;
                     if (draft && !promptedDrafts.current.has(promptKey)) {
@@ -529,14 +529,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                         return;
                     }
                 }
-                baselineRef.current = JSON.stringify({
+                setBaselineSnapshot(JSON.stringify({
                     territoryUuid,
                     month,
                     step: safeStep, stepKey: activeKey,
                     forms,
                     enabled: nextEnabled,
                     coefficientValues: nextCoefficients,
-                });
+                }));
                 setTailReady(true);
             } catch {
                 if (!cancelled) {
@@ -549,13 +549,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         return () => {
             cancelled = true;
         };
-    }, [loading, territoryUuid, month, username]);
+    }, [loading, territoryUuid, month, username, wizardFinished]);
 
     useEffect(() => {
-        if (!tailReady || !username || !territoryUuid || !month || resumeDraft || finishedRef.current) {
+        if (!tailReady || !username || !territoryUuid || !month || resumeDraft || wizardFinished) {
             return;
         }
-        if (draftSnapshot === baselineRef.current && !restoredRef.current) {
+        if (draftSnapshot === baselineSnapshot && !draftRestored) {
             return;
         }
         const timer = window.setTimeout(() => {
@@ -569,7 +569,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             });
         }, 400);
         return () => window.clearTimeout(timer);
-    }, [tailReady, username, territoryUuid, month, resumeDraft, draftSnapshot, safeStep, forms, enabled, coefficientValues]);
+    }, [tailReady, username, territoryUuid, month, resumeDraft, draftSnapshot, baselineSnapshot, draftRestored, wizardFinished, safeStep, activeKey, forms, enabled, coefficientValues]);
 
     useEffect(() => {
         function onClick(event: MouseEvent) {
@@ -634,8 +634,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         setCoefficientSaved({ ...restored.coefficients });
         setStepKey(restoredKey);
         setRestoreNotes(restored.notes);
-        restoredRef.current = true;
-        baselineRef.current = JSON.stringify({
+        setDraftRestored(true);
+        setBaselineSnapshot(JSON.stringify({
             territoryUuid,
             month,
             step: restoredKeys.indexOf(restoredKey),
@@ -643,7 +643,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             forms: restored.forms,
             enabled: restored.enabled,
             coefficientValues: restored.coefficients,
-        });
+        }));
         setResumeDraft(null);
     }
 
@@ -651,9 +651,9 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         if (username && resumeDraft) {
             deleteDraft(username, resumeDraft.territoryUuid, resumeDraft.month);
         }
-        restoredRef.current = false;
+        setDraftRestored(false);
         setResumeDraft(null);
-        baselineRef.current = draftSnapshot;
+        setBaselineSnapshot(draftSnapshot);
     }
 
     function confirmLeave() {
@@ -667,7 +667,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 coefficients: coefficientValues,
             });
         }
-        finishedRef.current = true;
+        setWizardFinished(true);
         const href = leaveHref ?? "/rrs";
         setLeaveHref(null);
         router.push(href);

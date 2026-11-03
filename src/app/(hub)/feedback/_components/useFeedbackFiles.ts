@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardEvent, DragEvent, useEffect, useRef, useState } from "react";
+import { ClipboardEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
     feedbackExtension,
     feedbackFileHint,
@@ -206,19 +206,20 @@ function clipboardExtension(type: string): string | null {
 }
 
 function useObjectUrls(files: File[]): (string | null)[] {
-    const [urls, setUrls] = useState<(string | null)[]>([]);
+    const urls = useMemo(
+        () => files.map((file) => (file.type.startsWith("image/") ? URL.createObjectURL(file) : null)),
+        [files],
+    );
 
     useEffect(() => {
-        const next = files.map((file) => (file.type.startsWith("image/") ? URL.createObjectURL(file) : null));
-        setUrls(next);
         return () => {
-            for (const url of next) {
+            for (const url of urls) {
                 if (url) {
                     URL.revokeObjectURL(url);
                 }
             }
         };
-    }, [files]);
+    }, [urls]);
 
     return urls;
 }

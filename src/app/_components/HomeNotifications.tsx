@@ -33,12 +33,6 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
     const [togglingId, setTogglingId] = useState<number | null>(null);
     const [allOpen, setAllOpen] = useState(false);
 
-    useEffect(() => {
-        return onNotificationsChanged(() => {
-            void refresh();
-        });
-    }, []);
-
     async function refresh() {
         try {
             const response = await fetch("/api/notifications", { cache: "no-store" });
@@ -50,6 +44,12 @@ export function HomeNotifications({ initial }: { initial: Feed }) {
             setError("Не удалось загрузить уведомления");
         }
     }
+
+    useEffect(() => {
+        return onNotificationsChanged(() => {
+            void refresh();
+        });
+    }, []);
 
     async function mark(body: { id: number; read?: boolean } | { all: true }) {
         const all = "all" in body;

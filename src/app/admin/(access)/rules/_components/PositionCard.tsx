@@ -14,15 +14,14 @@ interface PositionOption {
 type CardStatus = "idle" | "loading" | "ready" | "error";
 
 export function PositionCard({ title }: { title: string }) {
+    const needle = title.trim().toLowerCase();
+    return <PositionCardInner key={needle} title={title} needle={needle} />;
+}
+
+function PositionCardInner({ title, needle }: { title: string; needle: string }) {
     const [open, setOpen] = useState(false);
     const [count, setCount] = useState<number | null>(null);
     const [status, setStatus] = useState<CardStatus>("idle");
-    const needle = title.trim().toLowerCase();
-
-    useEffect(() => {
-        setCount(null);
-        setStatus("idle");
-    }, [needle]);
 
     useEffect(() => {
         if (!open || !needle) return;

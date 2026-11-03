@@ -134,13 +134,6 @@ export function BasketsEditor() {
         }
     }
 
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            void load();
-        }, 0);
-        return () => window.clearTimeout(timer);
-    }, []);
-
     async function load() {
         try {
             const [basketsResponse, indicatorsResponse] = await Promise.all([
@@ -173,6 +166,13 @@ export function BasketsEditor() {
             setLoaded(true);
         }
     }
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void load();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     function resetForm(nextIndicators = indicators) {
         setName("");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Check, CircleOff, Pipette, Plus, type LucideIcon } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -184,19 +184,12 @@ function ColorPanel({
 }) {
     const current = newsColor(value) ?? null;
     const [mode, setMode] = useState<"preset" | "custom">("preset");
-    const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(current ?? "#dc2626"));
-    const [hex, setHex] = useState(current ?? "");
-    const [saved, setSaved] = useState<string[]>([]);
+    const [saved, setSaved] = useState(() => readUserColors());
+    const customDraftRef = useRef(current ?? "#dc2626");
+    function rememberCustomDraft(draft: string) {
+        customDraftRef.current = draft;
+    }
     const eyedropper = typeof window !== "undefined" && "EyeDropper" in window;
-    useEffect(() => {
-        setSaved(readUserColors());
-    }, []);
-    useEffect(() => {
-        const next = current ?? "#dc2626";
-        setHsv(hexToHsv(next));
-        setHex(current ?? "");
-    }, [current]);
-    const draft = hsvToHex(hsv.h, hsv.s, hsv.v);
     const mine = mergeColors(saved, documentColors);
 
     function apply(color: string, store: boolean) {
@@ -208,8 +201,6 @@ function ColorPanel({
         if (store) {
             setSaved(rememberUserColor(next));
         }
-        setHex(next);
-        setHsv(hexToHsv(next));
     }
 
     async function pickFromScreen() {
@@ -223,15 +214,6 @@ function ColorPanel({
         } catch {
             // The eyedropper was closed before a color was chosen.
         }
-    }
-
-    function commitHex() {
-        const next = newsColor(hex.startsWith("#") ? hex : `#${hex}`);
-        if (!next) {
-            setHex(current ?? "");
-            return;
-        }
-        apply(next, true);
     }
 
     return (
@@ -272,40 +254,7 @@ function ColorPanel({
                     ))}
                 </div>
             ) : (
-                <div className="flex flex-col gap-2">
-                    <SaturationPad hsv={hsv} onChange={setHsv} />
-                    <input
-                        type="range"
-                        min={0}
-                        max={360}
-                        aria-label="Оттенок"
-                        value={Math.round(hsv.h)}
-                        className="h-2 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-foreground [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-foreground"
-                        style={{ background: "linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)" }}
-                        onChange={(event) => setHsv((currentHsv) => ({ ...currentHsv, h: Number(event.target.value) }))}
-                    />
-                    <div className="flex items-center gap-1">
-                        <span className="size-7 shrink-0 rounded-md border" style={{ backgroundColor: draft }} />
-                        <Input
-                            value={hex}
-                            aria-label="Код цвета"
-                            spellCheck={false}
-                            maxLength={7}
-                            className="h-8 font-mono uppercase"
-                            onChange={(event) => setHex(event.target.value)}
-                            onBlur={commitHex}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    commitHex();
-                                }
-                            }}
-                        />
-                        <Button type="button" size="icon-sm" aria-label="Применить цвет" onMouseDown={(event) => event.preventDefault()} onClick={() => apply(draft, true)}>
-                            <Check />
-                        </Button>
-                    </div>
-                </div>
+                <CustomColorFields key={current ?? "empty"} current={current} onDraft={rememberCustomDraft} onApply={apply} />
             )}
             <div className="flex flex-col gap-1.5">
                 <p className="text-xs text-muted-foreground">Мои цвета</p>
@@ -313,10 +262,78 @@ function ColorPanel({
                     {mine.map((color) => (
                         <Swatch key={color} label={color} pressed={current === color} color={color} onClick={() => apply(color, false)} />
                     ))}
-                    <Swatch label="Добавить цвет" onClick={() => apply(mode === "custom" ? draft : current ?? draft, true)}>
+                    <Swatch label="Добавить цвет" onClick={() => apply(mode === "custom" ? customDraftRef.current : current ?? customDraftRef.current, true)}>
                         <Plus className="size-3.5" />
                     </Swatch>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function CustomColorFields({
+    current,
+    onDraft,
+    onApply,
+}: {
+    current: string | null;
+    onDraft: (draft: string) => void;
+    onApply: (color: string, store: boolean) => void;
+}) {
+    const base = current ?? "#dc2626";
+    const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(base));
+    const [hex, setHex] = useState(current ?? "");
+    const draft = hsvToHex(hsv.h, hsv.s, hsv.v);
+
+    function setHsvDraft(next: Hsv) {
+        setHsv(next);
+        onDraft(hsvToHex(next.h, next.s, next.v));
+    }
+
+    function commitHex() {
+        const next = newsColor(hex.startsWith("#") ? hex : `#${hex}`);
+        if (!next) {
+            setHex(current ?? "");
+            return;
+        }
+        onApply(next, true);
+    }
+
+    return (
+        <div className="flex flex-col gap-2">
+            <SaturationPad hsv={hsv} onChange={setHsvDraft} />
+            <input
+                type="range"
+                min={0}
+                max={360}
+                aria-label="Оттенок"
+                value={Math.round(hsv.h)}
+                className="h-2 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-foreground [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-foreground"
+                style={{ background: "linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)" }}
+                onChange={(event) => {
+                    setHsvDraft({ ...hsv, h: Number(event.target.value) });
+                }}
+            />
+            <div className="flex items-center gap-1">
+                <span className="size-7 shrink-0 rounded-md border" style={{ backgroundColor: draft }} />
+                <Input
+                    value={hex}
+                    aria-label="Код цвета"
+                    spellCheck={false}
+                    maxLength={7}
+                    className="h-8 font-mono uppercase"
+                    onChange={(event) => setHex(event.target.value)}
+                    onBlur={commitHex}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitHex();
+                        }
+                    }}
+                />
+                <Button type="button" size="icon-sm" aria-label="Применить цвет" onMouseDown={(event) => event.preventDefault()} onClick={() => onApply(draft, true)}>
+                    <Check />
+                </Button>
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -41,13 +41,14 @@ export function RrsPeriodControls({
     hint: { text: string; tone: PeriodHintTone };
 }) {
     const [open, setOpen] = useState(false);
-
-    useEffect(() => {
-        if (hint.tone === "current" || hint.tone === "past") {
-            return;
+    const hintKey = `${hint.text}|${hint.tone}`;
+    const [previousHintKey, setPreviousHintKey] = useState(hintKey);
+    if (hintKey !== previousHintKey) {
+        setPreviousHintKey(hintKey);
+        if (hint.tone !== "current" && hint.tone !== "past") {
+            setOpen(true);
         }
-        setOpen(true);
-    }, [hint.text, hint.tone]);
+    }
 
     return (
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
