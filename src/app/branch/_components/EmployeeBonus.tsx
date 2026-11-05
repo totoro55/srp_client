@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { BonusDistributionChart } from "./BonusDistributionChart";
+import { EmployeeNameLine } from "./EmployeeMovementMark";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
 import {
@@ -59,7 +60,7 @@ export function EmployeeBonus() {
                 <Card className="min-w-0">
                     <CardHeader>
                         <CardTitle className="flex flex-wrap items-center gap-2">
-                            {employee.name}
+                            <EmployeeNameLine name={employee.name} movement={employee.movement} markClassName="px-1.5 py-0.5 text-xs" />
                             <span className={cn("inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 text-sm font-medium", ROLE_MARK[role] ?? "bg-muted text-foreground")}>
                                 {role}
                             </span>

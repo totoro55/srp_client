@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useBranchStore } from "./branch-store";
 import { BranchPeriodField, useBranchLocation } from "./BranchFrame";
+import { EmployeeNameLine, movementLabel, movementNameClass, movementValueClass } from "./EmployeeMovementMark";
 import {
     branchMonth,
     brigadeName,
@@ -27,6 +28,7 @@ import {
     servicePremiums,
     totalPremium,
     withBranchQuery,
+    type EmployeeMovement,
     type PremiumIndicatorId,
     type ServiceIndicatorId,
 } from "./mock";
@@ -124,12 +126,12 @@ const ROLE_MARK: Record<string, string> = {
     "Мерчендайзер": "bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-50",
     "Без подписи": "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100",
 };
-const NAME_COL = "w-[10.5rem] min-w-[10.5rem] max-w-[10.5rem]";
+const NAME_COL = "w-[15rem] min-w-[15rem] max-w-[15rem]";
 const ROLE_COL = "w-[7.25rem] min-w-[7.25rem] max-w-[7.25rem]";
 const HOUR_COL = "w-[5.75rem] min-w-[5.75rem] tabular-nums";
 const MONEY_COL = "w-[7.75rem] min-w-[7.75rem] tabular-nums";
 const PIN_NAME = "sticky left-0 z-20 border-l bg-background shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--background)]";
-const PIN_ROLE = "sticky left-[10.5rem] z-20 bg-background shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
+const PIN_ROLE = "sticky left-[15rem] z-20 bg-background shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
 const AIM_COL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
 const AIM_ROW = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
 const AIM_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
@@ -144,7 +146,7 @@ const AIM_NAME_HEAD_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0
 const AIM_ROLE_HEAD = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
 const AIM_ROLE_HEAD_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
 const PIN_NAME_HEAD = "sticky left-0 z-30 border-l bg-card shadow-[1px_0_0_0_var(--card)]";
-const PIN_ROLE_HEAD = "sticky left-[10.5rem] z-30 bg-card shadow-[1px_0_0_0_var(--card),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
+const PIN_ROLE_HEAD = "sticky left-[15rem] z-30 bg-card shadow-[1px_0_0_0_var(--card),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
 const BASKET_LAST = PREMIUM_INDICATORS[PREMIUM_INDICATORS.length - 1].id;
 const SERVICE_LAST = SERVICE_INDICATORS[SERVICE_INDICATORS.length - 1].id;
 const WASH_BASE = "bg-[color-mix(in_oklab,var(--color-sky-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-sky-950)_62%,var(--background))]";
@@ -197,7 +199,7 @@ function dataClass(column: BonusColumn, value?: number): string {
         CELL,
         endsGroup(column) && EDGE,
         !heat && (bodyWash(column) ?? "bg-background"),
-        column === "name" && cn(PIN_NAME, NAME_COL, "font-medium whitespace-nowrap"),
+        column === "name" && cn(PIN_NAME, NAME_COL, "font-medium whitespace-normal"),
         column === "role" && cn(PIN_ROLE, ROLE_COL),
         hours && HOUR_COL,
         !text && !hours && MONEY_COL,
@@ -275,6 +277,7 @@ export function BranchBonuses() {
     const [query, setQuery] = useState("");
     const [roles, setRoles] = useState<string[]>([]);
     const [brigades, setBrigades] = useState<string[]>([]);
+    const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>([]);
     const [sort, setSort] = useState<BonusSort>({ key: "role", direction: "desc" });
     const [hover, setHover] = useState<CellHover | null>(null);
     const tableFrame = useRef<HTMLDivElement>(null);
@@ -311,16 +314,21 @@ export function BranchBonuses() {
         if (brigadeOn && brigades.length > 0 && !brigades.includes(row.brigade ?? "")) {
             return false;
         }
+        if (row.employee.movement && hiddenMovements.includes(row.employee.movement)) {
+            return false;
+        }
         if (!needle) {
             return true;
         }
-        const haystack = `${row.employee.name} ${row.employee.title} ${row.role} ${row.brigade ?? ""}`.toLowerCase();
+        const movement = row.employee.movement ? movementLabel(row.employee.movement) : "";
+        const movementAlias = row.employee.movement === "transferred" ? "переведен" : "";
+        const haystack = `${row.employee.name} ${row.employee.title} ${row.role} ${row.brigade ?? ""} ${movement} ${movementAlias}`.toLowerCase();
         return haystack.includes(needle);
     });
     const visible = filtered.slice().sort((left, right) => compareRows(left, right, activeSort));
     const currentPays = visible.map((row) => row.pay.currentPay);
     const forecastPays = visible.map((row) => row.pay.forecastPay);
-    const filtersActive = needle !== "" || roles.length > 0 || (brigadeOn && brigades.length > 0);
+    const filtersActive = needle !== "" || roles.length > 0 || hiddenMovements.length > 0 || (brigadeOn && brigades.length > 0);
     const columnCount = 9 + PREMIUM_INDICATORS.length + SERVICE_INDICATORS.length + (brigadeOn ? 1 : 0);
 
     const placeholder = !month.inMotivation
@@ -362,6 +370,8 @@ export function BranchBonuses() {
                             brigadeOptions={brigadeOptions}
                             brigades={brigades}
                             onToggleBrigade={(value) => setBrigades(toggleValue(brigades, value))}
+                            hiddenMovements={hiddenMovements}
+                            onHiddenMovements={setHiddenMovements}
                         />
                         <Button
                             type="button"
@@ -374,6 +384,7 @@ export function BranchBonuses() {
                                 setQuery("");
                                 setRoles([]);
                                 setBrigades([]);
+                                setHiddenMovements([]);
                             }}
                         >
                             <RotateCcw />
@@ -457,29 +468,31 @@ export function BranchBonuses() {
                         const forecastHeat = payHeat(payRatio(forecastPays, row.pay.forecastPay));
                         const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
                         const rowId = row.employee.id;
+                        const movement = row.employee.movement;
+                        const valued = (column: BonusColumn, value?: number) => cn(dataClass(column, value), movementValueClass(movement));
                         return (
                             <TableRow key={rowId} className="hover:bg-transparent">
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn)} pin="name" className={dataClass("name")} onOpen={() => router.push(href)} onHover={setHover}>
-                                    {row.employee.name}
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn)} pin="name" className={cn(dataClass("name"), movementNameClass(movement))} onOpen={() => router.push(href)} onHover={setHover}>
+                                    <EmployeeNameLine name={row.employee.name} movement={movement} markAtEnd />
                                 </AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn)} pin="role" className={dataClass("role")} onHover={setHover}>
-                                    <RoleLabel role={row.role} />
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn)} pin="role" className={cn(dataClass("role"), movementNameClass(movement))} onHover={setHover}>
+                                    <RoleLabel role={row.role} plain={movement !== undefined} />
                                 </AimedCell>
-                                {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn)} className={dataClass("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("schedule", brigadeOn)} className={dataClass("schedule", row.pay.scheduleHours)} onHover={setHover}>{row.pay.scheduleHours}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("timesheet", brigadeOn)} className={cn(dataClass("timesheet", row.pay.timesheetHours), timesheetShort && SHORTFALL)} onHover={setHover}>{row.pay.timesheetHours}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("salary", brigadeOn)} className={dataClass("salary", row.pay.salary)} onHover={setHover}>{formatAmount(row.pay.salary)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("fixed", brigadeOn)} className={dataClass("fixed", row.fixed)} onHover={setHover}>{formatAmount(row.fixed)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("current", brigadeOn)} className={dataClass("current", row.pay.currentPay)} style={currentHeat} onHover={setHover}>{formatAmount(row.pay.currentPay)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("forecast", brigadeOn)} className={dataClass("forecast", row.pay.forecastPay)} style={forecastHeat} onHover={setHover}>{formatAmount(row.pay.forecastPay)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("total", brigadeOn)} className={dataClass("total", row.total)} onHover={setHover}>{formatAmount(row.total)}</AimedCell>
+                                {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn)} className={valued("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("schedule", brigadeOn)} className={valued("schedule", row.pay.scheduleHours)} onHover={setHover}>{row.pay.scheduleHours}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("timesheet", brigadeOn)} className={cn(valued("timesheet", row.pay.timesheetHours), timesheetShort && SHORTFALL)} onHover={setHover}>{row.pay.timesheetHours}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("salary", brigadeOn)} className={valued("salary", row.pay.salary)} onHover={setHover}>{formatAmount(row.pay.salary)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("fixed", brigadeOn)} className={valued("fixed", row.fixed)} onHover={setHover}>{formatAmount(row.fixed)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("current", brigadeOn)} className={valued("current", row.pay.currentPay)} style={currentHeat} onHover={setHover}>{formatAmount(row.pay.currentPay)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("forecast", brigadeOn)} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat} onHover={setHover}>{formatAmount(row.pay.forecastPay)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("total", brigadeOn)} className={valued("total", row.total)} onHover={setHover}>{formatAmount(row.total)}</AimedCell>
                                 {PREMIUM_INDICATORS.map((indicator) => (
                                     <AimedCell
                                         key={indicator.id}
                                         hover={hover}
                                         row={rowId}
                                         column={columnIndex(indicator.id, brigadeOn)}
-                                        className={dataClass(indicator.id, row.premiums[indicator.id])}
+                                        className={valued(indicator.id, row.premiums[indicator.id])}
                                         onOpen={() => router.push(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id))}
                                         onHover={setHover}
                                     >
@@ -487,7 +500,17 @@ export function BranchBonuses() {
                                     </AimedCell>
                                 ))}
                                 {SERVICE_INDICATORS.map((indicator) => (
-                                    <AimedCell key={indicator.id} hover={hover} row={rowId} column={columnIndex(indicator.id, brigadeOn)} className={dataClass(indicator.id, row.services[indicator.id])} onHover={setHover}>{formatAmount(row.services[indicator.id])}</AimedCell>
+                                    <AimedCell
+                                        key={indicator.id}
+                                        hover={hover}
+                                        row={rowId}
+                                        column={columnIndex(indicator.id, brigadeOn)}
+                                        className={valued(indicator.id, row.services[indicator.id])}
+                                        onOpen={() => router.push(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id))}
+                                        onHover={setHover}
+                                    >
+                                        {formatAmount(row.services[indicator.id])}
+                                    </AimedCell>
                                 ))}
                             </TableRow>
                         );
@@ -504,8 +527,8 @@ function formatAmount(value: number): string {
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value);
 }
 
-function RoleLabel({ role }: { role: string }) {
-    const tone = ROLE_MARK[role] ?? "bg-muted text-foreground";
+function RoleLabel({ role, plain = false }: { role: string; plain?: boolean }) {
+    const tone = plain ? "bg-transparent text-inherit" : (ROLE_MARK[role] ?? "bg-muted text-foreground");
     return <span className={cn("inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 font-medium", tone)}>{role}</span>;
 }
 
@@ -553,6 +576,8 @@ function BonusListItem({
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
+    const movement = row.employee.movement;
+    const valueTone = movementValueClass(movement);
     const details = [
         { label: "Оклад", amount: row.pay.salary },
         { label: "Фиксированная премия", amount: row.fixed },
@@ -563,43 +588,50 @@ function BonusListItem({
             amount: row.premiums[indicator.id],
             open: withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id),
         })),
-        ...SERVICE_INDICATORS.map((indicator) => ({ label: indicator.title, amount: row.services[indicator.id] })),
+        ...SERVICE_INDICATORS.map((indicator) => ({
+            label: indicator.title,
+            amount: row.services[indicator.id],
+            open: withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id),
+        })),
     ];
     return (
         <Collapsible open={open} onOpenChange={setOpen} className="border-b last:border-b-0">
             <CollapsibleTrigger className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-muted/60">
                 <span className="min-w-0 flex-1">
-                    <span
-                        role="link"
-                        tabIndex={0}
-                        className="block text-sm font-medium"
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            router.push(href);
-                        }}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
+                    <span className={cn("block rounded-md", movementNameClass(movement))}>
+                        <span
+                            role="link"
+                            tabIndex={0}
+                            className="block text-sm font-medium"
+                            onClick={(event) => {
                                 event.stopPropagation();
                                 router.push(href);
-                            }
-                        }}
-                    >
-                        {row.employee.name}
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    router.push(href);
+                                }
+                            }}
+                        >
+                            <EmployeeNameLine name={row.employee.name} movement={movement} markAtEnd />
+                        </span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm">
+                            <RoleLabel role={row.role} plain={movement !== undefined} />
+                        </span>
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                        <RoleLabel role={row.role} />
-                        {brigadeOn && row.brigade ? <span>· {row.brigade}</span> : null}
-                    </span>
+                    {brigadeOn && row.brigade ? <span className={cn("mt-0.5 block text-sm", valueTone ?? "text-muted-foreground")}>{row.brigade}</span> : null}
                     <span className="mt-0.5 block text-sm text-muted-foreground">
-                        график {row.pay.scheduleHours}
+                        график{" "}
+                        <span className={cn("tabular-nums", valueTone)}>{row.pay.scheduleHours}</span>
                         {" · табель "}
-                        <span className={timesheetShort ? SHORTFALL : undefined}>{row.pay.timesheetHours}</span>
+                        <span className={cn("tabular-nums", timesheetShort && SHORTFALL, valueTone)}>{row.pay.timesheetHours}</span>
                     </span>
                 </span>
                 <span className="shrink-0 rounded-md px-1.5 py-0.5 text-right" style={forecastHeat}>
                     <span className="block text-xs text-muted-foreground">Прогноз</span>
-                    <span className="block text-sm font-medium tabular-nums">{formatAmount(row.pay.forecastPay)}</span>
+                    <span className={cn("block text-sm font-medium tabular-nums", valueTone)}>{formatAmount(row.pay.forecastPay)}</span>
                 </span>
                 <ChevronDown className={cn("mt-1 size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
             </CollapsibleTrigger>
@@ -624,7 +656,7 @@ function BonusListItem({
                             } : undefined}
                         >
                             <dt className="text-muted-foreground">{item.label}</dt>
-                            <dd className={cn("tabular-nums", item.amount === 0 && "text-muted-foreground")}>{formatAmount(item.amount)}</dd>
+                            <dd className={cn("tabular-nums", item.amount === 0 && !valueTone && "text-muted-foreground", valueTone)}>{formatAmount(item.amount)}</dd>
                         </div>
                     ))}
                 </dl>
@@ -641,6 +673,8 @@ function MobileFilters({
     brigadeOptions,
     brigades,
     onToggleBrigade,
+    hiddenMovements,
+    onHiddenMovements,
 }: {
     roleOptions: string[];
     roles: readonly string[];
@@ -649,8 +683,10 @@ function MobileFilters({
     brigadeOptions: string[];
     brigades: readonly string[];
     onToggleBrigade: (value: string) => void;
+    hiddenMovements: readonly EmployeeMovement[];
+    onHiddenMovements: (hidden: EmployeeMovement[]) => void;
 }) {
-    const active = roles.length > 0 || (brigadeOn && brigades.length > 0);
+    const active = roles.length > 0 || hiddenMovements.length > 0 || (brigadeOn && brigades.length > 0);
     return (
         <Popover>
             <PopoverTrigger
@@ -661,10 +697,40 @@ function MobileFilters({
                 }
             />
             <PopoverContent align="end" className="max-h-80 w-64 gap-3 overflow-y-auto p-2">
+                <MovementFilterOptions hidden={hiddenMovements} onChange={onHiddenMovements} />
                 <FilterOptions title="Роли" options={roleOptions} selected={roles} onToggle={onToggleRole} />
                 {brigadeOn ? <FilterOptions title="Бригады" options={brigadeOptions} selected={brigades} onToggle={onToggleBrigade} /> : null}
             </PopoverContent>
         </Popover>
+    );
+}
+
+function MovementFilterOptions({
+    hidden,
+    onChange,
+}: {
+    hidden: readonly EmployeeMovement[];
+    onChange: (hidden: EmployeeMovement[]) => void;
+}) {
+    function toggle(movement: EmployeeMovement) {
+        onChange(hidden.includes(movement) ? hidden.filter((item) => item !== movement) : [...hidden, movement]);
+    }
+    return (
+        <div className="flex flex-col gap-1 border-b pb-2">
+            <p className="px-2 text-xs font-medium text-muted-foreground">Сотрудники</p>
+            <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                <Checkbox checked={hidden.length === 0} onCheckedChange={() => onChange([])} />
+                <span>Показывать всех</span>
+            </Label>
+            <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                <Checkbox checked={hidden.includes("dismissed")} onCheckedChange={() => toggle("dismissed")} />
+                <span>Скрыть уволенных</span>
+            </Label>
+            <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                <Checkbox checked={hidden.includes("transferred")} onCheckedChange={() => toggle("transferred")} />
+                <span>Скрыть переведённых</span>
+            </Label>
+        </div>
     );
 }
 

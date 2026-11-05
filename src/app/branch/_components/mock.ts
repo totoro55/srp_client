@@ -3,6 +3,7 @@ import { automaticRole, getMotivationSettings, ISSUANCE_EMPLOYEE_TITLE, KEEPER_T
 // Пример вместо вьюшек расчёта и таблицы ставок. Страницы читают только этот модуль.
 
 export type Ktu = "plus" | "minus";
+export type EmployeeMovement = "dismissed" | "transferred";
 export type BrigadeMode = "all" | "groups" | "off";
 
 export interface MockBranch {
@@ -22,6 +23,7 @@ export interface MockEmployee {
     payLevel: number;
     hourly: number;
     manualRoleId?: string | null;
+    movement?: EmployeeMovement;
 }
 
 export interface MockLine {
@@ -113,6 +115,10 @@ function leninaPerson(
     };
 }
 
+function moved(employee: MockEmployee, movement: EmployeeMovement): MockEmployee {
+    return { ...employee, movement };
+}
+
 const HALL_EXTRA = [
     "lebedeva",
     "krylov",
@@ -143,18 +149,18 @@ const EMPLOYEES: MockEmployee[] = [
     { id: "orlov", branchId: "lenina", name: "Орлов Павел", title: STORE_EMPLOYEE_TITLE, ktu: "minus", level: 1, payLevel: 48000, hourly: 230 },
     leninaPerson("lebedeva", "Лебедева Марина", "plus", 2, 64000, 260),
     leninaPerson("krylov", "Крылов Андрей", "plus", 3, 76000, 300),
-    leninaPerson("fomina", "Фомина Дарья", "plus", 1, 54000, 230),
-    leninaPerson("zaitsev", "Зайцев Никита", "plus", 2, 68000, 270),
+    moved(leninaPerson("fomina", "Фомина Дарья", "plus", 1, 54000, 230), "dismissed"),
+    moved(leninaPerson("zaitsev", "Зайцев Никита", "plus", 2, 68000, 270), "transferred"),
     leninaPerson("romanova", "Романова Алина", "plus", 2, 61000, 250),
     leninaPerson("kiselev", "Киселёв Глеб", "minus", 2, 58000, 240, STORE_EMPLOYEE_TITLE, "merchandiser"),
     leninaPerson("tikhonova", "Тихонова Вера", "plus", 1, 52000, 220),
     leninaPerson("baranov", "Баранов Олег", "plus", 3, 82000, 330),
     leninaPerson("saveleva", "Савельева Ирина", "plus", 2, 66000, 265),
     leninaPerson("gusev", "Гусев Максим", "minus", 2, 60000, 245, KEEPER_TITLE),
-    leninaPerson("melnikova", "Мельникова Юлия", "plus", 2, 63000, 255),
+    moved(leninaPerson("melnikova", "Мельникова Юлия", "plus", 2, 63000, 255), "dismissed"),
     leninaPerson("kotov", "Котов Артём", "plus", 1, 51000, 225),
     leninaPerson("vlasova", "Власова Наталья", "plus", 2, 69000, 275),
-    leninaPerson("ershov", "Ершов Павел", "plus", 3, 78000, 310),
+    moved(leninaPerson("ershov", "Ершов Павел", "plus", 3, 78000, 310), "transferred"),
     leninaPerson("kalinina", "Калинина Оксана", "plus", 2, 65000, 260),
     leninaPerson("noskov", "Носков Денис", "minus", 2, 57000, 235, ISSUANCE_EMPLOYEE_TITLE),
     leninaPerson("sheveleva", "Шевелёва Татьяна", "plus", 1, 53000, 230),
@@ -182,8 +188,8 @@ const EMPLOYEES: MockEmployee[] = [
     leninaPerson("loginova", "Логинова Екатерина", "minus", 2, 59000, 245, KEEPER_TITLE),
     leninaPerson("martynov", "Мартынов Владислав", "plus", 2, 64000, 260, ISSUANCE_EMPLOYEE_TITLE),
     { id: "volkov", branchId: "mira", name: "Волков Денис", title: STORE_EMPLOYEE_TITLE, ktu: "plus", level: 2, payLevel: 65000, hourly: 260 },
-    { id: "egorova", branchId: "mira", name: "Егорова Ольга", title: ISSUANCE_EMPLOYEE_TITLE, ktu: "minus", level: 2, payLevel: 52000, hourly: 240 },
-    { id: "pavlov", branchId: "mira", name: "Павлов Сергей", title: KEEPER_TITLE, ktu: "minus", level: 1, payLevel: 44000, hourly: 220 },
+    { id: "egorova", branchId: "mira", name: "Егорова Ольга", title: ISSUANCE_EMPLOYEE_TITLE, ktu: "minus", level: 2, payLevel: 52000, hourly: 240, movement: "dismissed" },
+    { id: "pavlov", branchId: "mira", name: "Павлов Сергей", title: KEEPER_TITLE, ktu: "minus", level: 1, payLevel: 44000, hourly: 220, movement: "transferred" },
 ];
 
 const BRANCH_BASE_BONUS: Record<string, number> = {
@@ -2018,7 +2024,7 @@ export function payFacts(employee: MockEmployee, period: string, bonus: number):
     const seed = hashId(employee.id);
     const scheduleHours = 144 + (seed % 5) * 8;
     const closed = period < "2026-10-01";
-    const shortfall = closed ? 0 : 8 + (seed % 4) * 4;
+    const shortfall = closed || employee.movement ? 0 : 8 + (seed % 4) * 4;
     const timesheetHours = Math.max(96, scheduleHours - shortfall);
     const salary = employee.hourly * timesheetHours;
     const currentPay = salary + bonus;
