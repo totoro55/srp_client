@@ -161,6 +161,7 @@ async function scopeLabelFor(username: string, scopeKind: ScopeKind): Promise<st
             FROM employees employee
             LEFT JOIN branches branch ON branch.uuid = employee.branch_uuid
             WHERE lower(employee.login) = lower($1)
+              AND (employee.territory_uuid IS NOT NULL OR employee.branch_uuid IS NOT NULL)
             LIMIT 1
             `,
             [username]

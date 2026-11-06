@@ -1,20 +1,15 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
+import { useBranchDirectory } from "./branch-directory";
 import {
-    BRANCHES,
-    DEFAULT_BRANCH_PERIOD,
-    branchById,
-    dataLoadedAt,
-    employeeById,
+    currentBranchPeriod,
     isBranchId,
     isBranchPeriod,
-    ownBranchId,
     readStoredBranchLocation,
     withBranchQuery,
     writeStoredBranchLocation,
@@ -25,40 +20,57 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const params = useParams<{ employeeId?: string }>();
+    const directory = useBranchDirectory();
     const { branchId, period } = useBranchLocation();
-    const branch = branchById(branchId);
+    const branch = directory.branches.find((item) => item.id === branchId) ?? null;
     const employeeId = typeof params.employeeId === "string" ? params.employeeId : null;
-    const employee = employeeId ? employeeById(employeeId) : null;
+    const employee = employeeId ? directory.employees.find((item) => item.id === employeeId) ?? null : null;
     const onLines = pathname.endsWith("/lines");
     const bonusList = pathname === "/branch/bonuses";
     const fillViewport = bonusList || onLines;
-    const showLoadStatus = pathname.startsWith("/branch/bonuses");
+    const query = searchParams.toString();
+    const appliedHref = useRef("");
 
     useEffect(() => {
-        const requestedBranch = searchParams.get("branch");
-        const requestedPeriod = searchParams.get("period");
-        const branchFromUrl = isBranchId(requestedBranch);
-        const periodFromUrl = isBranchPeriod(requestedPeriod);
-        if (branchFromUrl && periodFromUrl) {
-            writeStoredBranchLocation(requestedBranch, requestedPeriod);
+        if (directory.loading && directory.branches.length === 0) {
             return;
         }
+        const params = new URLSearchParams(query);
+        const requestedBranch = params.get("branch");
+        const requestedPeriod = params.get("period");
+        const sameBranch = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
+        const listed = isBranchId(requestedBranch)
+            ? directory.branches.find((item) => sameBranch(item.id, requestedBranch))
+            : undefined;
         const stored = readStoredBranchLocation();
-        const nextBranch = branchFromUrl ? requestedBranch : stored?.branchId ?? ownBranchId();
-        const nextPeriod = periodFromUrl ? requestedPeriod : stored?.period ?? DEFAULT_BRANCH_PERIOD;
-        writeStoredBranchLocation(nextBranch, nextPeriod);
-        const part = searchParams.get("part");
-        router.replace(withBranchQuery(pathname, nextBranch, nextPeriod, pathname.endsWith("/lines") ? part : null));
-    }, [pathname, router, searchParams]);
-
-    useEffect(() => {
-        if (!employeeId) {
+        const storedKnown = stored ? directory.branches.find((item) => sameBranch(item.id, stored.branchId)) : undefined;
+        const nextBranch = listed?.id ?? storedKnown?.id ?? directory.branches.find((item) => item.own)?.id ?? directory.branches[0]?.id ?? "";
+        const nextPeriod = isBranchPeriod(requestedPeriod) ? requestedPeriod : stored?.period ?? currentBranchPeriod();
+        if (!nextBranch) {
             return;
         }
-        if (!employee || employee.branchId !== branchId) {
+        const part = params.get("part");
+        const href = withBranchQuery(pathname, nextBranch, nextPeriod, pathname.endsWith("/lines") ? part : null);
+        const current = query ? `${pathname}?${query}` : pathname;
+        if (href === current || appliedHref.current === href) {
+            appliedHref.current = href;
+            writeStoredBranchLocation(nextBranch, nextPeriod);
+            return;
+        }
+        appliedHref.current = href;
+        writeStoredBranchLocation(nextBranch, nextPeriod);
+        router.replace(href);
+    }, [directory.branches, directory.loading, pathname, query, router]);
+
+    useEffect(() => {
+        if (!employeeId || directory.loading || !branchId) {
+            return;
+        }
+        const listMatchesBranch = directory.employees.every((item) => item.branchId === branchId);
+        if (!employee && listMatchesBranch) {
             router.replace(withBranchQuery("/branch/bonuses", branchId, period));
         }
-    }, [branchId, employee, employeeId, period, router]);
+    }, [branchId, directory.employees, directory.loading, employee, employeeId, period, router]);
 
     function replaceQuery(nextBranch: string, nextPeriod: string) {
         const part = searchParams.get("part");
@@ -76,11 +88,11 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     });
 
     const branchCrumb: PageHeadingCrumb = {
-        label: branch?.name ?? "Филиал",
+        label: branch?.name ?? (directory.loading ? "Филиал" : "Филиал не выбран"),
         menuKey: "branch",
         menuValue: branchId,
-        menu: BRANCHES.length > 1
-            ? BRANCHES.map((item) => ({ id: item.id, label: `${item.name} · ${item.own ? "свой" : "выдан"}` }))
+        menu: directory.branches.length > 1
+            ? directory.branches.map((item) => ({ id: item.id, label: item.own ? `${item.name} · свой` : item.name }))
             : undefined,
     };
     const trail: PageHeadingCrumb[] = employee
@@ -122,13 +134,13 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     return (
         <div className={cn("flex w-full min-w-0 flex-col gap-4 [@media(max-height:500px)]:gap-2!", fillViewport && "-mb-4 h-[calc(100dvh-5rem)] min-h-0 md:-mb-6 md:h-[calc(100dvh-5.5rem)] [@media(max-height:500px)]:-mb-2! [@media(max-height:500px)]:h-[calc(100dvh-4.5rem)]!")}>
             <PageHeading trail={trail} />
-            {bonusList ? null : <BranchPeriodField showLoadStatus={showLoadStatus} />}
+            {bonusList ? null : <BranchPeriodField />}
             {fillViewport ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
         </div>
     );
 }
 
-export function BranchPeriodField({ showLoadStatus = true }: { showLoadStatus?: boolean } = {}) {
+export function BranchPeriodField() {
     const { branchId, period } = useBranchLocation();
     const router = useRouter();
     const pathname = usePathname();
@@ -143,7 +155,7 @@ export function BranchPeriodField({ showLoadStatus = true }: { showLoadStatus?: 
                 className="h-9 min-w-0 flex-1 basis-0 px-2 text-xs sm:w-[9.25rem] sm:flex-none sm:basis-auto md:w-40 md:text-sm [@media(max-height:500px)]:w-[9.25rem]! [@media(max-height:500px)]:flex-none! [@media(max-height:500px)]:basis-auto! [@media(max-height:500px)]:text-xs!"
                 onChange={(event) => {
                     const month = event.target.value;
-                    if (!month) {
+                    if (!month || !branchId) {
                         return;
                     }
                     const nextPeriod = `${month}-01`;
@@ -152,48 +164,7 @@ export function BranchPeriodField({ showLoadStatus = true }: { showLoadStatus?: 
                     router.replace(withBranchQuery(pathname, branchId, nextPeriod, pathname.endsWith("/lines") ? part : null));
                 }}
             />
-            {showLoadStatus ? <DataLoadStatus branchId={branchId} period={period} /> : null}
         </div>
-    );
-}
-
-function formatLoadedAt(value: string): string {
-    const [date, time = ""] = value.split("T");
-    const [year, month, day] = date.split("-");
-    const clock = time.slice(0, 5);
-    return clock ? `${day}.${month}.${year} ${clock}` : `${day}.${month}.${year}`;
-}
-
-const loadStatusClass = "h-9 min-w-0 flex-1 basis-0 justify-center px-2 text-xs font-medium whitespace-nowrap sm:w-fit sm:flex-none sm:shrink-0 sm:basis-auto";
-
-function DataLoadStatus({ branchId, period }: { branchId: string; period: string }) {
-    const loadedAt = dataLoadedAt(branchId, period);
-    if (!loadedAt) {
-        return (
-            <Badge
-                variant="outline"
-                title="Данные не загружены"
-                className={cn(loadStatusClass, "border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-200")}
-            >
-                Нет данных
-            </Badge>
-        );
-    }
-    const full = formatLoadedAt(loadedAt);
-    const closed = period < "2026-10-01";
-    return (
-        <Badge
-            variant="outline"
-            title={`Данные загружены ${full}`}
-            className={cn(
-                loadStatusClass,
-                closed
-                    ? "border-border bg-muted text-muted-foreground"
-                    : "border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
-            )}
-        >
-            {full}
-        </Badge>
     );
 }
 
@@ -202,7 +173,7 @@ export function useBranchLocation(): { branchId: string; period: string } {
     const requestedBranch = searchParams.get("branch");
     const requestedPeriod = searchParams.get("period");
     return {
-        branchId: isBranchId(requestedBranch) ? requestedBranch : ownBranchId(),
-        period: isBranchPeriod(requestedPeriod) ? requestedPeriod : DEFAULT_BRANCH_PERIOD,
+        branchId: isBranchId(requestedBranch) ? requestedBranch : "",
+        period: isBranchPeriod(requestedPeriod) ? requestedPeriod : currentBranchPeriod(),
     };
 }

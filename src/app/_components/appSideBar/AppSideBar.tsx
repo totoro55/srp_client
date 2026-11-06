@@ -4,18 +4,15 @@
 import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import {SidebarMenuItem, useSidebar} from "@/components/ui/sidebar";
-import { isNavigationSubgroup, isRouteActive, visibleNavigation } from '@/lib/routes-config';
+import { visibleNavigation } from '@/lib/routes-config';
 import { SidebarUserMenu } from './SidebarUserMenu';
-import { SidebarNavItem } from './SidebarNavItem';
-import { SidebarNavSubgroup } from './SidebarNavSubgroup';
+import { SidebarNavGroup } from './SidebarNavGroup';
 import { useAccess } from "@/hooks/useAccess";
 import {
     Sidebar,
     SidebarContent,
     SidebarHeader,
     SidebarMenu,
-    SidebarGroup,
-    SidebarGroupLabel,
     SidebarFooter
 } from "@/components/ui/sidebar";
 import { SidebarBrand } from "./SidebarBrand";
@@ -50,31 +47,14 @@ export function AppSideBar() {
                 </div>
             )}
             <SidebarContent className="gap-3">
-                {dynamicNavigation.map((group) => {
-                    return (
-                        <SidebarGroup key={group.id} className="animate-in fade-in px-3 py-0 duration-200">
-                            {!(isMobile && group.id === "main") && (
-                                <SidebarGroupLabel className="text-xs font-semibold text-muted-foreground select-none">
-                                    {group.label}
-                                </SidebarGroupLabel>
-                            )}
-
-                            <SidebarMenu className="group-data-[collapsible=icon]:items-center">
-                                {group.items.map((entry) => (
-                                    isNavigationSubgroup(entry) ? (
-                                        <SidebarNavSubgroup key={entry.id} subgroup={entry} pathname={pathname} />
-                                    ) : (
-                                        <SidebarNavItem
-                                            key={entry.href}
-                                            item={entry}
-                                            isActive={isRouteActive(pathname, entry.href)}
-                                        />
-                                    )
-                                ))}
-                            </SidebarMenu>
-                        </SidebarGroup>
-                    );
-                })}
+                {dynamicNavigation.map((group) => (
+                    <SidebarNavGroup
+                        key={group.id}
+                        group={group}
+                        pathname={pathname}
+                        showLabel={!(isMobile && group.id === "main")}
+                    />
+                ))}
             </SidebarContent>
 
             {!isMobile && (

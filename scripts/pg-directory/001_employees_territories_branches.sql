@@ -4,6 +4,7 @@
 --
 -- Ожидаемые колонки со стороны приложения:
 --   employees:   uuid, login, name, title, branch_uuid, deleted
+--                territory_uuid и branch_uuid пусты у системной записи (сайт, доставка, система)
 --   territories: uuid, code, name, deleted
 --   branches:    uuid, code, name, territory_uuid, deleted
 

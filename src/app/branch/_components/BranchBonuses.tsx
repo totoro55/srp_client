@@ -10,43 +10,90 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { TableSkeleton } from "@/components/loading-state";
+import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useBranchDirectory } from "./branch-directory";
 import { useBranchStore } from "./branch-store";
 import { BranchPeriodField, useBranchLocation } from "./BranchFrame";
-import { EmployeeNameLine, movementLabel, movementNameClass, movementValueClass } from "./EmployeeMovementMark";
+import { EmployeeNameLine, movementLabel, movementNameClass, movementValueClass, StaffSegmentNote } from "./EmployeeMovementMark";
 import {
-    branchMonth,
     brigadeName,
-    employeesOf,
-    fixedPremium,
-    inCalculation,
-    indicatorPremiums,
-    payFacts,
-    PREMIUM_INDICATORS,
     roleCaption,
     SERVICE_INDICATORS,
-    servicePremiums,
-    totalPremium,
     withBranchQuery,
     type EmployeeMovement,
-    type PremiumIndicatorId,
     type ServiceIndicatorId,
 } from "./mock";
+import { fixedPremium, formatHours, roleKey, salaryFromTimesheet, segmentHref, type StaffEmployee } from "./staff";
 
-type BonusColumn = "name" | "role" | "brigade" | "schedule" | "timesheet" | "salary" | "fixed" | "current" | "forecast" | "total" | PremiumIndicatorId | ServiceIndicatorId;
+type BonusColumn = "name" | "role" | "brigade" | "schedule" | "timesheet" | "salary" | "fixed" | "current" | "forecast" | "total" | ServiceIndicatorId | (string & {});
+
+interface CabinetIndicator {
+    id: string;
+    title: string;
+}
+
+interface CabinetColumns {
+    baskets: CabinetIndicator[];
+    basketIds: ReadonlySet<string>;
+    basketLast?: string;
+}
+
+const SERVICE_TITLES = new Set<string>(SERVICE_INDICATORS.map((indicator) => indicator.title));
+
+function cabinetColumns(indicators: readonly CabinetIndicator[]): CabinetColumns {
+    const baskets = indicators.filter((indicator) => !SERVICE_TITLES.has(indicator.title));
+    return {
+        baskets,
+        basketIds: new Set(baskets.map((indicator) => indicator.id)),
+        basketLast: baskets.at(-1)?.id,
+    };
+}
 type SortDirection = "asc" | "desc";
 type BonusSort = { key: BonusColumn; direction: SortDirection };
 
+const DEFAULT_HIDDEN_MOVEMENTS: EmployeeMovement[] = ["dismissed", "transferred", "absent"];
+
+function sameMovements(left: readonly EmployeeMovement[], right: readonly EmployeeMovement[]): boolean {
+    return left.length === right.length && right.every((item) => left.includes(item));
+}
+
+interface StaffPay {
+    scheduleHours: number | null;
+    timesheetHours: number | null;
+    salary: number | null;
+    currentPay: number | null;
+    forecastPay: number | null;
+}
+
 interface BonusRow {
-    employee: ReturnType<typeof employeesOf>[number];
+    employee: StaffEmployee;
     roleId: string | null;
     role: string;
-    pay: ReturnType<typeof payFacts>;
-    fixed: number;
-    premiums: ReturnType<typeof indicatorPremiums>;
-    services: ReturnType<typeof servicePremiums>;
-    total: number;
+    pay: StaffPay;
+    fixed: number | null;
+    premiums: Record<string, number | null>;
+    services: Record<ServiceIndicatorId, number | null>;
+    total: number | null;
     brigade: string | null;
+}
+
+function blankPremiums(indicators: readonly CabinetIndicator[]): Record<string, number | null> {
+    return Object.fromEntries(indicators.map((indicator) => [indicator.id, null]));
+}
+
+function rowPremiums(indicators: readonly CabinetIndicator[], salePremium: number | undefined): Record<string, number | null> {
+    const premiums = blankPremiums(indicators);
+    const sales = indicators.find((indicator) => indicator.title === "Продажа товара");
+    if (sales && salePremium !== undefined) {
+        premiums[sales.id] = salePremium;
+    }
+    return premiums;
+}
+
+function blankServices(): Record<ServiceIndicatorId, number | null> {
+    return Object.fromEntries(SERVICE_INDICATORS.map((indicator) => [indicator.id, null])) as Record<ServiceIndicatorId, number | null>;
 }
 
 const TEXT_COLUMNS = new Set<BonusColumn>(["name", "role", "brigade"]);
@@ -62,7 +109,7 @@ const HEAD_TONE: Record<"name" | "role" | "base" | "fixed" | "current" | "foreca
     service: "bg-orange-100 text-orange-950 dark:bg-orange-950 dark:text-orange-50",
 };
 
-function headTone(column: BonusColumn): string | undefined {
+function headTone(column: BonusColumn, columns: CabinetColumns): string | undefined {
     if (column === "name") {
         return HEAD_TONE.name;
     }
@@ -84,7 +131,7 @@ function headTone(column: BonusColumn): string | undefined {
     if (column === "total") {
         return HEAD_TONE.total;
     }
-    if (PREMIUM_INDICATORS.some((indicator) => indicator.id === column)) {
+    if (columns.basketIds.has(column)) {
         return HEAD_TONE.basket;
     }
     if (SERVICE_INDICATORS.some((indicator) => indicator.id === column)) {
@@ -147,7 +194,6 @@ const AIM_ROLE_HEAD = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_tran
 const AIM_ROLE_HEAD_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
 const PIN_NAME_HEAD = "sticky left-0 z-30 border-l bg-card shadow-[1px_0_0_0_var(--card)]";
 const PIN_ROLE_HEAD = "sticky left-[15rem] z-30 bg-card shadow-[1px_0_0_0_var(--card),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const BASKET_LAST = PREMIUM_INDICATORS[PREMIUM_INDICATORS.length - 1].id;
 const SERVICE_LAST = SERVICE_INDICATORS[SERVICE_INDICATORS.length - 1].id;
 const WASH_BASE = "bg-[color-mix(in_oklab,var(--color-sky-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-sky-950)_62%,var(--background))]";
 const WASH_FIXED = "bg-[color-mix(in_oklab,var(--color-indigo-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-indigo-950)_62%,var(--background))]";
@@ -155,7 +201,7 @@ const WASH_TOTAL = "bg-[color-mix(in_oklab,var(--color-fuchsia-100)_58%,var(--ba
 const WASH_BASKET = "bg-[color-mix(in_oklab,var(--color-violet-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-violet-950)_62%,var(--background))]";
 const WASH_SERVICE = "bg-[color-mix(in_oklab,var(--color-orange-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-orange-950)_62%,var(--background))]";
 
-function endsGroup(column: BonusColumn): boolean {
+function endsGroup(column: BonusColumn, columns: CabinetColumns): boolean {
     return column === "name"
         || column === "role"
         || column === "brigade"
@@ -164,11 +210,11 @@ function endsGroup(column: BonusColumn): boolean {
         || column === "current"
         || column === "forecast"
         || column === "total"
-        || column === BASKET_LAST
+        || column === columns.basketLast
         || column === SERVICE_LAST;
 }
 
-function bodyWash(column: BonusColumn): string | undefined {
+function bodyWash(column: BonusColumn, columns: CabinetColumns): string | undefined {
     if (column === "schedule" || column === "timesheet" || column === "salary") {
         return WASH_BASE;
     }
@@ -178,7 +224,7 @@ function bodyWash(column: BonusColumn): string | undefined {
     if (column === "total") {
         return WASH_TOTAL;
     }
-    if (PREMIUM_INDICATORS.some((indicator) => indicator.id === column)) {
+    if (columns.basketIds.has(column)) {
         return WASH_BASKET;
     }
     if (SERVICE_INDICATORS.some((indicator) => indicator.id === column)) {
@@ -187,18 +233,18 @@ function bodyWash(column: BonusColumn): string | undefined {
     return undefined;
 }
 
-function timesheetIsShort(scheduleHours: number, timesheetHours: number): boolean {
-    return timesheetHours < scheduleHours;
+function timesheetIsShort(scheduleHours: number | null, timesheetHours: number | null): boolean {
+    return scheduleHours !== null && timesheetHours !== null && timesheetHours < scheduleHours;
 }
 
-function dataClass(column: BonusColumn, value?: number): string {
+function dataClass(column: BonusColumn, columns: CabinetColumns, value?: number): string {
     const hours = column === "schedule" || column === "timesheet";
     const text = column === "name" || column === "role" || column === "brigade";
     const heat = column === "current" || column === "forecast";
     return cn(
         CELL,
-        endsGroup(column) && EDGE,
-        !heat && (bodyWash(column) ?? "bg-background"),
+        endsGroup(column, columns) && EDGE,
+        !heat && (bodyWash(column, columns) ?? "bg-background"),
         column === "name" && cn(PIN_NAME, NAME_COL, "font-medium whitespace-normal"),
         column === "role" && cn(PIN_ROLE, ROLE_COL),
         hours && HOUR_COL,
@@ -212,7 +258,7 @@ type CellHover = { row: string; column: number };
 type AimPin = "name" | "role" | "name-head" | "role-head";
 const HEAD_ROW = "head";
 
-function columnIndex(column: BonusColumn, brigadeOn: boolean): number {
+function columnIndex(column: BonusColumn, brigadeOn: boolean, columns: CabinetColumns): number {
     const order: BonusColumn[] = [
         "name",
         "role",
@@ -224,7 +270,7 @@ function columnIndex(column: BonusColumn, brigadeOn: boolean): number {
         "current",
         "forecast",
         "total",
-        ...PREMIUM_INDICATORS.map((indicator) => indicator.id),
+        ...columns.baskets.map((indicator) => indicator.id),
         ...SERVICE_INDICATORS.map((indicator) => indicator.id),
     ];
     return order.indexOf(column);
@@ -274,38 +320,49 @@ export function BranchBonuses() {
     const router = useRouter();
     const { branchId, period } = useBranchLocation();
     const store = useBranchStore();
+    const directory = useBranchDirectory();
+    const settings = useMotivationRoles();
     const [query, setQuery] = useState("");
     const [roles, setRoles] = useState<string[]>([]);
     const [brigades, setBrigades] = useState<string[]>([]);
-    const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>([]);
+    const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>([...DEFAULT_HIDDEN_MOVEMENTS]);
     const [sort, setSort] = useState<BonusSort>({ key: "role", direction: "desc" });
     const [hover, setHover] = useState<CellHover | null>(null);
     const tableFrame = useRef<HTMLDivElement>(null);
-    const month = branchMonth(branchId, period);
-    const slice = store.slice(branchId, period);
+    const slice = store.slice(branchId, period, directory.employees, settings);
     const brigadeOn = slice.savedBrigades.mode !== "off";
-    const rows = employeesOf(branchId).flatMap((employee) => {
-        const roleId = slice.savedRoles[employee.id] ?? null;
-        if (!inCalculation(employee, roleId)) {
+    const columns = cabinetColumns(directory.indicators);
+    const services = blankServices();
+    const rows = directory.employees.flatMap((employee) => {
+        const roleId = slice.savedRoles[roleKey(employee)] ?? null;
+        if (roleId === null) {
             return [];
         }
-        const premiums = indicatorPremiums(employee);
-        const total = totalPremium(premiums);
+        const timesheetHours = employee.timesheetHours;
         return [{
             employee,
             roleId,
-            role: roleCaption(employee, roleId),
-            services: servicePremiums(employee),
-            pay: payFacts(employee, period, total),
-            fixed: fixedPremium(employee),
-            premiums,
-            total,
+            role: roleCaption(employee, roleId, settings),
+            services,
+            pay: {
+                scheduleHours: employee.scheduleHours,
+                timesheetHours,
+                salary: salaryFromTimesheet(employee.hourly, timesheetHours),
+                currentPay: null,
+                forecastPay: null,
+            },
+            fixed: fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, timesheetHours),
+            premiums: rowPremiums(columns.baskets, directory.salePremiums[roleKey(employee)]),
+            total: null,
             brigade: brigadeName(employee.id, slice.savedBrigades, true),
         } satisfies BonusRow];
     });
     const roleOptions = uniqueSorted(rows.map((row) => row.role));
     const brigadeOptions = uniqueSorted(rows.flatMap((row) => row.brigade ? [row.brigade] : []));
-    const activeSort = sort.key === "brigade" && !brigadeOn ? { key: "role" as const, direction: "desc" as const } : sort;
+    const sortable = new Set(sortColumns(brigadeOn, columns).map((item) => item.key));
+    const activeSort = sort.key === "brigade" && !brigadeOn
+        ? { key: "role" as const, direction: "desc" as const }
+        : sortable.has(sort.key) ? sort : { key: "role" as const, direction: "desc" as const };
     const needle = query.trim().toLowerCase();
     const filtered = rows.filter((row) => {
         if (roles.length > 0 && !roles.includes(row.role)) {
@@ -320,22 +377,22 @@ export function BranchBonuses() {
         if (!needle) {
             return true;
         }
-        const movement = row.employee.movement ? movementLabel(row.employee.movement) : "";
-        const movementAlias = row.employee.movement === "transferred" ? "переведен" : "";
+        const movement = row.employee.movement ? movementLabel(row.employee.movement, row.employee.movementOn) : "";
+        const movementAlias = row.employee.movement === "transferred" ? "переведен" : row.employee.movement === "title" ? "смена должности" : "";
         const haystack = `${row.employee.name} ${row.employee.title} ${row.role} ${row.brigade ?? ""} ${movement} ${movementAlias}`.toLowerCase();
         return haystack.includes(needle);
     });
     const visible = filtered.slice().sort((left, right) => compareRows(left, right, activeSort));
-    const currentPays = visible.map((row) => row.pay.currentPay);
-    const forecastPays = visible.map((row) => row.pay.forecastPay);
-    const filtersActive = needle !== "" || roles.length > 0 || hiddenMovements.length > 0 || (brigadeOn && brigades.length > 0);
-    const columnCount = 9 + PREMIUM_INDICATORS.length + SERVICE_INDICATORS.length + (brigadeOn ? 1 : 0);
+    const currentPays = visible.flatMap((row) => row.pay.currentPay === null ? [] : [row.pay.currentPay]);
+    const forecastPays = visible.flatMap((row) => row.pay.forecastPay === null ? [] : [row.pay.forecastPay]);
+    const movementFilterChanged = !sameMovements(hiddenMovements, DEFAULT_HIDDEN_MOVEMENTS);
+    const filtersActive = needle !== "" || roles.length > 0 || movementFilterChanged || (brigadeOn && brigades.length > 0);
+    const emptyText = rows.length === 0 ? "В этом филиале нет сотрудников с ролью." : "Никого не найдено по этим фильтрам.";
+    const columnCount = 9 + columns.baskets.length + SERVICE_INDICATORS.length + (brigadeOn ? 1 : 0);
 
-    const placeholder = !month.inMotivation
-        ? "Филиал в этом месяце не участвует в мотивации."
-        : !month.calculated
-            ? "Расчёт за этот месяц ещё не готов."
-            : null;
+    const pending = directory.loading && directory.employees.length === 0;
+    const blocked = directory.error
+        ?? (directory.branches.length === 0 && !directory.loading ? "За этот месяц штатное расписание не загружено." : null);
 
     return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 [@media(max-height:500px)]:gap-2!">
@@ -384,32 +441,41 @@ export function BranchBonuses() {
                                 setQuery("");
                                 setRoles([]);
                                 setBrigades([]);
-                                setHiddenMovements([]);
+                                setHiddenMovements([...DEFAULT_HIDDEN_MOVEMENTS]);
                             }}
                         >
                             <RotateCcw />
                         </Button>
                         <div className="sm:hidden">
-                            <SortMenu sort={activeSort} brigadeOn={brigadeOn} onSort={setSort} />
+                            <SortMenu sort={activeSort} brigadeOn={brigadeOn} columns={columns} onSort={setSort} />
                         </div>
                     </div>
                 </div>
             </div>
-            {placeholder ? <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{placeholder}</p> : null}
-            {placeholder ? null : <>
+            {pending ? (
+                <div className="rounded-md border" aria-busy="true">
+                    <Table>
+                        <TableBody>
+                            <TableSkeleton columns={8} />
+                        </TableBody>
+                    </Table>
+                </div>
+            ) : null}
+            {blocked ? <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{blocked}</p> : null}
+            {pending || blocked ? null : <>
             <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border sm:hidden">
                 {visible.length === 0 ? (
-                    <p className="px-4 py-10 text-center text-sm text-muted-foreground">Никого не найдено по этим фильтрам.</p>
+                    <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyText}</p>
                 ) : visible.map((row) => (
                     <BonusListItem
-                        key={row.employee.id}
+                        key={roleKey(row.employee)}
                         row={row}
                         brigadeOn={brigadeOn}
                         branchId={branchId}
                         period={period}
-                        href={withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period)}
-                        currentHeat={payHeat(payRatio(currentPays, row.pay.currentPay))}
-                        forecastHeat={payHeat(payRatio(forecastPays, row.pay.forecastPay))}
+                        href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
+                        baskets={columns.baskets}
+                        currentHeat={row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay))}
                     />
                 ))}
             </div>
@@ -437,21 +503,21 @@ export function BranchBonuses() {
             <Table containerClassName="min-h-0 max-w-full flex-1" className="w-max cursor-default border-separate border-spacing-0 text-xs">
                 <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                        <SortHead label="Сотрудник" column="name" sort={activeSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Роль" column="role" sort={activeSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={activeSort} hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} /> : null}
-                        <SortHead label="Часов по графику" column="schedule" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Часов по табелю" column="timesheet" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Оклад" column="salary" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Фиксированная премия" column="fixed" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Текущая ЗП" column="current" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Прогноз ЗП" column="forecast" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Общая премия" column="total" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
-                        {PREMIUM_INDICATORS.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Сотрудник" column="name" sort={activeSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Роль" column="role" sort={activeSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={activeSort} hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} /> : null}
+                        <SortHead label="Часов по графику" column="schedule" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Часов по табелю" column="timesheet" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Оклад" column="salary" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Фиксированная премия" column="fixed" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Текущая ЗП" column="current" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Прогноз ЗП" column="forecast" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Общая премия" column="total" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
+                        {columns.baskets.map((indicator) => (
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
                         ))}
                         {SERVICE_INDICATORS.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} onSort={setSort} onHover={setHover} />
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} onSort={setSort} onHover={setHover} />
                         ))}
                     </TableRow>
                 </TableHeader>
@@ -459,41 +525,42 @@ export function BranchBonuses() {
                     {visible.length === 0 ? (
                         <TableRow className="hover:bg-transparent">
                             <TableCell colSpan={columnCount} className={cn(CELL, "border-l border-r py-10 text-center whitespace-normal text-muted-foreground")}>
-                                Никого не найдено по этим фильтрам.
+                                {emptyText}
                             </TableCell>
                         </TableRow>
                     ) : visible.map((row) => {
-                        const href = withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period);
-                        const currentHeat = payHeat(payRatio(currentPays, row.pay.currentPay));
-                        const forecastHeat = payHeat(payRatio(forecastPays, row.pay.forecastPay));
+                        const href = segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom);
+                        const currentHeat = row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay));
+                        const forecastHeat = row.pay.forecastPay === null ? undefined : payHeat(payRatio(forecastPays, row.pay.forecastPay));
                         const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
-                        const rowId = row.employee.id;
+                        const rowId = roleKey(row.employee);
                         const movement = row.employee.movement;
-                        const valued = (column: BonusColumn, value?: number) => cn(dataClass(column, value), movementValueClass(movement));
+                        const valued = (column: BonusColumn, value?: number | null) => cn(dataClass(column, columns, value ?? undefined), movementValueClass(movement));
                         return (
                             <TableRow key={rowId} className="hover:bg-transparent">
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn)} pin="name" className={cn(dataClass("name"), movementNameClass(movement))} onOpen={() => router.push(href)} onHover={setHover}>
-                                    <EmployeeNameLine name={row.employee.name} movement={movement} markAtEnd />
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn, columns)} pin="name" className={cn(dataClass("name", columns), movementNameClass(movement))} onOpen={() => router.push(href)} onHover={setHover}>
+                                    <EmployeeNameLine name={row.employee.name} movement={movement} movementOn={row.employee.movementOn} markAtEnd />
+                                    <StaffSegmentNote partial={row.employee.partial} from={row.employee.activeFrom} until={row.employee.activeUntil} />
                                 </AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn)} pin="role" className={cn(dataClass("role"), movementNameClass(movement))} onHover={setHover}>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn, columns)} pin="role" className={cn(dataClass("role", columns), movementNameClass(movement))} onHover={setHover}>
                                     <RoleLabel role={row.role} plain={movement !== undefined} />
                                 </AimedCell>
-                                {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn)} className={valued("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("schedule", brigadeOn)} className={valued("schedule", row.pay.scheduleHours)} onHover={setHover}>{row.pay.scheduleHours}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("timesheet", brigadeOn)} className={cn(valued("timesheet", row.pay.timesheetHours), timesheetShort && SHORTFALL)} onHover={setHover}>{row.pay.timesheetHours}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("salary", brigadeOn)} className={valued("salary", row.pay.salary)} onHover={setHover}>{formatAmount(row.pay.salary)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("fixed", brigadeOn)} className={valued("fixed", row.fixed)} onHover={setHover}>{formatAmount(row.fixed)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("current", brigadeOn)} className={valued("current", row.pay.currentPay)} style={currentHeat} onHover={setHover}>{formatAmount(row.pay.currentPay)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("forecast", brigadeOn)} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat} onHover={setHover}>{formatAmount(row.pay.forecastPay)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("total", brigadeOn)} className={valued("total", row.total)} onHover={setHover}>{formatAmount(row.total)}</AimedCell>
-                                {PREMIUM_INDICATORS.map((indicator) => (
+                                {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn, columns)} className={valued("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("schedule", brigadeOn, columns)} className={valued("schedule", row.pay.scheduleHours ?? undefined)} onHover={setHover}>{formatHours(row.pay.scheduleHours)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("timesheet", brigadeOn, columns)} className={cn(valued("timesheet", row.pay.timesheetHours ?? undefined), timesheetShort && SHORTFALL)} onHover={setHover}>{formatHours(row.pay.timesheetHours)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("salary", brigadeOn, columns)} className={valued("salary", row.pay.salary)} onHover={setHover}>{formatAmount(row.pay.salary)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("fixed", brigadeOn, columns)} className={valued("fixed", row.fixed)} onHover={setHover}>{formatAmount(row.fixed)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("current", brigadeOn, columns)} className={valued("current", row.pay.currentPay)} style={currentHeat} onHover={setHover}>{formatAmount(row.pay.currentPay)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("forecast", brigadeOn, columns)} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat} onHover={setHover}>{formatAmount(row.pay.forecastPay)}</AimedCell>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("total", brigadeOn, columns)} className={valued("total", row.total)} onHover={setHover}>{formatAmount(row.total)}</AimedCell>
+                                {columns.baskets.map((indicator) => (
                                     <AimedCell
                                         key={indicator.id}
                                         hover={hover}
                                         row={rowId}
-                                        column={columnIndex(indicator.id, brigadeOn)}
+                                        column={columnIndex(indicator.id, brigadeOn, columns)}
                                         className={valued(indicator.id, row.premiums[indicator.id])}
-                                        onOpen={() => router.push(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id))}
+                                        onOpen={() => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom))}
                                         onHover={setHover}
                                     >
                                         {formatAmount(row.premiums[indicator.id])}
@@ -504,9 +571,9 @@ export function BranchBonuses() {
                                         key={indicator.id}
                                         hover={hover}
                                         row={rowId}
-                                        column={columnIndex(indicator.id, brigadeOn)}
+                                        column={columnIndex(indicator.id, brigadeOn, columns)}
                                         className={valued(indicator.id, row.services[indicator.id])}
-                                        onOpen={() => router.push(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id))}
+                                        onOpen={() => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom))}
                                         onHover={setHover}
                                     >
                                         {formatAmount(row.services[indicator.id])}
@@ -523,7 +590,10 @@ export function BranchBonuses() {
     );
 }
 
-function formatAmount(value: number): string {
+function formatAmount(value: number | null): string {
+    if (value === null) {
+        return "—";
+    }
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value);
 }
 
@@ -539,7 +609,7 @@ function nextSort(current: BonusSort, column: BonusColumn): BonusSort {
     return { key: column, direction: TEXT_COLUMNS.has(column) ? "asc" : "desc" };
 }
 
-function sortColumns(brigadeOn: boolean): { key: BonusColumn; label: string }[] {
+function sortColumns(brigadeOn: boolean, columns: CabinetColumns): { key: BonusColumn; label: string }[] {
     return [
         { key: "name", label: "Сотрудник" },
         { key: "role", label: "Роль" },
@@ -551,7 +621,7 @@ function sortColumns(brigadeOn: boolean): { key: BonusColumn; label: string }[] 
         { key: "current", label: "Текущая ЗП" },
         { key: "forecast", label: "Прогноз ЗП" },
         { key: "total", label: "Общая премия" },
-        ...PREMIUM_INDICATORS.map((indicator) => ({ key: indicator.id, label: indicator.title })),
+        ...columns.baskets.map((indicator) => ({ key: indicator.id, label: indicator.title })),
         ...SERVICE_INDICATORS.map((indicator) => ({ key: indicator.id, label: indicator.title })),
     ];
 }
@@ -562,16 +632,16 @@ function BonusListItem({
     branchId,
     period,
     href,
+    baskets,
     currentHeat,
-    forecastHeat,
 }: {
     row: BonusRow;
     brigadeOn: boolean;
     branchId: string;
     period: string;
     href: string;
-    currentHeat: { backgroundColor: string };
-    forecastHeat: { backgroundColor: string };
+    baskets: readonly CabinetIndicator[];
+    currentHeat?: { backgroundColor: string };
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -583,15 +653,15 @@ function BonusListItem({
         { label: "Фиксированная премия", amount: row.fixed },
         { label: "Текущая ЗП", amount: row.pay.currentPay, heat: currentHeat },
         { label: "Общая премия", amount: row.total },
-        ...PREMIUM_INDICATORS.map((indicator) => ({
+        ...baskets.map((indicator) => ({
             label: indicator.title,
             amount: row.premiums[indicator.id],
-            open: withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id),
+            open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom),
         })),
         ...SERVICE_INDICATORS.map((indicator) => ({
             label: indicator.title,
             amount: row.services[indicator.id],
-            open: withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id),
+            open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom),
         })),
     ];
     return (
@@ -615,7 +685,8 @@ function BonusListItem({
                                 }
                             }}
                         >
-                            <EmployeeNameLine name={row.employee.name} movement={movement} markAtEnd />
+                            <EmployeeNameLine name={row.employee.name} movement={movement} movementOn={row.employee.movementOn} markAtEnd />
+                            <StaffSegmentNote partial={row.employee.partial} from={row.employee.activeFrom} until={row.employee.activeUntil} />
                         </span>
                         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm">
                             <RoleLabel role={row.role} plain={movement !== undefined} />
@@ -624,14 +695,14 @@ function BonusListItem({
                     {brigadeOn && row.brigade ? <span className={cn("mt-0.5 block text-sm", valueTone ?? "text-muted-foreground")}>{row.brigade}</span> : null}
                     <span className="mt-0.5 block text-sm text-muted-foreground">
                         график{" "}
-                        <span className={cn("tabular-nums", valueTone)}>{row.pay.scheduleHours}</span>
+                        <span className={cn("tabular-nums", valueTone)}>{formatHours(row.pay.scheduleHours)}</span>
                         {" · табель "}
-                        <span className={cn("tabular-nums", timesheetShort && SHORTFALL, valueTone)}>{row.pay.timesheetHours}</span>
+                        <span className={cn("tabular-nums", timesheetShort && SHORTFALL, valueTone)}>{formatHours(row.pay.timesheetHours)}</span>
                     </span>
                 </span>
-                <span className="shrink-0 rounded-md px-1.5 py-0.5 text-right" style={forecastHeat}>
-                    <span className="block text-xs text-muted-foreground">Прогноз</span>
-                    <span className={cn("block text-sm font-medium tabular-nums", valueTone)}>{formatAmount(row.pay.forecastPay)}</span>
+                <span className="shrink-0 rounded-md px-1.5 py-0.5 text-right">
+                    <span className="block text-xs text-muted-foreground">Фикс. премия</span>
+                    <span className={cn("block text-sm font-medium tabular-nums", valueTone)}>{formatAmount(row.fixed)}</span>
                 </span>
                 <ChevronDown className={cn("mt-1 size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
             </CollapsibleTrigger>
@@ -686,7 +757,7 @@ function MobileFilters({
     hiddenMovements: readonly EmployeeMovement[];
     onHiddenMovements: (hidden: EmployeeMovement[]) => void;
 }) {
-    const active = roles.length > 0 || hiddenMovements.length > 0 || (brigadeOn && brigades.length > 0);
+    const active = roles.length > 0 || !sameMovements(hiddenMovements, DEFAULT_HIDDEN_MOVEMENTS) || (brigadeOn && brigades.length > 0);
     return (
         <Popover>
             <PopoverTrigger
@@ -730,6 +801,10 @@ function MovementFilterOptions({
                 <Checkbox checked={hidden.includes("transferred")} onCheckedChange={() => toggle("transferred")} />
                 <span>Скрыть переведённых</span>
             </Label>
+            <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                <Checkbox checked={hidden.includes("absent")} onCheckedChange={() => toggle("absent")} />
+                <span>Скрыть отсутствующих</span>
+            </Label>
         </div>
     );
 }
@@ -758,9 +833,9 @@ function FilterOptions({
     );
 }
 
-function SortMenu({ sort, brigadeOn, onSort }: { sort: BonusSort; brigadeOn: boolean; onSort: (sort: BonusSort) => void }) {
-    const columns = sortColumns(brigadeOn);
-    const current = columns.find((column) => column.key === sort.key) ?? columns[0];
+function SortMenu({ sort, brigadeOn, columns, onSort }: { sort: BonusSort; brigadeOn: boolean; columns: CabinetColumns; onSort: (sort: BonusSort) => void }) {
+    const options = sortColumns(brigadeOn, columns);
+    const current = options.find((column) => column.key === sort.key) ?? options[0];
     const mark = sort.direction === "asc" ? "↑" : "↓";
     return (
         <Popover>
@@ -772,7 +847,7 @@ function SortMenu({ sort, brigadeOn, onSort }: { sort: BonusSort; brigadeOn: boo
                 }
             />
             <PopoverContent align="end" className="max-h-80 w-64 gap-0 overflow-y-auto p-1">
-                {columns.map((column) => {
+                {options.map((column) => {
                     const active = sort.key === column.key;
                     return (
                         <button
@@ -881,6 +956,7 @@ function SortHead({
     widthClass,
     hover,
     brigadeOn,
+    columns,
     onHover,
 }: {
     label: string;
@@ -892,19 +968,20 @@ function SortHead({
     widthClass?: string;
     hover: CellHover | null;
     brigadeOn: boolean;
+    columns: CabinetColumns;
     onHover: (hover: CellHover) => void;
 }) {
     const active = sort.key === column;
     const next = nextSort(sort, column);
     const mark = sort.direction === "asc" ? "↑" : "↓";
     const width = fit === "hour" ? HOUR_COL : fit === "money" ? MONEY_COL : widthClass;
-    const index = columnIndex(column, brigadeOn);
+    const index = columnIndex(column, brigadeOn, columns);
     const headPin = column === "name" ? "name-head" : column === "role" ? "role-head" : undefined;
     return (
         <TableHead
             data-aim={`${HEAD_ROW}:${index}`}
             aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
-            className={cn(CELL, endsGroup(column) && EDGE, "h-auto border-t text-center whitespace-normal", width, pin, headTone(column), aimClass(hover, HEAD_ROW, index, headPin))}
+            className={cn(CELL, endsGroup(column, columns) && EDGE, "h-auto border-t text-center whitespace-normal", width, pin, headTone(column, columns), aimClass(hover, HEAD_ROW, index, headPin))}
             onMouseEnter={() => onHover({ row: HEAD_ROW, column: index })}
         >
             <button
@@ -949,10 +1026,21 @@ function directedCompare(left: BonusRow, right: BonusRow, column: BonusColumn, d
         const rightText = column === "role" ? right.role : right.brigade ?? "";
         return leftText.localeCompare(rightText, "ru") * factor;
     }
-    return (numericColumn(left, column) - numericColumn(right, column)) * factor;
+    const leftValue = numericColumn(left, column);
+    const rightValue = numericColumn(right, column);
+    if (leftValue === null && rightValue === null) {
+        return 0;
+    }
+    if (leftValue === null) {
+        return 1;
+    }
+    if (rightValue === null) {
+        return -1;
+    }
+    return (leftValue - rightValue) * factor;
 }
 
-function numericColumn(row: BonusRow, column: BonusColumn): number {
+function numericColumn(row: BonusRow, column: BonusColumn): number | null {
     if (column === "schedule") {
         return row.pay.scheduleHours;
     }
@@ -977,7 +1065,7 @@ function numericColumn(row: BonusRow, column: BonusColumn): number {
     if (SERVICE_INDICATORS.some((indicator) => indicator.id === column)) {
         return row.services[column as ServiceIndicatorId];
     }
-    return row.premiums[column as PremiumIndicatorId];
+    return row.premiums[column] ?? null;
 }
 
 function uniqueSorted(values: string[]): string[] {

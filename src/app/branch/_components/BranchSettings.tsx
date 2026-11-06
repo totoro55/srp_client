@@ -13,30 +13,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HelpDrawer } from "@/components/help-drawer";
-import { ButtonSpinner } from "@/components/loading-state";
+import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
-import { notifySuccess } from "@/lib/notify";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
+import { useBranchDirectory } from "./branch-directory";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
+import { EmployeeNameLine, StaffSegmentNote } from "./EmployeeMovementMark";
 import { KtuMark } from "./ktu-mark";
 import {
-    branchMonth,
-    employeesOf,
-    fixedPremium,
     formatMoney,
     inCalculation,
     roleCaption,
     type BrigadeMode,
-    type MockEmployee,
 } from "./mock";
+import { latestStaffSegments, roleKey, type StaffEmployee } from "./staff";
 
 const brigadeLaneClass = "flex w-full shrink-0 flex-col lg:h-full lg:min-h-0 lg:max-[1919px]:w-[calc((100%-2.25rem-1px)/4)] min-[1920px]:w-[calc((100%-3rem-1px)/5)]";
 const brigadeBodyClass = "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-foreground/25";
 
 export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
-    const month = branchMonth(branchId, period);
 
     return (
         <Tabs defaultValue="staff" className="min-w-0 gap-4">
@@ -45,10 +43,10 @@ export function BranchSettings() {
                 <TabsTrigger value="brigades">Бригады</TabsTrigger>
             </TabsList>
             <TabsContent value="staff">
-                <Staff branchId={branchId} period={period} closed={month.closed} inMotivation={month.inMotivation} />
+                <Staff branchId={branchId} period={period} closed={false} inMotivation />
             </TabsContent>
             <TabsContent value="brigades">
-                <Brigades branchId={branchId} period={period} closed={month.closed} inMotivation={month.inMotivation} />
+                <Brigades branchId={branchId} period={period} closed={false} inMotivation />
             </TabsContent>
         </Tabs>
     );
@@ -65,19 +63,32 @@ function Staff({
     closed: boolean;
     inMotivation: boolean;
 }) {
+    const directory = useBranchDirectory();
     const store = useBranchStore();
-    const slice = store.slice(branchId, period);
+    const settings = useMotivationRoles();
+    const employees = directory.employees;
+    const slice = store.slice(branchId, period, employees, settings);
     const [saving, setSaving] = useState(false);
     const [resetOpen, setResetOpen] = useState(false);
-    const employees = employeesOf(branchId);
     const hasManual = employees.some((employee) => slice.roleManual[employee.id]);
 
     async function save() {
         setSaving(true);
         try {
-            await pause();
+            const response = await fetch("/api/branch/roles", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ branchId, period, overrides: store.roleDraft(branchId) }),
+            });
+            const json = await response.json() as { success?: boolean; error?: { message?: string } };
+            if (!response.ok || !json.success) {
+                notifyError(json.error?.message || "Не удалось сохранить роли");
+                return;
+            }
             store.saveRoles(branchId);
             notifySuccess("Роли сохранены");
+        } catch {
+            notifyError("Не удалось сохранить роли");
         } finally {
             setSaving(false);
         }
@@ -85,7 +96,7 @@ function Staff({
 
     return (
         <div className="flex flex-col gap-3">
-            {!inMotivation ? <Notice>Филиал в этом месяце не участвует в мотивации.</Notice> : null}
+            {directory.error ? <Notice>{directory.error}</Notice> : null}
             <ConfirmDialog
                 open={resetOpen}
                 title="Сбросить роли"
@@ -123,10 +134,8 @@ function Staff({
                     <TableRow>
                         <TableHead>Сотрудник</TableHead>
                         <TableHead>КТУ</TableHead>
-                        <TableHead>Уровень</TableHead>
                         <TableHead className="text-right">Уровень оплаты труда</TableHead>
                         <TableHead className="text-right">Часовая ставка</TableHead>
-                        <TableHead className="text-right">Фиксированная премия</TableHead>
                         <TableHead>Роль</TableHead>
                         <TableHead className="w-10 px-2">
                             <span className="sr-only">Назначение</span>
@@ -135,29 +144,43 @@ function Staff({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {employees.map((employee) => {
-                        const roleId = slice.draftRoles[employee.id] ?? null;
+                    {directory.loading ? (
+                        <TableSkeleton columns={7} />
+                    ) : employees.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                                {directory.branches.length === 0
+                                    ? "За этот месяц штатное расписание не загружено."
+                                    : "В штатном расписании этого филиала никого нет."}
+                            </TableCell>
+                        </TableRow>
+                    ) : employees.map((employee) => {
+                        const roleId = slice.draftRoles[roleKey(employee)] ?? null;
                         const manual = slice.roleManual[employee.id] === true;
                         const participating = inCalculation(employee, roleId);
                         return (
-                            <TableRow key={employee.id}>
+                            <TableRow key={roleKey(employee)}>
                                 <TableCell>
-                                    <div className="font-medium">{employee.name}</div>
-                                    <div className="text-muted-foreground">{employee.title}</div>
+                                    <div className="font-medium">
+                                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} />
+                                        <StaffSegmentNote partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                        {employee.title || "Должность не указана"}
+                                        {employee.probation ? " · испытательный срок" : ""}
+                                    </div>
                                 </TableCell>
                                 <TableCell>
                                     <KtuMark ktu={employee.ktu} />
                                 </TableCell>
-                                <TableCell className="tabular-nums">{employee.level}</TableCell>
-                                <TableCell className="text-right tabular-nums">{formatMoney(employee.payLevel)}</TableCell>
+                                <TableCell className="text-right tabular-nums">{employee.payLevel === null ? "—" : formatMoney(employee.payLevel)}</TableCell>
                                 <TableCell className="text-right tabular-nums">{formatMoney(employee.hourly)}</TableCell>
-                                <TableCell className="text-right tabular-nums">{formatMoney(fixedPremium(employee))}</TableCell>
                                 <TableCell>
                                     <RoleSelect
                                         employee={employee}
                                         roleId={roleId}
                                         manual={manual}
-                                        disabled={closed}
+                                        disabled={closed || saving}
                                         onChange={(next) => {
                                             if (next === "auto") {
                                                 store.clearRole(branchId, employee.id);
@@ -187,13 +210,14 @@ function RoleSelect({
     disabled,
     onChange,
 }: {
-    employee: MockEmployee;
+    employee: StaffEmployee;
     roleId: string | null;
     manual: boolean;
     disabled: boolean;
     onChange: (roleId: string | null | "auto") => void;
 }) {
-    const { roles } = useMotivationRoles();
+    const settings = useMotivationRoles();
+    const { roles } = settings;
     const value = manual ? (roleId ?? "none") : "auto";
     return (
         <Select
@@ -212,7 +236,7 @@ function RoleSelect({
         >
             <SelectTrigger className="w-48" aria-label={`Роль ${employee.name}`}>
                 <SelectValue>
-                    {() => roleCaption(employee, roleId)}
+                    {() => roleCaption(employee, roleId, settings)}
                 </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -289,8 +313,11 @@ function Brigades({
     closed: boolean;
     inMotivation: boolean;
 }) {
+    const directory = useBranchDirectory();
     const store = useBranchStore();
-    const slice = store.slice(branchId, period);
+    const settings = useMotivationRoles();
+    const employees = latestStaffSegments(directory.employees);
+    const slice = store.slice(branchId, period, directory.employees, settings);
     const [saving, setSaving] = useState(false);
     const [adding, setAdding] = useState(false);
     const [draftName, setDraftName] = useState("");
@@ -298,11 +325,10 @@ function Brigades({
     const [overId, setOverId] = useState<string | null>(null);
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const setup = slice.draftBrigades;
-    const employees = employeesOf(branchId);
-    const order = compareEmployees(slice.draftRoles);
-    const sortEmployees = (list: MockEmployee[]) => [...list].sort(order);
-    const eligible = sortEmployees(employees.filter((employee) => inCalculation(employee, slice.draftRoles[employee.id] ?? null)));
-    const outside = sortEmployees(employees.filter((employee) => !inCalculation(employee, slice.draftRoles[employee.id] ?? null)));
+    const order = compareEmployees(slice.draftRoles, settings);
+    const sortEmployees = (list: StaffEmployee[]) => [...list].sort(order);
+    const eligible = sortEmployees(employees.filter((employee) => inCalculation(employee, slice.draftRoles[roleKey(employee)] ?? null)));
+    const outside = sortEmployees(employees.filter((employee) => !inCalculation(employee, slice.draftRoles[roleKey(employee)] ?? null)));
 
     async function save() {
         setSaving(true);
@@ -453,7 +479,7 @@ function Brigades({
                                             <DraggablePerson
                                                 key={employee.id}
                                                 employee={employee}
-                                                roleId={slice.draftRoles[employee.id] ?? null}
+                                                roleId={slice.draftRoles[roleKey(employee)] ?? null}
                                                 disabled={closed}
                                                 dragging={dragId === employee.id}
                                                 onDragStart={setDragId}
@@ -482,7 +508,7 @@ function Brigades({
                                                     <li key={employee.id} className="flex items-center gap-1 rounded-md py-0.5">
                                                         <UserMinus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                                                         <span className="min-w-0 flex-1">
-                                                            <EmployeeMark employee={employee} roleId={slice.draftRoles[employee.id] ?? null} />
+                                                            <EmployeeMark employee={employee} roleId={slice.draftRoles[roleKey(employee)] ?? null} />
                                                         </span>
                                                     </li>
                                                 ))}
@@ -525,7 +551,7 @@ function Brigades({
                                                     <DraggablePerson
                                                         key={employee.id}
                                                         employee={employee}
-                                                        roleId={slice.draftRoles[employee.id] ?? null}
+                                                        roleId={slice.draftRoles[roleKey(employee)] ?? null}
                                                         disabled={closed}
                                                         dragging={dragId === employee.id}
                                                         onDragStart={setDragId}
@@ -631,9 +657,9 @@ function ModeButton({
     );
 }
 
-function compareEmployees(roles: Record<string, string | null>) {
-    return (left: MockEmployee, right: MockEmployee) => {
-        const byRole = roleCaption(left, roles[left.id] ?? null).localeCompare(roleCaption(right, roles[right.id] ?? null), "ru");
+function compareEmployees(roles: Record<string, string | null>, settings: ReturnType<typeof useMotivationRoles>) {
+    return (left: StaffEmployee, right: StaffEmployee) => {
+        const byRole = roleCaption(left, roles[roleKey(left)] ?? null, settings).localeCompare(roleCaption(right, roles[roleKey(right)] ?? null, settings), "ru");
         if (byRole !== 0) {
             return byRole;
         }
@@ -650,7 +676,7 @@ function DraggablePerson({
     onDragEnd,
     actions,
 }: {
-    employee: MockEmployee;
+    employee: StaffEmployee;
     roleId: string | null;
     disabled: boolean;
     dragging: boolean;
@@ -703,11 +729,12 @@ function AddMemberRow({
 }: {
     disabled: boolean;
     groupName: string;
-    candidates: MockEmployee[];
+    candidates: StaffEmployee[];
     roles: Record<string, string | null>;
     placeOf: (employeeId: string) => string;
     onAdd: (employeeId: string) => void;
 }) {
+    const settings = useMotivationRoles();
     const empty = candidates.length === 0;
     return (
         <DropdownMenu>
@@ -723,7 +750,7 @@ function AddMemberRow({
             <DropdownMenuContent align="start">
                 {candidates.map((employee) => (
                     <DropdownMenuItem key={employee.id} onClick={() => onAdd(employee.id)}>
-                        {`${employee.name}, ${roleCaption(employee, roles[employee.id] ?? null)} · ${placeOf(employee.id)}`}
+                        {`${employee.name}, ${roleCaption(employee, roles[roleKey(employee)] ?? null, settings)} · ${placeOf(employee.id)}`}
                     </DropdownMenuItem>
                 ))}
             </DropdownMenuContent>
@@ -799,7 +826,7 @@ function People({
     roles,
     empty,
 }: {
-    employees: MockEmployee[];
+    employees: StaffEmployee[];
     roles: Record<string, string | null>;
     empty: string;
 }) {
@@ -810,14 +837,15 @@ function People({
         <ul className="flex flex-col gap-1 text-sm">
             {employees.map((employee) => (
                 <li key={employee.id}>
-                    <EmployeeMark employee={employee} roleId={roles[employee.id] ?? null} />
+                    <EmployeeMark employee={employee} roleId={roles[roleKey(employee)] ?? null} />
                 </li>
             ))}
         </ul>
     );
 }
 
-function EmployeeMark({ employee, roleId }: { employee: MockEmployee; roleId: string | null }) {
+function EmployeeMark({ employee, roleId }: { employee: StaffEmployee; roleId: string | null }) {
+    const settings = useMotivationRoles();
     const ktu = employee.ktu === "plus" ? "КТУ+" : "КТУ−";
     return (
         <span className="inline-flex items-baseline gap-2">
@@ -826,7 +854,7 @@ function EmployeeMark({ employee, roleId }: { employee: MockEmployee; roleId: st
                 <TooltipTrigger
                     render={<span tabIndex={0} className="cursor-help text-muted-foreground" />}
                 >
-                    {roleCaption(employee, roleId)}
+                    {roleCaption(employee, roleId, settings)}
                 </TooltipTrigger>
                 <TooltipContent>{`${employee.title} · ${ktu}`}</TooltipContent>
             </Tooltip>

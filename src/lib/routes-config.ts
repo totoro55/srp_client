@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, List, MapPinned, Settings, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, Settings2, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags, TrendingUp, IdCard } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -63,8 +63,70 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         ],
     },
     {
-        id: "rrs",
+        id: "motivation",
         label: "Настройки мотивации",
+        items: [
+            {
+                name: "Штатное расписание",
+                href: "/admin/staffing",
+                icon: IdCard,
+                title: "Штатное расписание",
+                description: "Филиал сотрудника по датам и роль на филиале",
+                permission: "staffing:read",
+            },
+            {
+                name: "Настройка корзин",
+                href: "/admin/baskets",
+                icon: ShoppingBasket,
+                title: "Настройка корзин",
+                description: "Каталог схем расчёта и их версии",
+                permission: "baskets:read",
+            },
+            {
+                kind: "subgroup",
+                id: "motivation-parameters",
+                label: "Параметры",
+                icon: Settings2,
+                items: [
+                    {
+                        name: "Алгоритмы тарифов",
+                        href: "/admin/tariff-algorithms",
+                        icon: SlidersHorizontal,
+                        title: "Алгоритмы тарифов",
+                        description: "Расчёт по категориям и по изделиям",
+                        permission: "tariffs:read",
+                    },
+                    {
+                        name: "Роли мотивации",
+                        href: "/admin/motivation-roles",
+                        icon: UserCog,
+                        title: "Роли мотивации",
+                        description: "Виды ролей и автоматическое назначение по должности",
+                        permission: "motivation-roles:read",
+                    },
+                    {
+                        name: "Надбавка за рост цен",
+                        href: "/admin/price-growth",
+                        icon: TrendingUp,
+                        title: "Надбавка за рост цен",
+                        description: "Одно значение на компанию с выбранного месяца",
+                        permission: "price-growth:read",
+                    },
+                    {
+                        name: "Бренды СТМ",
+                        href: "/admin/stm-brands",
+                        icon: Tags,
+                        title: "Бренды СТМ",
+                        description: "Какие бренды в рознице считаются СТМ",
+                        permission: "stm-brands:read",
+                    },
+                ],
+            },
+        ],
+    },
+    {
+        id: "rrs",
+        label: "РРС",
         items: [
             {
                 name: "Настройки РРС",
@@ -107,39 +169,9 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
         ],
     },
     {
-        id: "baskets",
-        label: "Корзины мотивации",
-        items: [
-            {
-                name: "Настройка корзин",
-                href: "/admin/baskets",
-                icon: ShoppingBasket,
-                title: "Настройка корзин",
-                description: "Каталог схем расчёта и их версии",
-                permission: "baskets:read",
-            },
-            {
-                name: "Алгоритмы тарифов",
-                href: "/admin/tariff-algorithms",
-                icon: SlidersHorizontal,
-                title: "Алгоритмы тарифов",
-                description: "Расчёт по категориям и по изделиям",
-                permission: "tariffs:read",
-            },
-        ],
-    },
-    {
         id: "administration",
         label: "Администрирование",
         items: [
-            {
-                name: "Роли мотивации",
-                href: "/admin/motivation-roles",
-                icon: UserCog,
-                title: "Роли мотивации",
-                description: "Виды ролей и автоматическое назначение по должности",
-                permission: "motivation-roles:read",
-            },
             {
                 name: "Настройки",
                 href: "/admin/settings",

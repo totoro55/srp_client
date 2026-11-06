@@ -71,6 +71,14 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
         ],
     },
     {
+        title: "Филиал",
+        routes: [
+            { path: "/api/branch/staff", description: "GET возвращает филиалы области за месяц, сотрудников выбранного филиала, часы графика и табеля, базовую премию филиала, надбавку за рост цен, показатели корзин, подключённых для РРС филиала, и премию за продажу по сотрудникам. Смена должности даёт отдельную строку на каждый отрезок дат, премия за продажу считается по документам этого отрезка. Параметры period и branch. Нужно право branch:read или baskets:connect." },
+            { path: "/api/branch/roles", description: "PUT сохраняет ручные роли сотрудников филиала. Тело: branchId, period и overrides. Нужно право branch:read или baskets:connect." },
+            { path: "/api/branch/sale-premium/recalculate", description: "POST пока не записывает премию: запросы ещё собираются. Тело: period, первое число. Закрытый месяц отклоняется. Загрузчик Airflow передаёт Authorization: Bearer и значение SALE_RECALC_TOKEN. Без этого заголовка нужна сессия и право branch:read или baskets:connect." },
+        ],
+    },
+    {
         title: "Карточка РРС",
         routes: [
             { path: "/api/rrs/territories", description: "GET возвращает территории, доступные для карточки. Нужно право baskets:connect." },
@@ -106,6 +114,10 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
             { path: "/api/admin/users", description: "GET возвращает страницу вошедших пользователей. Параметры q, department и page." },
             { path: "/api/admin/users/logins", description: "GET возвращает журнал входов пользователя или список отказов. Нужны userId или outcome=failure." },
             { path: "/api/admin/settings", description: "GET читает настройки приложения. PUT сохраняет их, нужно право settings:write." },
+            { path: "/api/motivation-roles", description: "GET читает роли мотивации и правила. Нужно право motivation-roles:read, branch:read или baskets:connect. PUT заменяет справочник и правила, нужно право motivation-roles:write." },
+            { path: "/api/admin/staffing", description: "GET читает штатное расписание месяца. Параметры period, branch, territory и q. branch и territory — списки uuid через запятую. territory — целые РРС. Без филиала, РРС и q строки сотрудников не читаются. q без филиала ищет имя по всем доступным филиалам. Нужно право staffing:read." },
+            { path: "/api/admin/price-growth", description: "GET читает надбавку за рост цен по месяцам. PUT записывает значение с месяца, DELETE удаляет месяц. Запись требует price-growth:write." },
+            { path: "/api/admin/stm-brands", description: "GET читает бренды СТМ. POST добавляет бренд, DELETE удаляет его. Запись требует stm-brands:write." },
         ],
     },
 ];

@@ -48,7 +48,7 @@ function parseRuleInput(body: {
 async function unknownLogin(rule: RuleInput, keepMarkedLogin = false): Promise<boolean> {
     if (rule.matchType !== "login") return false;
     const rows = await db.query<{ login: string; deleted: boolean }>(
-        "SELECT login, deleted FROM employees WHERE lower(login) = lower($1) LIMIT 1",
+        "SELECT login, deleted FROM employees WHERE lower(login) = lower($1) AND (territory_uuid IS NOT NULL OR branch_uuid IS NOT NULL) LIMIT 1",
         [rule.matchValue]
     );
     if (rows.length === 0) return true;

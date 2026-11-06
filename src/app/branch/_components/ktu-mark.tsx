@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import type { Ktu } from "./mock";
 
-export function KtuMark({ ktu }: { ktu: Ktu }) {
+export function KtuMark({ ktu }: { ktu: Ktu | null }) {
     const plus = ktu === "plus";
     return (
         <Badge

@@ -16,6 +16,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<AvailablePosition[
             `SELECT btrim(title) AS title, COUNT(*)::int AS count
              FROM employees
              WHERE NOT deleted
+               AND (territory_uuid IS NOT NULL OR branch_uuid IS NOT NULL)
                AND title IS NOT NULL
                AND btrim(title) <> ''
              GROUP BY btrim(title)

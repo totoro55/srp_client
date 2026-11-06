@@ -1,9 +1,9 @@
-import { automaticRole, getMotivationSettings, ISSUANCE_EMPLOYEE_TITLE, KEEPER_TITLE, STORE_EMPLOYEE_TITLE } from "@/lib/motivation-roles";
+import { automaticRole, ISSUANCE_EMPLOYEE_TITLE, KEEPER_TITLE, STORE_EMPLOYEE_TITLE, type MotivationSettings } from "@/lib/motivation-roles";
 
 // Пример вместо вьюшек расчёта и таблицы ставок. Страницы читают только этот модуль.
 
 export type Ktu = "plus" | "minus";
-export type EmployeeMovement = "dismissed" | "transferred";
+export type EmployeeMovement = "dismissed" | "transferred" | "absent" | "title";
 export type BrigadeMode = "all" | "groups" | "off";
 
 export interface MockBranch {
@@ -643,11 +643,11 @@ export function employeeById(employeeId: string): MockEmployee | null {
     return EMPLOYEES.find((item) => item.id === employeeId) ?? null;
 }
 
-export function roleById(roleId: string | null): { id: string; title: string } | null {
+export function roleById(roleId: string | null, settings: MotivationSettings): { id: string; title: string } | null {
     if (!roleId) {
         return null;
     }
-    return getMotivationSettings().roles.find((item) => item.id === roleId) ?? null;
+    return settings.roles.find((item) => item.id === roleId) ?? null;
 }
 
 export function defaultOverrides(branchId: string): Record<string, string | null> {
@@ -660,12 +660,19 @@ export function defaultOverrides(branchId: string): Record<string, string | null
     return roles;
 }
 
-export function effectiveRoles(branchId: string, overrides: Record<string, string | null>): Record<string, string | null> {
+export function effectiveRoles(
+    employees: { id: string; title: string; ktu: Ktu | null; rowKey?: string }[],
+    overrides: Record<string, string | null>,
+    settings: MotivationSettings,
+): Record<string, string | null> {
     const roles: Record<string, string | null> = {};
-    for (const employee of employeesOf(branchId)) {
-        roles[employee.id] = Object.prototype.hasOwnProperty.call(overrides, employee.id)
-            ? overrides[employee.id] ?? null
-            : automaticRole(employee.title, employee.ktu);
+    for (const employee of employees) {
+        const key = employee.rowKey || employee.id;
+        if (Object.prototype.hasOwnProperty.call(overrides, employee.id)) {
+            roles[key] = overrides[employee.id] ?? null;
+            continue;
+        }
+        roles[key] = automaticRole(employee.title, employee.ktu, settings);
     }
     return roles;
 }
@@ -744,12 +751,12 @@ export function basketConditions(branchId: string): BasketConditions[] {
     ];
 }
 
-export function inCalculation(employee: MockEmployee, roleId: string | null): boolean {
+export function inCalculation(employee: { ktu: Ktu | null }, roleId: string | null): boolean {
     return employee.ktu === "plus" || roleId !== null;
 }
 
-export function roleCaption(employee: MockEmployee, roleId: string | null): string {
-    const role = roleById(roleId);
+export function roleCaption(employee: { ktu: Ktu | null }, roleId: string | null, settings: MotivationSettings): string {
+    const role = roleById(roleId, settings);
     if (role) {
         return role.title;
     }
@@ -2195,15 +2202,16 @@ export function withBranchQuery(path: string, branchId: string, period: string, 
     return `${path}?${params.toString()}`;
 }
 
-export const DEFAULT_BRANCH_PERIOD = "2026-10-01";
 const BRANCH_LOCATION_KEY = "branch-location";
+const BRANCH_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function ownBranchId(): string {
-    return BRANCHES.find((item) => item.own)?.id ?? BRANCHES[0]?.id ?? "lenina";
+export function currentBranchPeriod(now = new Date()): string {
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    return `${now.getFullYear()}-${month}-01`;
 }
 
 export function isBranchId(value: string | null | undefined): value is string {
-    return typeof value === "string" && BRANCHES.some((item) => item.id === value);
+    return typeof value === "string" && BRANCH_UUID.test(value);
 }
 
 export function isBranchPeriod(value: string | null | undefined): value is string {

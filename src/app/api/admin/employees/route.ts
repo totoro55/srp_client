@@ -37,6 +37,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Em
                 OR lower(employee.title) LIKE $2 ESCAPE '\\'
                 OR lower(branch.name) LIKE $2 ESCAPE '\\'
             )
+              AND (employee.territory_uuid IS NOT NULL OR employee.branch_uuid IS NOT NULL)
               AND (NOT employee.deleted OR $3::boolean)
             ORDER BY employee.name
             LIMIT 30

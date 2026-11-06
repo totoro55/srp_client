@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Pencil, Trash2 } from "lucide-react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -14,19 +14,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAccess } from "@/hooks/useAccess";
-import { useMotivationRoles } from "@/hooks/useMotivationRoles";
+import { useMotivationRoles, useReplaceMotivationSettings } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import {
     RULE_KTU_LABELS,
-    addMotivationRole,
-    moveMotivationRule,
-    removeMotivationRole,
-    removeMotivationRule,
+    draftAddRole,
+    draftMoveRule,
+    draftRemoveRole,
+    draftRemoveRule,
+    draftSaveRule,
+    draftUpdateRole,
     roleTitle,
-    saveMotivationRule,
-    updateMotivationRole,
     type MotivationRole,
     type MotivationRoleRule,
+    type MotivationSettings,
     type RuleKtu,
 } from "@/lib/motivation-roles";
 
@@ -35,6 +36,7 @@ const KTU_OPTIONS: RuleKtu[] = ["plus", "minus", "any"];
 export function MotivationRolesEditor() {
     const access = useAccess();
     const settings = useMotivationRoles();
+    const replaceSettings = useReplaceMotivationSettings();
     const canWrite = access.has("motivation-roles:write");
     const [roleDialog, setRoleDialog] = useState<MotivationRole | null | "new">(null);
     const [roleName, setRoleName] = useState("");
@@ -45,8 +47,36 @@ export function MotivationRolesEditor() {
     const [ruleRoleId, setRuleRoleId] = useState("none");
     const [formError, setFormError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [moving, setMoving] = useState<{ id: string; direction: -1 | 1 } | null>(null);
     const [pendingRole, setPendingRole] = useState<MotivationRole | null>(null);
     const [pendingRule, setPendingRule] = useState<MotivationRoleRule | null>(null);
+    const busy = useRef(false);
+
+    async function writeSettings(next: MotivationSettings): Promise<MotivationSettings | string> {
+        if (busy.current) {
+            return "Подождите, сохранение ещё идёт";
+        }
+        busy.current = true;
+        setSaving(true);
+        try {
+            const response = await fetch("/api/motivation-roles", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(next),
+            });
+            const json = await response.json() as { success?: boolean; data?: MotivationSettings; error?: { message?: string } };
+            if (!response.ok || !json.success || !json.data) {
+                return json.error?.message || "Не удалось сохранить роли";
+            }
+            replaceSettings(json.data);
+            return json.data;
+        } catch {
+            return "Не удалось сохранить роли";
+        } finally {
+            busy.current = false;
+            setSaving(false);
+        }
+    }
 
     function openRole(role: MotivationRole | "new") {
         setFormError(null);
@@ -65,24 +95,23 @@ export function MotivationRolesEditor() {
 
     async function submitRole(event: FormEvent) {
         event.preventDefault();
-        setSaving(true);
         setFormError(null);
-        try {
-            await pause();
-            const error = roleDialog === "new"
-                ? addMotivationRole({ id: roleCode, title: roleName })
-                : roleDialog
-                    ? updateMotivationRole(roleDialog.id, roleName)
-                    : "Роль не найдена";
-            if (error) {
-                setFormError(error);
-                return;
-            }
-            notifySuccess(roleDialog === "new" ? "Роль добавлена" : "Роль сохранена");
-            setRoleDialog(null);
-        } finally {
-            setSaving(false);
+        const draft = roleDialog === "new"
+            ? draftAddRole(settings, { id: roleCode, title: roleName })
+            : roleDialog
+                ? draftUpdateRole(settings, roleDialog.id, roleName)
+                : { ok: false as const, error: "Роль не найдена" };
+        if (!draft.ok) {
+            setFormError(draft.error);
+            return;
         }
+        const saved = await writeSettings(draft.settings);
+        if (typeof saved === "string") {
+            setFormError(saved);
+            return;
+        }
+        notifySuccess(roleDialog === "new" ? "Роль добавлена" : "Роль сохранена");
+        setRoleDialog(null);
     }
 
     async function submitRule(event: FormEvent) {
@@ -90,24 +119,39 @@ export function MotivationRolesEditor() {
         if (!ruleDialog) {
             return;
         }
-        setSaving(true);
         setFormError(null);
+        const draft = draftSaveRule(settings, {
+            id: ruleDialog === "new" ? `rule-${crypto.randomUUID()}` : ruleDialog.id,
+            title: ruleTitle,
+            ktu: ruleKtu,
+            roleId: ruleRoleId === "none" ? null : ruleRoleId,
+        });
+        if (!draft.ok) {
+            setFormError(draft.error);
+            return;
+        }
+        const saved = await writeSettings(draft.settings);
+        if (typeof saved === "string") {
+            setFormError(saved);
+            return;
+        }
+        notifySuccess(ruleDialog === "new" ? "Правило добавлено" : "Правило сохранено");
+        setRuleDialog(null);
+    }
+
+    async function moveRule(id: string, direction: -1 | 1) {
+        const next = draftMoveRule(settings, id, direction);
+        if (!next || saving || moving) {
+            return;
+        }
+        setMoving({ id, direction });
         try {
-            await pause();
-            const error = saveMotivationRule({
-                id: ruleDialog === "new" ? `rule-${crypto.randomUUID()}` : ruleDialog.id,
-                title: ruleTitle,
-                ktu: ruleKtu,
-                roleId: ruleRoleId === "none" ? null : ruleRoleId,
-            });
-            if (error) {
-                setFormError(error);
-                return;
+            const saved = await writeSettings(next);
+            if (typeof saved === "string") {
+                notifyError(saved);
             }
-            notifySuccess(ruleDialog === "new" ? "Правило добавлено" : "Правило сохранено");
-            setRuleDialog(null);
         } finally {
-            setSaving(false);
+            setMoving(null);
         }
     }
 
@@ -119,13 +163,19 @@ export function MotivationRolesEditor() {
                     title="Удалить роль"
                     description={pendingRole ? `Роль «${pendingRole.title}» исчезнет из выбора на филиале.` : ""}
                     confirmLabel="Удалить"
-                    onConfirm={() => {
+                    isPending={saving}
+                    onConfirm={async () => {
                         if (!pendingRole) {
                             return;
                         }
-                        const error = removeMotivationRole(pendingRole.id);
-                        if (error) {
-                            notifyError(error);
+                        const draft = draftRemoveRole(settings, pendingRole.id);
+                        if (!draft.ok) {
+                            notifyError(draft.error);
+                            return;
+                        }
+                        const saved = await writeSettings(draft.settings);
+                        if (typeof saved === "string") {
+                            notifyError(saved);
                             return;
                         }
                         notifySuccess(`Роль «${pendingRole.title}» удалена`);
@@ -142,11 +192,16 @@ export function MotivationRolesEditor() {
                     title="Удалить правило"
                     description={pendingRule ? `Для должности «${pendingRule.title}» автоматическая роль больше не назначится.` : ""}
                     confirmLabel="Удалить"
-                    onConfirm={() => {
+                    isPending={saving}
+                    onConfirm={async () => {
                         if (!pendingRule) {
                             return;
                         }
-                        removeMotivationRule(pendingRule.id);
+                        const saved = await writeSettings(draftRemoveRule(settings, pendingRule.id));
+                        if (typeof saved === "string") {
+                            notifyError(saved);
+                            return;
+                        }
                         notifySuccess("Правило удалено");
                         setPendingRule(null);
                     }}
@@ -198,8 +253,7 @@ export function MotivationRolesEditor() {
                     <TabsTrigger value="rules">Правила для ролей</TabsTrigger>
                 </TabsList>
                 <TabsContent value="roles" className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm text-muted-foreground">Их выбирают на филиале и подставляют в правила.</p>
+                    <div className="flex justify-end">
                         <Button type="button" size="sm" disabled={!canWrite} onClick={() => openRole("new")}>Добавить роль</Button>
                     </div>
                     <Table containerClassName="max-w-full">
@@ -233,8 +287,7 @@ export function MotivationRolesEditor() {
                     </Table>
                 </TabsContent>
                 <TabsContent value="rules" className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm text-muted-foreground">Срабатывает первое подходящее правило. На филиале его можно заменить вручную для пары сотрудник и филиал.</p>
+                    <div className="flex justify-end">
                         <Button type="button" size="sm" disabled={!canWrite || settings.roles.length === 0} onClick={() => openRule("new")}>Добавить правило</Button>
                     </div>
                     <Table containerClassName="max-w-full">
@@ -257,11 +310,11 @@ export function MotivationRolesEditor() {
                                     <TableCell>{RULE_KTU_LABELS[rule.ktu]}</TableCell>
                                     <TableCell>{roleTitle(rule.roleId, settings)}</TableCell>
                                     <TableCell className="text-right">
-                                        <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite || index === 0} aria-label="Выше" onClick={() => moveMotivationRule(rule.id, -1)}>
-                                            <ChevronUp />
+                                        <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite || saving || moving !== null || index === 0} aria-label="Выше" onClick={() => void moveRule(rule.id, -1)}>
+                                            {moving?.id === rule.id && moving.direction === -1 ? <ButtonSpinner /> : <ChevronUp />}
                                         </Button>
-                                        <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite || index === settings.rules.length - 1} aria-label="Ниже" onClick={() => moveMotivationRule(rule.id, 1)}>
-                                            <ChevronDown />
+                                        <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite || saving || moving !== null || index === settings.rules.length - 1} aria-label="Ниже" onClick={() => void moveRule(rule.id, 1)}>
+                                            {moving?.id === rule.id && moving.direction === 1 ? <ButtonSpinner /> : <ChevronDown />}
                                         </Button>
                                         <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite} aria-label={`Изменить правило ${rule.title}`} onClick={() => openRule(rule)}>
                                             <Pencil />
@@ -412,10 +465,4 @@ function RuleDialog({
             </DialogContent>
         </Dialog>
     );
-}
-
-function pause(): Promise<void> {
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, 250);
-    });
 }

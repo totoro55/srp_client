@@ -30,6 +30,9 @@ const EXTERNAL_TABLES = new Set([
     "basket_category_stats",
     "basket_kind_stats",
     "basic_bonuses",
+    "hr_ktu",
+    "sale",
+    "grafiki_tabeli",
 ]);
 
 function skipString(text: string, start: number): number {

@@ -12,6 +12,7 @@ import {
     BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 
 export type PageHeadingMenuItem = {
     id: string;
@@ -136,6 +137,51 @@ export function usePageHeadingMenu(handler: (key: string, id: string) => void) {
     }, [menuSelectRef]);
 }
 
+function BranchMenu({
+    choices,
+    value,
+    onSelect,
+}: {
+    choices: PageHeadingMenuItem[];
+    value?: string;
+    onSelect: (id: string) => void;
+}) {
+    const [query, setQuery] = useState("");
+    const needle = query.trim().toLowerCase();
+    const visible = needle ? choices.filter((choice) => choice.label.toLowerCase().includes(needle)) : choices;
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger
+                type="button"
+                aria-label="Выбрать филиал"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:text-foreground [&_svg]:transition-transform data-popup-open:[&_svg]:rotate-180"
+            >
+                <ChevronDown className="size-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
+                {choices.length > 8 ? (
+                    <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
+                        <Input
+                            value={query}
+                            placeholder="Филиал"
+                            aria-label="Найти филиал"
+                            onChange={(event) => setQuery(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                        />
+                    </div>
+                ) : null}
+                {visible.length === 0 ? <p className="px-2 py-1.5 text-sm text-muted-foreground">Ничего не найдено</p> : null}
+                {visible.map((choice) => (
+                    <DropdownMenuItem key={choice.id} onClick={() => onSelect(choice.id)}>
+                        <Check className={choice.id === value ? undefined : "invisible"} />
+                        {choice.label}
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
 function trailKey(item: PageHeadingCrumb): string {
     return `${item.menuKey ?? item.href ?? ""}-${item.label}`;
 }
@@ -216,30 +262,15 @@ export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
                                     <span className="truncate font-semibold text-foreground"><CrumbLabel item={item} /></span>
                                 )}
                                 {choices.length > 1 ? (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger
-                                            type="button"
-                                            aria-label="Выбрать филиал"
-                                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:text-foreground [&_svg]:transition-transform data-popup-open:[&_svg]:rotate-180"
-                                        >
-                                            <ChevronDown className="size-3.5" />
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="start" className="w-auto min-w-56">
-                                            {choices.map((choice) => (
-                                                <DropdownMenuItem
-                                                    key={choice.id}
-                                                    onClick={() => {
-                                                        if (choice.id !== item.menuValue && item.menuKey) {
-                                                            menuSelectRef?.current?.(item.menuKey, choice.id);
-                                                        }
-                                                    }}
-                                                >
-                                                    <Check className={choice.id === item.menuValue ? undefined : "invisible"} />
-                                                    {choice.label}
-                                                </DropdownMenuItem>
-                                            ))}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
+                                    <BranchMenu
+                                        choices={choices}
+                                        value={item.menuValue}
+                                        onSelect={(id) => {
+                                            if (id !== item.menuValue && item.menuKey) {
+                                                menuSelectRef?.current?.(item.menuKey, id);
+                                            }
+                                        }}
+                                    />
                                 ) : null}
                             </BreadcrumbItem>
                         </span>

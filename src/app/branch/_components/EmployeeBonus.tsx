@@ -1,29 +1,17 @@
 "use client";
 
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowRight } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { cn } from "@/lib/utils";
-import { BonusDistributionChart } from "./BonusDistributionChart";
-import { EmployeeNameLine } from "./EmployeeMovementMark";
+import { useBranchDirectory } from "./branch-directory";
+import { findStaffSegment, fixedPremium, formatHourlyRate, formatHours, roleKey, salaryFromTimesheet } from "./staff";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
-import {
-    basketGroups,
-    branchMonth,
-    brigadeName,
-    employeeById,
-    fixedPremium,
-    formatMoney,
-    inCalculation,
-    lineSum,
-    payFacts,
-    periodLines,
-    roleCaption,
-    withBranchQuery,
-} from "./mock";
+import { EmployeeNameLine, StaffSegmentNote } from "./EmployeeMovementMark";
+import { KtuMark } from "./ktu-mark";
+import { formatMoney, inCalculation, roleCaption, withBranchQuery } from "./mock";
 
 const ROLE_MARK: Record<string, string> = {
     "УСМ": "bg-muted text-foreground",
@@ -34,94 +22,70 @@ const ROLE_MARK: Record<string, string> = {
 };
 
 export function EmployeeBonus() {
+    const router = useRouter();
     const params = useParams<{ employeeId: string }>();
+    const searchParams = useSearchParams();
     const { branchId, period } = useBranchLocation();
-    const employee = employeeById(params.employeeId);
+    const directory = useBranchDirectory();
+    const employee = findStaffSegment(directory.employees, params.employeeId, searchParams.get("from"));
     const store = useBranchStore();
-    if (!employee || employee.branchId !== branchId) {
+    const settings = useMotivationRoles();
+    const slice = store.slice(branchId, period, directory.employees, settings);
+    const roleId = employee ? slice.savedRoles[roleKey(employee)] ?? null : null;
+    const listed = employee !== null && employee.branchId === branchId && roleId !== null;
+
+    useEffect(() => {
+        if (directory.loading || !branchId || employee === null || employee.branchId !== branchId) {
+            return;
+        }
+        if (roleId !== null) {
+            return;
+        }
+        router.replace(withBranchQuery("/branch/bonuses", branchId, period));
+    }, [branchId, directory.loading, employee, period, roleId, router]);
+
+    if (directory.loading || !listed || employee === null) {
         return null;
     }
-    const month = branchMonth(branchId, period);
-    const slice = store.slice(branchId, period);
-    const roleId = slice.savedRoles[employee.id] ?? null;
-    const role = roleCaption(employee, roleId);
+    const role = roleCaption(employee, roleId, settings);
     const participating = inCalculation(employee, roleId);
-    const lines = participating ? periodLines(employee.id, period, month.calculated) : [];
-    const bonus = lineSum(lines);
-    const pay = payFacts(employee, period, bonus);
-    const fixed = fixedPremium(employee);
-    const groups = basketGroups(lines);
-    const brigadeOn = slice.savedBrigades.mode !== "off";
-    const brigade = brigadeOn ? brigadeName(employee.id, slice.savedBrigades, participating) : null;
+    const salary = salaryFromTimesheet(employee.hourly, employee.timesheetHours);
+    const premium = fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, employee.timesheetHours);
+    const salePremium = directory.salePremiums[roleKey(employee)];
 
     return (
         <div className="flex min-w-0 flex-col gap-4">
-            <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
-                <Card className="min-w-0">
-                    <CardHeader>
-                        <CardTitle className="flex flex-wrap items-center gap-2">
-                            <EmployeeNameLine name={employee.name} movement={employee.movement} markClassName="px-1.5 py-0.5 text-xs" />
-                            <span className={cn("inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 text-sm font-medium", ROLE_MARK[role] ?? "bg-muted text-foreground")}>
-                                {role}
-                            </span>
-                        </CardTitle>
-                        <p className="text-sm text-muted-foreground">{employee.title}</p>
-                    </CardHeader>
-                    <CardContent>
-                        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                            <Fact label="Прогноз ЗП" value={formatMoney(pay.forecastPay)} />
-                            <Fact label="Текущая ЗП" value={formatMoney(pay.currentPay)} />
-                            <Fact label="Фиксированная премия" value={formatMoney(fixed)} />
-                            <Fact label="Оклад" value={formatMoney(pay.salary)} />
-                            <Fact label="Часов табель / график" value={`${pay.timesheetHours} / ${pay.scheduleHours}`} />
-                            {brigade ? <Fact label="Бригада" value={brigade} /> : null}
-                        </dl>
-                    </CardContent>
-                </Card>
-                <BonusDistributionChart groups={groups} />
-            </div>
-            {!participating ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Сотрудник в этом месяце вне расчёта.</p>
-            ) : !month.calculated ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Расчёт за этот месяц ещё не готов.</p>
-            ) : (
-                <>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <p className="text-2xl font-semibold tabular-nums">
-                            <span className="mr-2 text-base font-normal text-muted-foreground">Текущая премия</span>
-                            {formatMoney(bonus)}
-                        </p>
-                        <Link href={withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, groups[0]?.basketId ?? "sales")} className={buttonVariants({ size: "sm", variant: "outline" })}>
-                            Вся детализация
-                        </Link>
-                    </div>
-                    <div className="grid gap-3 lg:grid-cols-2">
-                        {groups.map((group) => (
-                            <Link key={group.basketId} href={withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, group.basketId)} className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-                                <Card className="h-full transition-colors hover:bg-muted/40">
-                                    <CardHeader>
-                                        <CardTitle>{group.title}</CardTitle>
-                                        <p className="text-lg font-medium tabular-nums">{formatMoney(group.amount)}</p>
-                                        <CardAction className="self-center">
-                                            <ArrowRight className="size-7 text-muted-foreground" aria-hidden="true" />
-                                        </CardAction>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <dl className="grid gap-x-4 gap-y-2 [grid-template-columns:repeat(auto-fit,minmax(6.5rem,1fr))]">
-                                            {group.facts.map((fact) => (
-                                                <div key={fact.label} className="min-w-0">
-                                                    <dt className="text-xs text-muted-foreground">{fact.label}</dt>
-                                                    <dd className="tabular-nums">{fact.value}</dd>
-                                                </div>
-                                            ))}
-                                        </dl>
-                                    </CardContent>
-                                </Card>
-                            </Link>
-                        ))}
-                    </div>
-                </>
-            )}
+            <Card className="min-w-0">
+                <CardHeader>
+                    <CardTitle className="flex flex-wrap items-center gap-2">
+                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} markClassName="px-1.5 py-0.5 text-xs" />
+                        <span className={cn("inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 text-sm font-medium", ROLE_MARK[role] ?? "bg-muted text-foreground")}>
+                            {role}
+                        </span>
+                    </CardTitle>
+                    <StaffSegmentNote partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
+                    <p className="text-sm text-muted-foreground">
+                        {employee.title || "Должность не указана"}
+                        {employee.probation ? " · испытательный срок" : ""}
+                    </p>
+                </CardHeader>
+                <CardContent>
+                    <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="flex flex-col gap-0.5">
+                            <dt className="text-xs text-muted-foreground">КТУ</dt>
+                            <dd><KtuMark ktu={employee.ktu} /></dd>
+                        </div>
+                        <Fact label="Уровень оплаты труда" value={employee.payLevel === null ? "—" : formatMoney(employee.payLevel)} />
+                        <Fact label="Часовая ставка" value={formatHourlyRate(employee.hourly)} />
+                        <Fact label="График, ч" value={formatHours(employee.scheduleHours)} />
+                        <Fact label="Табель, ч" value={formatHours(employee.timesheetHours)} />
+                        <Fact label="Оклад" value={salary === null ? "—" : formatMoney(salary)} />
+                        <Fact label="Фиксированная премия" value={premium === null ? "—" : formatMoney(premium)} />
+                        <Fact label="Продажа товара" value={salePremium === undefined ? "—" : formatMoney(salePremium)} />
+                        <Fact label="В расчёте" value={participating ? "Да" : "Нет"} />
+                    </dl>
+                </CardContent>
+            </Card>
         </div>
     );
 }

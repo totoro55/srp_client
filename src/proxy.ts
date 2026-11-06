@@ -74,6 +74,13 @@ export async function proxy(req: NextRequest) {
             return NextResponse.next();
         }
 
+        if (
+            pathname === "/api/branch/sale-premium/recalculate"
+            && req.headers.get("authorization")?.startsWith("Bearer ")
+        ) {
+            return NextResponse.next();
+        }
+
         if (!token) {
             if (pathname.startsWith("/api/")) {
                 return NextResponse.json(

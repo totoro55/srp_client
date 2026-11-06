@@ -586,6 +586,7 @@ export async function listFeedbackAssignees(access: AccessView, query: string): 
                 JOIN employees employee ON employee.title = rr.match_value
                     AND btrim(employee.login) <> ''
                     AND NOT employee.deleted
+                    AND (employee.territory_uuid IS NOT NULL OR employee.branch_uuid IS NOT NULL)
                 WHERE rr.match_type = 'title'
                   AND (rr.expires_at IS NULL OR rr.expires_at > NOW())
                   AND (
@@ -1023,6 +1024,7 @@ async function processorLogin(access: AccessView, body: unknown): Promise<string
             JOIN employees employee ON employee.title = rr.match_value
                 AND btrim(employee.login) <> ''
                 AND NOT employee.deleted
+                AND (employee.territory_uuid IS NOT NULL OR employee.branch_uuid IS NOT NULL)
             WHERE rr.match_type = 'title'
               AND (rr.expires_at IS NULL OR rr.expires_at > NOW())
               AND (

@@ -24,6 +24,7 @@ export async function GET(request: Request) {
                    employee.title
             FROM employees employee
             WHERE NOT employee.deleted
+              AND (employee.territory_uuid IS NOT NULL OR employee.branch_uuid IS NOT NULL)
               AND (
                 $1::text = ''
                 OR lower(employee.login) LIKE $2 ESCAPE '\\'

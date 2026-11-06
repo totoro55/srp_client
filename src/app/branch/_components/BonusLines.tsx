@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
+import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { useBranchDirectory } from "./branch-directory";
+import { findStaffSegment, roleKey, segmentHref } from "./staff";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
 import { DisplayBonusDetail } from "./DisplayBonusDetail";
@@ -17,7 +20,6 @@ import { UnloadBonusDetail } from "./UnloadBonusDetail";
 import { WarehouseBonusDetail } from "./WarehouseBonusDetail";
 import {
     branchMonth,
-    employeeById,
     inCalculation,
     periodLines,
     withBranchQuery,
@@ -31,11 +33,13 @@ export function BonusLines() {
     const store = useBranchStore();
     const listRef = useRef<HTMLDivElement>(null);
     const [edges, setEdges] = useState({ left: false, right: false });
-    const employee = employeeById(params.employeeId);
+    const directory = useBranchDirectory();
+    const settings = useMotivationRoles();
+    const employee = findStaffSegment(directory.employees, params.employeeId, searchParams.get("from"));
     const part = searchParams.get("part");
     const month = employee && employee.branchId === branchId ? branchMonth(branchId, period) : null;
-    const slice = store.slice(branchId, period);
-    const roleId = employee ? (slice.savedRoles[employee.id] ?? null) : null;
+    const slice = store.slice(branchId, period, directory.employees, settings);
+    const roleId = employee ? (slice.savedRoles[roleKey(employee)] ?? null) : null;
     const participating = employee ? inCalculation(employee, roleId) : false;
     const lines = employee && participating && month ? periodLines(employee.id, period, month.calculated) : [];
     const baskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
@@ -47,7 +51,7 @@ export function BonusLines() {
             return;
         }
         if (!knownPart) {
-            router.replace(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, baskets[0][0]));
+            router.replace(segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, baskets[0][0]), employee.activeFrom));
         }
     }, [baskets, branchId, employee, knownPart, period, router]);
 
@@ -114,7 +118,7 @@ export function BonusLines() {
                 <Tabs
                     value={tab}
                     onValueChange={(next) => {
-                        router.replace(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, next));
+                        router.replace(segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, next), employee.activeFrom));
                     }}
                     className="min-w-0 gap-0"
                 >

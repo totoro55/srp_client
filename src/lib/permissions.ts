@@ -97,6 +97,12 @@ export const PERMISSION_CATALOG = [
         description: "Настройки филиала, премии сотрудников и детализация",
     },
     {
+        code: "staffing:read",
+        group: "Мотивация",
+        title: "Просмотр штатного расписания",
+        description: "Филиал, должность, КТУ, роль и оплата сотрудника за месяц",
+    },
+    {
         code: "motivation-roles:read",
         group: "Мотивация",
         title: "Просмотр ролей мотивации",
@@ -107,6 +113,30 @@ export const PERMISSION_CATALOG = [
         group: "Мотивация",
         title: "Изменение ролей мотивации",
         description: "Новые роли и правила по должности и КТУ",
+    },
+    {
+        code: "price-growth:read",
+        group: "Мотивация",
+        title: "Просмотр надбавки за рост цен",
+        description: "Значение надбавки по месяцам. Сотрудникам оно не показывается",
+    },
+    {
+        code: "price-growth:write",
+        group: "Мотивация",
+        title: "Изменение надбавки за рост цен",
+        description: "Запись и удаление значения надбавки с выбранного месяца",
+    },
+    {
+        code: "stm-brands:read",
+        group: "Мотивация",
+        title: "Просмотр брендов СТМ",
+        description: "Список брендов, розница которых считается СТМ",
+    },
+    {
+        code: "stm-brands:write",
+        group: "Мотивация",
+        title: "Изменение брендов СТМ",
+        description: "Добавление и удаление бренда из списка СТМ",
     },
 ] as const;
 
