@@ -372,6 +372,9 @@ export function WikiDesk() {
             next.delete("tag");
         }
         const value = next.toString();
+        if (value === searchParams.toString()) {
+            return;
+        }
         router.replace(value ? `${pathname}?${value}` : pathname, { scroll: false });
     }
 
