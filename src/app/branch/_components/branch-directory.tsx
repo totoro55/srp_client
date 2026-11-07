@@ -22,6 +22,7 @@ interface BranchDirectoryValue {
     roleOverrides: Record<string, string | null>;
     indicators: { id: string; title: string }[];
     salePremiums: Record<string, number>;
+    releasePremiums: Record<string, number>;
     baseBonus: number | null;
     priceGrowth: number;
 }
@@ -54,6 +55,7 @@ interface StaffResponse {
         roleOverrides?: Record<string, string | null>;
         indicators?: { id: string; title: string }[];
         salePremiums?: Record<string, number>;
+        releasePremiums?: Record<string, number>;
         baseBonus: number | null;
         priceGrowth: number;
     };
@@ -76,6 +78,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         roleOverrides: {},
         indicators: [],
         salePremiums: {},
+        releasePremiums: {},
         baseBonus: null,
         priceGrowth: 0,
     });
@@ -107,7 +110,8 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     loadedBranchId: branchId,
                     roleOverrides,
                     indicators: readIndicators(body.data.indicators),
-                    salePremiums: readSalePremiums(body.data.salePremiums),
+                    salePremiums: readPremiums(body.data.salePremiums),
+                    releasePremiums: readPremiums(body.data.releasePremiums),
                     baseBonus: body.data.baseBonus,
                     priceGrowth: body.data.priceGrowth,
                     employees: body.data.employees.map((employee) => {
@@ -149,6 +153,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     roleOverrides: current.roleOverrides,
                     indicators: current.indicators,
                     salePremiums: current.salePremiums,
+                    releasePremiums: current.releasePremiums,
                     baseBonus: current.baseBonus,
                     priceGrowth: current.priceGrowth,
                 }));
@@ -167,7 +172,7 @@ export function useBranchDirectory(): BranchDirectoryValue {
     return value;
 }
 
-function readSalePremiums(value: Record<string, number> | undefined): Record<string, number> {
+function readPremiums(value: Record<string, number> | undefined): Record<string, number> {
     if (!value) {
         return {};
     }

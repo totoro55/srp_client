@@ -17,16 +17,15 @@ CREATE TABLE IF NOT EXISTS main.sale_premium_lines (
     tariff NUMERIC NOT NULL,
     price DOUBLE PRECISION,
     item_count DOUBLE PRECISION NOT NULL,
-    sale_coef NUMERIC NOT NULL,
-    b2b_coef NUMERIC NOT NULL,
     premium NUMERIC(18, 2) NOT NULL,
     link_doc TEXT,
     document_number TEXT,
     document_date TIMESTAMP,
+    product_name TEXT,
     calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT sale_premium_lines_period_month CHECK (period = date_trunc('month', period)::date),
     CONSTRAINT sale_premium_lines_axis_check CHECK (axis IN ('category', 'product_kind')),
-    CONSTRAINT sale_premium_lines_channel_check CHECK (channel IN ('main', 'b2b')),
+    CONSTRAINT sale_premium_lines_channel_check CHECK (channel IN ('main', 'stm', 'not_stm', 'im', 'b2b')),
     CONSTRAINT sale_premium_lines_mode_check CHECK (base_mode IN ('percent', 'per_unit'))
 );
 
@@ -40,10 +39,16 @@ COMMENT ON TABLE main.sale_premium_lines IS
     'Строка премии за продажу. Считается по подключённой версии 2 или 3. Остаётся, если совсем старый период уберут из raw.sale.';
 
 COMMENT ON COLUMN main.sale_premium_lines.channel IS
-    'main — розница, b2b — безнал. Канал интернет-магазина появится отдельным условием.';
+    'stm — розница СТМ, not_stm — розница не СТМ, im — интернет-магазин, b2b — безнал. main — розница в снимке, где эти каналы ещё не разделены.';
+
+COMMENT ON COLUMN main.sale_premium_lines.tariff IS
+    'Готовый тариф строки. Ставка канала уже умножена на коэффициент канала, на 2 для тарифа от количества при цене от 100 000 и на коэффициент продаж филиала.';
 
 COMMENT ON COLUMN main.sale_premium_lines.premium IS
-    'Премия строки. Розница за количество: ставка main × количество × sale_coef. От цены: доля main × цена × количество × sale_coef. Безнал: ставка b2b × количество × b2b_coef × sale_coef.';
+    'Премия строки, округление до копеек. Тариф от количества: готовый тариф × количество. Тариф от цены: готовый тариф × цена × количество.';
+
+COMMENT ON COLUMN main.sale_premium_lines.product_name IS
+    'Название товара из raw.sale. Пусто, если в продаже названия не было.';
 
 CREATE OR REPLACE VIEW main.sale_premium_employees AS
 SELECT period,

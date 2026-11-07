@@ -989,6 +989,8 @@ export interface SalesDetailLine {
     amount: number;
     documentId: string;
     documentTitle: string;
+    productName?: string;
+    doubled?: boolean;
 }
 
 export interface SalesDetailGroup {

@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
@@ -30,6 +33,7 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const fillViewport = bonusList || onLines;
     const query = searchParams.toString();
     const appliedHref = useRef("");
+    const narrowScrollRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (directory.loading && directory.branches.length === 0) {
@@ -50,7 +54,19 @@ export function BranchFrame({ children }: { children: ReactNode }) {
             return;
         }
         const part = params.get("part");
-        const href = withBranchQuery(pathname, nextBranch, nextPeriod, pathname.endsWith("/lines") ? part : null);
+        let href = withBranchQuery(pathname, nextBranch, nextPeriod, onLines ? part : null);
+        if (onLines) {
+            const kept = new URLSearchParams(href.slice(href.indexOf("?") + 1));
+            const from = params.get("from");
+            const page = params.get("page");
+            if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+                kept.set("from", from);
+            }
+            if (page && /^[1-9]\d*$/.test(page) && page !== "1") {
+                kept.set("page", page);
+            }
+            href = `${pathname}?${kept.toString()}`;
+        }
         const current = query ? `${pathname}?${query}` : pathname;
         if (href === current || appliedHref.current === href) {
             appliedHref.current = href;
@@ -131,16 +147,97 @@ export function BranchFrame({ children }: { children: ReactNode }) {
                 branchCrumb,
             ];
 
+    const backHref = [...trail].reverse().find((item) => item.href)?.href;
+
     return (
         <div className={cn("flex w-full min-w-0 flex-col gap-4 [@media(max-height:500px)]:gap-2!", fillViewport && "-mb-4 h-[calc(100dvh-5rem)] min-h-0 md:-mb-6 md:h-[calc(100dvh-5.5rem)] [@media(max-height:500px)]:-mb-2! [@media(max-height:500px)]:h-[calc(100dvh-4.5rem)]!")}>
             <PageHeading trail={trail} />
-            {bonusList ? null : <BranchPeriodField />}
-            {fillViewport ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
+            {fillViewport ? (
+                <div ref={narrowScrollRef} data-narrow-scroll="" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 max-sm:gap-2 max-sm:overflow-y-auto max-sm:overscroll-contain">
+                    {bonusList ? null : (
+                        <div className="shrink-0">
+                            <BranchPeriodField backHref={backHref} />
+                        </div>
+                    )}
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:h-auto max-sm:flex-none">{children}</div>
+                    <NarrowScrollTail rootRef={narrowScrollRef} />
+                </div>
+            ) : (
+                <>
+                    <BranchPeriodField backHref={backHref} />
+                    {children}
+                </>
+            )}
         </div>
     );
 }
 
-export function BranchPeriodField() {
+function NarrowScrollTail({ rootRef }: { rootRef: RefObject<HTMLDivElement | null> }) {
+    const [height, setHeight] = useState(0);
+
+    useEffect(() => {
+        const root = rootRef.current;
+        if (!root) {
+            return;
+        }
+        const query = window.matchMedia("(max-width: 639px)");
+        let frame = 0;
+
+        function measure() {
+            if (!query.matches) {
+                setHeight((current) => current === 0 ? current : 0);
+                return;
+            }
+            const rows = root!.querySelectorAll<HTMLElement>("[data-scroll-row]");
+            let last: HTMLElement | null = null;
+            for (let index = rows.length - 1; index >= 0; index -= 1) {
+                if (rows[index].getBoundingClientRect().height > 0) {
+                    last = rows[index];
+                    break;
+                }
+            }
+            if (!last) {
+                setHeight((current) => current === 0 ? current : 0);
+                return;
+            }
+            const spacer = root!.querySelector<HTMLElement>("[data-scroll-tail]");
+            const rootTop = root!.getBoundingClientRect().top;
+            const rowTop = last.getBoundingClientRect().top - rootTop + root!.scrollTop;
+            const contentEnd = spacer
+                ? spacer.getBoundingClientRect().top - rootTop + root!.scrollTop
+                : root!.scrollHeight;
+            const next = Math.max(0, Math.round(root!.clientHeight - (contentEnd - rowTop)));
+            setHeight((current) => current === next ? current : next);
+        }
+
+        function schedule() {
+            window.cancelAnimationFrame(frame);
+            frame = window.requestAnimationFrame(measure);
+        }
+
+        const observer = new ResizeObserver(schedule);
+        observer.observe(root);
+        for (const child of root.children) {
+            if (!child.hasAttribute("data-scroll-tail")) {
+                observer.observe(child);
+            }
+        }
+        const mutations = new MutationObserver(schedule);
+        mutations.observe(root, { childList: true, subtree: true });
+        query.addEventListener("change", schedule);
+        schedule();
+        return () => {
+            window.cancelAnimationFrame(frame);
+            observer.disconnect();
+            mutations.disconnect();
+            query.removeEventListener("change", schedule);
+        };
+    }, [rootRef]);
+
+    return <div data-scroll-tail="" aria-hidden className="shrink-0 sm:hidden" style={{ height }} />;
+}
+
+export function BranchPeriodField({ backHref }: { backHref?: string }) {
     const { branchId, period } = useBranchLocation();
     const router = useRouter();
     const pathname = usePathname();
@@ -148,6 +245,11 @@ export function BranchPeriodField() {
 
     return (
         <div className="flex w-full min-w-0 shrink-0 items-center gap-1.5 sm:w-auto sm:gap-2">
+            {backHref ? (
+                <Link href={backHref} aria-label="Назад" className={cn(buttonVariants({ variant: "outline", size: "icon" }), "sm:hidden")}>
+                    <ArrowLeft />
+                </Link>
+            ) : null}
             <Input
                 type="month"
                 aria-label="Период"

@@ -61,11 +61,11 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
     } as ChartConfig;
 
     return (
-        <Card className="min-w-0">
+        <Card className="h-full min-w-0">
             <CardHeader>
                 <CardTitle>Распределение премии</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-1 items-center">
                 {chartData.length === 0 ? (
                     <p className="py-10 text-center text-sm text-muted-foreground">Нет данных для диаграммы.</p>
                 ) : (
@@ -99,8 +99,8 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
                                     nameKey="basket"
                                     innerRadius={68}
                                     outerRadius={96}
-                                    stroke="var(--background)"
-                                    strokeWidth={2}
+                                    stroke={chartData.length > 1 ? "var(--background)" : "transparent"}
+                                    strokeWidth={chartData.length > 1 ? 2 : 0}
                                 >
                                     {chartData.map((item) => (
                                         <Cell key={item.basket} fill={item.fill} />

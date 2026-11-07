@@ -14,6 +14,7 @@ import { useBranchLocation } from "./BranchFrame";
 import { DisplayBonusDetail } from "./DisplayBonusDetail";
 import { DocumentPremiumDetail } from "./DocumentPremiumDetail";
 import { IssueBonusDetail, PickingBonusDetail } from "./IssueBonusDetail";
+import { ReleaseBonusDetail } from "./ReleaseBonusDetail";
 import { SalesBonusDetail } from "./SalesBonusDetail";
 import { ServiceBonusDetail } from "./ServiceBonusDetail";
 import { UnloadBonusDetail } from "./UnloadBonusDetail";
@@ -42,7 +43,11 @@ export function BonusLines() {
     const roleId = employee ? (slice.savedRoles[roleKey(employee)] ?? null) : null;
     const participating = employee ? inCalculation(employee, roleId) : false;
     const lines = employee && participating && month ? periodLines(employee.id, period, month.calculated) : [];
-    const baskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
+    const salesIndicator = directory.indicators.find((indicator) => indicator.title === "Продажа товара");
+    const releaseIndicator = directory.indicators.find((indicator) => indicator.title === "Выдача товара");
+    const mockBaskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
+    const liveBaskets = [salesIndicator, releaseIndicator].flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
+    const baskets = month?.calculated && mockBaskets.length > 0 ? mockBaskets : liveBaskets;
     const knownPart = part !== null && baskets.some(([basketId]) => basketId === part);
     const tab = knownPart && part ? part : (baskets[0]?.[0] ?? "");
 
@@ -105,7 +110,7 @@ export function BonusLines() {
     if (!participating) {
         return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Сотрудник в этом месяце вне расчёта.</p>;
     }
-    if (!month?.calculated || lines.length === 0) {
+    if (baskets.length === 0) {
         return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Расчёт за этот месяц ещё не готов.</p>;
     }
     if (!tab) {
@@ -113,7 +118,7 @@ export function BonusLines() {
     }
 
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:gap-2">
             <div className="relative min-w-0 shrink-0">
                 <Tabs
                     value={tab}
@@ -187,8 +192,10 @@ export function BonusLines() {
                 ) : null}
             </div>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                {tab === "sales" ? (
+                {tab === "sales" || tab === salesIndicator?.id ? (
                     <SalesBonusDetail employeeId={employee.id} period={period} />
+                ) : tab === releaseIndicator?.id ? (
+                    <ReleaseBonusDetail employeeId={employee.id} period={period} />
                 ) : tab === "issue" ? (
                     <IssueBonusDetail employeeId={employee.id} period={period} />
                 ) : tab === "picking" ? (

@@ -110,6 +110,35 @@ export function fixedPremium(
     return amount < 0 ? 0 : amount;
 }
 
+/** Оклад и фиксированная премия по табелю плюс уже посчитанные премии корзин. */
+export function currentPay(salary: number | null, fixed: number | null, basketPremium: number): number | null {
+    if (salary === null || fixed === null) {
+        return null;
+    }
+    return salary + fixed + basketPremium;
+}
+
+/** Те же части, что у текущей ЗП, но оклад и фикс — на часы графика, премии корзин — в доле графика к табелю. */
+export function forecastPay(
+    hourly: number,
+    payLevel: number | null,
+    baseBonus: number | null,
+    priceGrowth: number,
+    scheduleHours: number | null,
+    timesheetHours: number | null,
+    basketPremium: number,
+): number | null {
+    if (scheduleHours === null || timesheetHours === null || timesheetHours <= 0) {
+        return null;
+    }
+    const salary = salaryFromTimesheet(hourly, scheduleHours);
+    const fixed = fixedPremium(payLevel, hourly, baseBonus, priceGrowth, scheduleHours);
+    if (salary === null || fixed === null) {
+        return null;
+    }
+    return salary + fixed + basketPremium * (scheduleHours / timesheetHours);
+}
+
 export function cabinetMovement(row: {
     status: string;
     titleChange: boolean;

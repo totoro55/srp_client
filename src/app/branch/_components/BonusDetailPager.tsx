@@ -19,6 +19,30 @@ export type SortDir = "asc" | "desc";
 export type SortState = { key: string; dir: SortDir };
 export type BonusDetailSortOption = { key: string; label: string };
 
+export function BonusDetailEnd({ loaded, total }: { loaded: number; total: number }) {
+    return (
+        <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+            Конец детализации
+            <span className="sm:hidden">
+                {" · "}
+                <span className="tabular-nums">{formatCount(loaded)} из {formatCount(total)}</span>
+            </span>
+        </p>
+    );
+}
+
+export function BonusDetailCount({ loaded, total }: { loaded: number; total: number }) {
+    return (
+        <p className="hidden text-sm text-muted-foreground sm:block">
+            <span className="tabular-nums">{formatCount(loaded)} из {formatCount(total)}</span>
+        </p>
+    );
+}
+
+function formatCount(count: number): string {
+    return new Intl.NumberFormat("ru-RU").format(count);
+}
+
 export function BonusDetailTotal({ total, className }: { total: number; className?: string }) {
     return (
         <p className={cn("shrink-0 text-sm text-muted-foreground", className)}>
@@ -162,18 +186,22 @@ export function BonusDetailShell({
     children,
     pagination,
     measureRef,
+    scrollRef,
 }: {
     toolbar: ReactNode;
     children: ReactNode;
     pagination?: ReactNode;
     measureRef: Ref<HTMLDivElement | null>;
+    scrollRef?: Ref<HTMLDivElement | null>;
 }) {
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:h-auto max-sm:flex-none max-sm:gap-2">
             <div className="shrink-0">{toolbar}</div>
-            <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-                {children}
-                {pagination}
+            <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:h-auto max-sm:flex-none">
+                <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain max-sm:h-auto max-sm:flex-none max-sm:overflow-visible">
+                    {children}
+                </div>
+                {pagination ? <div className="shrink-0">{pagination}</div> : null}
             </div>
         </div>
     );
@@ -293,11 +321,11 @@ export function useBonusDetailPagination(itemCount: number, resetKey?: string | 
             }
 
             const fullRows = Math.floor(Math.max(0, height - gap - tableHeader) / row);
-            if (itemCount <= fullRows) {
+            const pagedRows = Math.floor(Math.max(0, height - paginationReserve - gap - tableHeader) / row);
+            if (itemCount > 0 && itemCount <= fullRows) {
                 setPageSize(Math.max(8, fullRows));
                 return;
             }
-            const pagedRows = Math.floor(Math.max(0, height - paginationReserve - gap - tableHeader) / row);
             setPageSize(Math.max(8, pagedRows));
         }
 

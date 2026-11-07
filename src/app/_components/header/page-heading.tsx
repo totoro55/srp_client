@@ -154,9 +154,9 @@ function BranchMenu({
             <DropdownMenuTrigger
                 type="button"
                 aria-label="Выбрать филиал"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:text-foreground [&_svg]:transition-transform data-popup-open:[&_svg]:rotate-180"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:text-foreground sm:size-7 [&_svg]:transition-transform data-popup-open:[&_svg]:rotate-180"
             >
-                <ChevronDown className="size-3.5" />
+                <ChevronDown className="size-3 sm:size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
                 {choices.length > 8 ? (
@@ -229,28 +229,28 @@ export function PageHeadingTrail({ trail }: { trail: PageHeadingCrumb[] }) {
     return (
         <Breadcrumb ref={rootRef} className="relative min-w-0 overflow-hidden">
             {canOmit ? (
-                <div ref={measureRef} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 flex w-max flex-nowrap items-center gap-1.5 text-base font-semibold whitespace-nowrap sm:gap-2.5 xl:text-lg">
+                <div ref={measureRef} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 flex w-max flex-nowrap items-center gap-1 text-sm font-semibold whitespace-nowrap sm:gap-2.5 sm:text-base xl:text-lg">
                     {trail.map((item, index) => {
                         const choices = item.menu ?? [];
                         return (
                             <span key={trailKey(item)} className="contents">
-                                {index > 0 ? <span className="size-3.5 shrink-0" /> : null}
+                                {index > 0 ? <span className="size-3 shrink-0 sm:size-3.5" /> : null}
                                 <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap">
                                     <CrumbLabel item={item} />
-                                    {choices.length > 1 ? <span className="size-7 shrink-0" /> : null}
+                                    {choices.length > 1 ? <span className="size-6 shrink-0 sm:size-7" /> : null}
                                 </span>
                             </span>
                         );
                     })}
                 </div>
             ) : null}
-            <BreadcrumbList className="w-full min-w-0 flex-nowrap gap-1.5 overflow-hidden text-base font-semibold sm:gap-2.5 xl:text-lg">
+            <BreadcrumbList className="w-full min-w-0 flex-nowrap gap-1 overflow-hidden text-sm font-semibold sm:gap-2.5 sm:text-base xl:text-lg">
                 {visible.map((item, index) => {
                     const last = index === visible.length - 1;
                     const choices = item.menu ?? [];
                     return (
                         <span key={`${item.menuKey ?? item.href ?? ""}-${item.label}`} className="contents">
-                            {index > 0 ? <BreadcrumbSeparator className="shrink-0" /> : null}
+                            {index > 0 ? <BreadcrumbSeparator className="shrink-0 [&>svg]:size-3 sm:[&>svg]:size-3.5" /> : null}
                             <BreadcrumbItem className="min-w-0 shrink gap-0.5">
                                 {!last && item.href ? (
                                     <BreadcrumbLink className="min-w-0 truncate font-semibold" render={<Link href={item.href} />}>

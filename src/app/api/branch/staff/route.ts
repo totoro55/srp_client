@@ -12,6 +12,7 @@ export interface BranchStaffPayload {
     roleOverrides: Record<string, string | null>;
     indicators: ConnectedBasketIndicator[];
     salePremiums: Record<string, number>;
+    releasePremiums: Record<string, number>;
     baseBonus: number | null;
     priceGrowth: number;
 }

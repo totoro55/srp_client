@@ -83,11 +83,19 @@ function blankPremiums(indicators: readonly CabinetIndicator[]): Record<string, 
     return Object.fromEntries(indicators.map((indicator) => [indicator.id, null]));
 }
 
-function rowPremiums(indicators: readonly CabinetIndicator[], salePremium: number | undefined): Record<string, number | null> {
+function rowPremiums(
+    indicators: readonly CabinetIndicator[],
+    salePremium: number | undefined,
+    releasePremium: number | undefined,
+): Record<string, number | null> {
     const premiums = blankPremiums(indicators);
     const sales = indicators.find((indicator) => indicator.title === "Продажа товара");
+    const release = indicators.find((indicator) => indicator.title === "Выдача товара");
     if (sales && salePremium !== undefined) {
         premiums[sales.id] = salePremium;
+    }
+    if (release && releasePremium !== undefined) {
+        premiums[release.id] = releasePremium;
     }
     return premiums;
 }
@@ -352,7 +360,7 @@ export function BranchBonuses() {
                 forecastPay: null,
             },
             fixed: fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, timesheetHours),
-            premiums: rowPremiums(columns.baskets, directory.salePremiums[roleKey(employee)]),
+            premiums: rowPremiums(columns.baskets, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)]),
             total: null,
             brigade: brigadeName(employee.id, slice.savedBrigades, true),
         } satisfies BonusRow];
@@ -395,7 +403,7 @@ export function BranchBonuses() {
         ?? (directory.branches.length === 0 && !directory.loading ? "За этот месяц штатное расписание не загружено." : null);
 
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 [@media(max-height:500px)]:gap-2!">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 max-sm:h-auto max-sm:flex-none [@media(max-height:500px)]:gap-2!">
             <div className="flex shrink-0 flex-col gap-1.5 p-0.5 sm:flex-row sm:items-center sm:gap-2">
                 <BranchPeriodField />
                 <div className="flex min-w-0 items-center gap-1.5 sm:ml-auto sm:flex-none sm:gap-2">
@@ -463,7 +471,7 @@ export function BranchBonuses() {
             ) : null}
             {blocked ? <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{blocked}</p> : null}
             {pending || blocked ? null : <>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border sm:hidden">
+            <div className="overflow-visible rounded-lg border sm:hidden">
                 {visible.length === 0 ? (
                     <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyText}</p>
                 ) : visible.map((row) => (
@@ -665,7 +673,7 @@ function BonusListItem({
         })),
     ];
     return (
-        <Collapsible open={open} onOpenChange={setOpen} className="border-b last:border-b-0">
+        <Collapsible open={open} onOpenChange={setOpen} data-scroll-row="" className="border-b last:border-b-0">
             <CollapsibleTrigger className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-muted/60">
                 <span className="min-w-0 flex-1">
                     <span className={cn("block rounded-md", movementNameClass(movement))}>

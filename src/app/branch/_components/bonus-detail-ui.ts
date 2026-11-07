@@ -4,8 +4,7 @@ export const detailAmountClass = "justify-self-end text-right tabular-nums";
 
 export const detailChevronClass = "size-4 shrink-0 justify-self-end text-muted-foreground transition-transform";
 
-export const detailTableFrameClass =
-    "overflow-x-auto overscroll-x-contain rounded-xl border [-webkit-overflow-scrolling:touch]";
+export const detailTableFrameClass = "overflow-visible rounded-xl border";
 
 export const detailTableInnerClass = "min-w-full";
 
@@ -33,7 +32,7 @@ export const detailGridWarranty =
 export const detailGridUnload =
     "grid w-full grid-cols-[5.5rem_minmax(5rem,0.7fr)_4.5rem_minmax(7rem,1.1fr)_5.5rem] items-center gap-x-2 sm:grid-cols-[6.5rem_minmax(6rem,0.7fr)_5.5rem_minmax(10rem,1.2fr)_7.5rem] sm:gap-x-3";
 
-export const detailHeaderClass = "border-b bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground sm:px-3";
+export const detailHeaderClass = "border-b bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground sm:sticky sm:top-0 sm:z-10 sm:bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] sm:px-3";
 
 export const detailRowClass = "border-b px-2.5 py-2.5 text-sm last:border-b-0 sm:px-3";
 

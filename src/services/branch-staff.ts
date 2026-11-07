@@ -1,6 +1,7 @@
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
 import { priceGrowthAllowanceFor } from "@/services/price-growth";
+import { readBranchReleasePremiumDays } from "@/services/release-premium";
 import { readBranchSalePremiumDays } from "@/services/sale-premium";
 
 export interface BranchOption {
@@ -61,7 +62,7 @@ export async function readBranchStaff(
     access: AccessView,
     period: string,
     branchId: string | null,
-): Promise<{ branches: BranchOption[]; employees: BranchStaffRow[]; indicators: ConnectedBasketIndicator[]; salePremiums: Record<string, number>; baseBonus: number | null; priceGrowth: number }> {
+): Promise<{ branches: BranchOption[]; employees: BranchStaffRow[]; indicators: ConnectedBasketIndicator[]; salePremiums: Record<string, number>; releasePremiums: Record<string, number>; baseBonus: number | null; priceGrowth: number }> {
     const branches = await db.query<BranchOption>(
         `
         SELECT branch.uuid::text AS id,
@@ -104,10 +105,10 @@ export async function readBranchStaff(
         ? branches.find((branch) => branch.id.toLowerCase() === branchId.toLowerCase())
         : undefined;
     if (!selected) {
-        return { branches, employees: [], indicators: [], salePremiums: {}, baseBonus: null, priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0 };
+        return { branches, employees: [], indicators: [], salePremiums: {}, releasePremiums: {}, baseBonus: null, priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0 };
     }
 
-    const [versions, days, premiumDays] = await Promise.all([
+    const [versions, days, premiumDays, releaseDays] = await Promise.all([
         db.query<StaffVersion>(
             `
             -- Строки сотрудника с предыдущего месяца до конца выбранного:
@@ -156,6 +157,7 @@ export async function readBranchStaff(
             [period, selected.id],
         ),
         readBranchSalePremiumDays(period, selected.id),
+        readBranchReleasePremiumDays(period, selected.id),
     ]);
     const employees = staffSegments(versions, days, selected.id.toLowerCase(), period);
 
@@ -164,6 +166,7 @@ export async function readBranchStaff(
         employees,
         indicators: await readConnectedIndicators(period, selected.id),
         salePremiums: premiumsBySegment(employees, premiumDays),
+        releasePremiums: premiumsBySegment(employees, releaseDays),
         baseBonus: selected ? await readBaseBonus(period, selected.id) : null,
         priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,
     };
