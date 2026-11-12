@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HelpDrawer } from "@/components/help-drawer";
-import { ButtonSpinner, StackSkeleton } from "@/components/loading-state";
+import { ButtonSpinner, StackSkeleton, TableSkeleton } from "@/components/loading-state";
 import { useAccess } from "@/hooks/useAccess";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";

@@ -232,6 +232,13 @@ export interface SharedPremiumAuthorRow {
     activeFrom: string;
 }
 
+function authorKind(value: string): SharedPremiumAuthorRow["kind"] | null {
+    if (value === "staff" || value === "promoter" || value === "system") {
+        return value;
+    }
+    return null;
+}
+
 export async function readSharedPremiumAuthors(
     access: AccessView,
     period: string,
@@ -299,15 +306,19 @@ export async function readSharedPremiumAuthors(
         const sale = amount(row.sale);
         const release = amount(row.release);
         const kassa = amount(row.kassa);
-        if (sale === null || release === null || kassa === null || (row.kind !== "staff" && row.kind !== "promoter" && row.kind !== "system")) {
+        if (sale === null || release === null || kassa === null) {
             return [];
         }
-        const account = row.kind === "system" ? technicalAccount(row.id) : null;
+        const kind = authorKind(row.kind);
+        if (!kind) {
+            return [];
+        }
+        const account = kind === "system" ? technicalAccount(row.id) : null;
         return [{
             id: row.id,
             name: account?.name ?? row.name,
             title: row.title,
-            kind: row.kind,
+            kind,
             sale,
             release,
             kassa,

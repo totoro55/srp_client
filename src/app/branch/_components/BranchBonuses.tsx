@@ -774,28 +774,31 @@ function BonusListItem({
                 <div className="border-t px-3 py-1">
                     <EmployeeStatusNote movement={movement} movementOn={row.employee.movementOn} partial={row.employee.partial} from={row.employee.activeFrom} until={row.employee.activeUntil} className="px-1.5 py-1" />
                     <dl>
-                    {details.map((item) => (
+                    {details.map((item) => {
+                        const destination = "open" in item && item.open ? item.open : null;
+                        return (
                         <div
                             key={item.label}
-                            role={"open" in item && item.open ? "link" : undefined}
-                            tabIndex={"open" in item && item.open ? 0 : undefined}
+                            role={destination ? "link" : undefined}
+                            tabIndex={destination ? 0 : undefined}
                             className={cn(
                                 "flex items-baseline justify-between gap-3 rounded-md px-1.5 py-1.5 text-sm",
-                                "open" in item && item.open && "cursor-pointer hover:bg-muted/60",
+                                destination && "cursor-pointer hover:bg-muted/60",
                             )}
                             style={"heat" in item ? item.heat : undefined}
-                            onClick={"open" in item && item.open ? () => router.push(item.open) : undefined}
-                            onKeyDown={"open" in item && item.open ? (event) => {
+                            onClick={destination ? () => router.push(destination) : undefined}
+                            onKeyDown={destination ? (event) => {
                                 if (event.key === "Enter" || event.key === " ") {
                                     event.preventDefault();
-                                    router.push(item.open);
+                                    router.push(destination);
                                 }
                             } : undefined}
                         >
                             <dt className="text-muted-foreground">{item.label}</dt>
                             <dd className={cn("tabular-nums", item.amount === 0 && !valueTone && "text-muted-foreground", valueTone)}>{formatAmount(item.amount)}</dd>
                         </div>
-                    ))}
+                        );
+                    })}
                     </dl>
                 </div>
             </CollapsibleContent>
