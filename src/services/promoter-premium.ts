@@ -33,7 +33,7 @@ export async function readBranchPromoterPremiums(period: string, branchId: strin
               FROM raw.hr_ktu regular
               WHERE lower(regular.employees_uuid::text) = lower(staff.employees_uuid::text)
                 AND regular.date_modified < ($1::date + INTERVAL '1 month')
-                AND btrim(regular.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                AND btrim(regular.branch_uuid::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
           )
         ORDER BY staff.employees_uuid, staff.date_modified DESC
         `,
@@ -70,7 +70,7 @@ export function limitPremiumAuthors(sql: string, ids: string[]): string {
     }
     const list = ids.filter((id) => AUTHOR_UUID.test(id)).map((id) => `'${id}'`).join(", ");
     const authors = list.length > 0
-        ? `(lower(btrim(sale.author)) IN (${list}) OR lower(btrim(sale.author2)) IN (${list}))`
+        ? `(lower(btrim(sale.author::text)) IN (${list}) OR lower(btrim(sale.author2::text)) IN (${list}))`
         : "FALSE";
     return sql.replaceAll(
         "sale.period = $1::timestamp",

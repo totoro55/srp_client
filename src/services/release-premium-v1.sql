@@ -65,15 +65,15 @@ issue_hits AS (
     WHERE $2::text IS NOT NULL
       AND sale.period = $1::timestamp
       AND sale.author2 IS NOT NULL
-      AND btrim(sale.author2) <> ''
-      AND lower(btrim(sale.author2)) = lower(btrim($2))
+      AND btrim(sale.author2::text) <> ''
+      AND lower(btrim(sale.author2::text)) = lower(btrim($2))
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
     WHERE $2::text IS NULL
       AND sale.period = $1::timestamp
       AND sale.author2 IS NOT NULL
-      AND btrim(sale.author2) <> ''
+      AND btrim(sale.author2::text) <> ''
       AND (
           $4::date IS NULL
           OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
@@ -101,7 +101,7 @@ SELECT $1::date AS period,
        NULLIF(btrim(sale.name_product), '') AS product_name
 FROM issue_hits sale
 CROSS JOIN LATERAL (
-    SELECT NULLIF(lower(btrim(sale.author2)), '') AS employee_uuid
+    SELECT NULLIF(lower(btrim(sale.author2::text)), '') AS employee_uuid
 ) issuer
 JOIN main.author_days author_day
     ON author_day.period = $1::date

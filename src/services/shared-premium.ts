@@ -744,8 +744,8 @@ async function readOutsideContributions(
         const selectSql = sourceSql.replaceAll(
             "sale.period = $1::timestamp",
             `sale.period = $1::timestamp AND (
-                lower(btrim(sale.author)) IN (SELECT outside_author.id FROM outside_authors outside_author)
-                OR lower(btrim(sale.author2)) IN (SELECT outside_author.id FROM outside_authors outside_author)
+                lower(btrim(sale.author::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)
+                OR lower(btrim(sale.author2::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)
             )`,
         );
         const saleFile = file !== "release-premium-v1.sql";
@@ -792,7 +792,7 @@ ${selectSql}
     }
     const kassaSelect = kassaSql.replaceAll(
         "operation.period = $1::timestamp",
-        `operation.period = $1::timestamp AND lower(btrim(operation.author)) IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        `operation.period = $1::timestamp AND lower(btrim(operation.author::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)`,
     );
     const kassaRows = await query<{ branch: string; employee: string; kind: string; premium: number | string }>(
         `
@@ -911,7 +911,7 @@ async function readVersions(query: PremiumQuery, period: string, asOf: string): 
         SELECT lower(staff.employees_uuid::text) AS id,
                COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
-               lower(btrim(staff.branch_uuid)) AS "branchId",
+               lower(btrim(staff.branch_uuid::text)) AS "branchId",
                COALESCE(staff.title, '') AS title,
                staff.ktu,
                staff.probation,

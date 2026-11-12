@@ -122,7 +122,7 @@ export async function readStaffingBranches(access: AccessView, period: string): 
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period = $3::date
-                    AND lower(staff.branch_uuid) = lower(branch.uuid::text)
+                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
               )
             ORDER BY territory.name, branch.name
             `,
@@ -153,7 +153,7 @@ export async function readStaffing(
         SELECT staff.employees_uuid AS "employeeId",
                COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                COALESCE(territory.name, 'РРС не найдена') AS "territoryName",
-               lower(staff.branch_uuid) AS "branchId",
+               lower(staff.branch_uuid::text) AS "branchId",
                COALESCE(branch.name, 'Филиал не найден') AS "branchName",
                to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
                COALESCE(staff.title, '') AS title,
@@ -169,16 +169,16 @@ export async function readStaffing(
         LEFT JOIN employees employee
             ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
         LEFT JOIN branches branch
-            ON lower(branch.uuid::text) = lower(staff.branch_uuid)
+            ON lower(branch.uuid::text) = lower(staff.branch_uuid::text)
         LEFT JOIN territories territory
             ON territory.uuid = branch.territory_uuid
         LEFT JOIN raw.basic_bonuses bonus
             ON bonus.period = staff.period
-           AND lower(bonus.branch_uuid::text) = lower(staff.branch_uuid)
+           AND lower(bonus.branch_uuid::text) = lower(staff.branch_uuid::text)
         LEFT JOIN LATERAL (
             SELECT role.role_id, role.automatic
             FROM branch_motivation_roles role
-            WHERE lower(role.branch_uuid) = lower(staff.branch_uuid)
+            WHERE lower(role.branch_uuid) = lower(staff.branch_uuid::text)
               AND lower(role.employee_uuid) = lower(staff.employees_uuid::text)
               AND role.period <= staff.period
             ORDER BY role.period DESC
@@ -188,7 +188,7 @@ export async function readStaffing(
           AND ${SCOPE}
           AND (
               ($4::text = '' AND $6::text = '')
-              OR lower(staff.branch_uuid) = ANY (string_to_array($4, ','))
+              OR lower(staff.branch_uuid::text) = ANY (string_to_array($4, ','))
               OR lower(territory.uuid::text) = ANY (string_to_array($6, ','))
           )
           AND (

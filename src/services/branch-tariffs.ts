@@ -129,7 +129,7 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period = $3::date
-                    AND lower(staff.branch_uuid) = lower(branch.uuid::text)
+                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
           )

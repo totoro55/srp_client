@@ -30,7 +30,7 @@ COMMENT ON COLUMN raw.kassa_oper."minute" IS
     'Минуты операции. Премия — минуты, умноженные на тариф территории и коэффициент филиала.';
 
 CREATE INDEX IF NOT EXISTS kassa_oper_period_author_idx
-    ON raw.kassa_oper ("period", lower(btrim(author)));
+    ON raw.kassa_oper ("period", lower(btrim(author::text)));
 
 COMMENT ON INDEX raw.kassa_oper_period_author_idx IS
     'Кассовые операции сотрудника за месяц.';

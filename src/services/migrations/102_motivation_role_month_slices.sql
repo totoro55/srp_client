@@ -20,7 +20,7 @@ FROM (
 ) source
 JOIN (
     SELECT DISTINCT period,
-           lower(branch_uuid) AS branch,
+           lower(branch_uuid::text) AS branch,
            lower(employees_uuid::text) AS employee
     FROM raw.hr_ktu
 ) staff

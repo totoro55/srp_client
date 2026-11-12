@@ -2,11 +2,11 @@
 -- Повторный запуск не пересоздаёт индексы.
 
 CREATE INDEX IF NOT EXISTS sale_period_author_idx
-    ON raw.sale (period, lower(btrim(author)));
+    ON raw.sale (period, lower(btrim(author::text)));
 
 CREATE INDEX IF NOT EXISTS sale_period_author2_idx
-    ON raw.sale (period, lower(btrim(author2)))
-    WHERE author2 IS NOT NULL AND btrim(author2) <> '';
+    ON raw.sale (period, lower(btrim(author2::text)))
+    WHERE author2 IS NOT NULL AND btrim(author2::text) <> '';
 
 COMMENT ON INDEX raw.sale_period_author_idx IS
     'Продажи сотрудника за месяц по автору документа.';

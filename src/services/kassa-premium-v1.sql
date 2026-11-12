@@ -57,15 +57,15 @@ operation_hits AS (
     WHERE $2::text IS NOT NULL
       AND operation.period = $1::timestamp
       AND operation.author IS NOT NULL
-      AND btrim(operation.author) <> ''
-      AND lower(btrim(operation.author)) = lower(btrim($2))
+      AND btrim(operation.author::text) <> ''
+      AND lower(btrim(operation.author::text)) = lower(btrim($2))
     UNION ALL
     SELECT operation.*
     FROM raw.kassa_oper operation
     WHERE $2::text IS NULL
       AND operation.period = $1::timestamp
       AND operation.author IS NOT NULL
-      AND btrim(operation.author) <> ''
+      AND btrim(operation.author::text) <> ''
       AND (
           $4::date IS NULL
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
@@ -83,7 +83,7 @@ SELECT $1::date AS period,
        ROUND(operation.minute::numeric * rates.rate * COALESCE(coef.value, 1), 2) AS premium
 FROM operation_hits operation
 CROSS JOIN LATERAL (
-    SELECT NULLIF(lower(btrim(operation.author)), '') AS employee_uuid
+    SELECT NULLIF(lower(btrim(operation.author::text)), '') AS employee_uuid
 ) issuer
 JOIN main.author_days author_day
     ON author_day.period = $1::date

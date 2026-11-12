@@ -69,15 +69,15 @@ sale_hits AS (
     FROM raw.sale sale
     WHERE $2::text IS NOT NULL
       AND sale.period = $1::timestamp
-      AND lower(btrim(sale.author)) = lower(btrim($2))
-      AND lower(btrim(sale.author)) NOT IN (SELECT author FROM site_authors)
+      AND lower(btrim(sale.author::text)) = lower(btrim($2))
+      AND lower(btrim(sale.author::text)) NOT IN (SELECT author FROM site_authors)
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
     WHERE $2::text IS NOT NULL
       AND sale.period = $1::timestamp
-      AND lower(btrim(sale.author2)) = lower(btrim($2))
-      AND lower(btrim(sale.author)) IN (SELECT author FROM site_authors)
+      AND lower(btrim(sale.author2::text)) = lower(btrim($2))
+      AND lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors)
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
@@ -118,7 +118,7 @@ sale_lines AS (
                CASE
                    -- Безнал перекрывает автора интернет-магазина.
                    WHEN COALESCE(sale.b2b, FALSE) THEN 'b2b'
-                   WHEN lower(btrim(sale.author)) IN (SELECT author FROM site_authors) THEN 'im'
+                   WHEN lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors) THEN 'im'
                    ELSE 'main'
                END AS channel,
                lower(btrim(sale.brend)) IN (
@@ -134,9 +134,9 @@ sale_lines AS (
         FROM sale_hits sale
         CROSS JOIN LATERAL (
             SELECT CASE
-                       WHEN lower(btrim(sale.author)) IN (SELECT author FROM site_authors)
-                           THEN NULLIF(lower(btrim(sale.author2)), '')
-                       ELSE NULLIF(lower(btrim(sale.author)), '')
+                       WHEN lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors)
+                           THEN NULLIF(lower(btrim(sale.author2::text)), '')
+                       ELSE NULLIF(lower(btrim(sale.author::text)), '')
                    END AS employee_uuid
         ) seller
         JOIN main.author_days author_day

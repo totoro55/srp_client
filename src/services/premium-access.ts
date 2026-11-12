@@ -18,14 +18,14 @@ function workedAssignmentsSql(employeeIdSql: string, periodSql: string): string 
                    LEAD(assignment.started) OVER (ORDER BY assignment.started, assignment.branch_id) AS ended
             FROM (
                 SELECT DISTINCT ON (staff.date_modified)
-                       lower(btrim(staff.branch_uuid)) AS branch_id,
+                       lower(btrim(staff.branch_uuid::text)) AS branch_id,
                        staff.date_modified AS started,
                        btrim(COALESCE(staff.status, '')) AS status
                 FROM raw.hr_ktu staff
                 WHERE ${employeeIdSql} IS NOT NULL
                   AND lower(staff.employees_uuid::text) = ${employeeIdSql}
                   AND staff.date_modified IS NOT NULL
-                  AND btrim(staff.branch_uuid) ~* '${BRANCH_UUID}'
+                  AND btrim(staff.branch_uuid::text) ~* '${BRANCH_UUID}'
                 ORDER BY staff.date_modified, staff.period DESC NULLS LAST
             ) assignment
         ) version
@@ -249,7 +249,7 @@ export async function branchVisible(access: AccessView, period: string, branchId
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period <= $3::date
-                    AND lower(staff.branch_uuid) = lower(branch.uuid::text)
+                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
           )

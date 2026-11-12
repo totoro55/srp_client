@@ -68,13 +68,13 @@ export async function replaceAuthorDays(query: PremiumQuery, period: string, asO
                 SELECT DISTINCT ON (lower(staff.employees_uuid::text), staff.date_modified)
                        lower(staff.employees_uuid::text) AS employee_uuid,
                        staff.date_modified,
-                       lower(btrim(staff.branch_uuid))::uuid AS branch_uuid,
+                       lower(btrim(staff.branch_uuid::text))::uuid AS branch_uuid,
                        COALESCE(staff.status, '') AS status
                 FROM raw.hr_ktu staff
                 WHERE staff.employees_uuid IS NOT NULL
                   AND staff.date_modified IS NOT NULL
                   AND ($2::date IS NULL OR staff.date_modified <= $2::date)
-                  AND btrim(staff.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                  AND btrim(staff.branch_uuid::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                 ORDER BY lower(staff.employees_uuid::text), staff.date_modified, staff.period DESC NULLS LAST
             ) version
         ) segment
