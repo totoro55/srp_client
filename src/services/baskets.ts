@@ -68,6 +68,8 @@ interface VersionRow {
     settings: unknown;
     tariffAxis: string | null;
     publishedAt: Date | string | null;
+    wikiArticleId: number | null;
+    wikiArticleTitle: string | null;
 }
 
 interface VersionChangeRow {
@@ -149,17 +151,20 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
     const versions = await db.query<VersionRow>(
         `
         SELECT
-            id,
-            version_no AS "versionNo",
-            name,
-            description,
-            status,
-            settings,
-            tariff_axis AS "tariffAxis",
-            published_at AS "publishedAt"
-        FROM basket_versions
-        WHERE basket_id = $1
-        ORDER BY version_no DESC
+            version.id,
+            version.version_no AS "versionNo",
+            version.name,
+            version.description,
+            version.status,
+            version.settings,
+            version.tariff_axis AS "tariffAxis",
+            version.published_at AS "publishedAt",
+            article.id AS "wikiArticleId",
+            article.title AS "wikiArticleTitle"
+        FROM basket_versions version
+        LEFT JOIN wiki_articles article ON article.id = version.wiki_article_id
+        WHERE version.basket_id = $1
+        ORDER BY version.version_no DESC
         `,
         [id]
     );
@@ -490,6 +495,20 @@ export async function updateBasketVersion(
                 throw new BasketRuleError(400, boundsIssue);
             }
         }
+        if (input.wikiArticleId !== null) {
+            const articles = await query<{ id: number }>(
+                `
+                SELECT id
+                FROM wiki_articles
+                WHERE id = $1
+                  AND NOT archived
+                `,
+                [input.wikiArticleId],
+            );
+            if (!articles[0]) {
+                throw new BasketRuleError(400, "Связать можно статью, которая не лежит в архиве");
+            }
+        }
 
         await query(
             `
@@ -497,10 +516,11 @@ export async function updateBasketVersion(
             SET name = $2,
                 description = $3,
                 settings = $4::jsonb,
-                tariff_axis = $5
+                tariff_axis = $5,
+                wiki_article_id = $6
             WHERE id = $1
             `,
-            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings)), settings.tariffAxis]
+            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings)), settings.tariffAxis, input.wikiArticleId]
         );
         await insertVersionChange(query, versionId, {
             comment: input.comment,
@@ -622,15 +642,15 @@ export async function openBasketDraft(
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const sources = await query<{ versionNo: number; name: string; settings: unknown; tariffAxis: string | null }>(
+        const sources = await query<{ versionNo: number; name: string; settings: unknown; tariffAxis: string | null; wikiArticleId: number | null }>(
             sourceVersionId
                 ? `
-                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis"
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", wiki_article_id AS "wikiArticleId"
                 FROM basket_versions
                 WHERE basket_id = $1 AND id = $2
                 `
                 : `
-                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis"
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", wiki_article_id AS "wikiArticleId"
                 FROM basket_versions
                 WHERE basket_id = $1
                 ORDER BY version_no DESC
@@ -651,11 +671,18 @@ export async function openBasketDraft(
         const name = `Версия ${versionNo}`;
         const created = await query<{ id: number }>(
             `
-            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings, tariff_axis)
-            VALUES ($1, $2, 'draft', $3, '', $4::jsonb, $5)
+            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings, tariff_axis, wiki_article_id)
+            VALUES ($1, $2, 'draft', $3, '', $4::jsonb, $5, $6)
             RETURNING id
             `,
-            [basketId, versionNo, name, JSON.stringify(source.settings ?? {}), isTariffAxis(source.tariffAxis) ? source.tariffAxis : null]
+            [
+                basketId,
+                versionNo,
+                name,
+                JSON.stringify(source.settings ?? {}),
+                isTariffAxis(source.tariffAxis) ? source.tariffAxis : null,
+                source.wikiArticleId,
+            ]
         );
         const versionId = created[0]?.id;
         if (!versionId) {
@@ -773,6 +800,7 @@ function toVersion(row: VersionRow, changes: VersionChangeRow[]): BasketVersion 
         status: row.status,
         settings,
         publishedAt: toIso(row.publishedAt),
+        wikiArticle: row.wikiArticleId === null ? null : { id: row.wikiArticleId, title: row.wikiArticleTitle?.trim() || "Статья" },
         changes: changes.map((change) => ({
             id: change.id,
             comment: change.comment,

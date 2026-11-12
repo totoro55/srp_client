@@ -20,6 +20,7 @@ import { CoefficientTable, coefficientCellDirty, coefficientFieldKey } from "../
 import { PeriodChangeHistory } from "../../../_components/PeriodChangeHistory";
 import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
+import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
 import { formatMonth } from "../../../_components/model";
 
 export function BranchCoefficients() {
@@ -162,7 +163,11 @@ export function BranchCoefficients() {
                 open={confirmSave}
                 title="Сохранить коэффициенты"
                 description={page
-                    ? `Коэффициенты филиалов «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`
+                    ? premiumSaveDescription(
+                        `Коэффициенты филиалов «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`,
+                        page.period,
+                        "Премия по изменённым корзинам будет пересчитана для филиалов, коэффициенты которых изменены.",
+                    )
                     : ""}
                 confirmLabel="Сохранить"
                 confirmVariant="default"

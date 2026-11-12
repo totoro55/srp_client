@@ -3,17 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { DataTableSkeleton } from "@/components/loading-state";
 import { buttonVariants } from "@/components/ui/button";
-import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { technicalAccount } from "@/lib/technical-accounts";
 import { useBranchDirectory } from "./branch-directory";
-import { findStaffSegment, roleKey, segmentHref } from "./staff";
-import { useBranchStore } from "./branch-store";
+import { findStaffSegment, segmentHref } from "./staff";
 import { useBranchLocation } from "./BranchFrame";
 import { DisplayBonusDetail } from "./DisplayBonusDetail";
 import { DocumentPremiumDetail } from "./DocumentPremiumDetail";
 import { IssueBonusDetail, PickingBonusDetail } from "./IssueBonusDetail";
+import { KassaBonusDetail } from "./KassaBonusDetail";
 import { ReleaseBonusDetail } from "./ReleaseBonusDetail";
 import { SalesBonusDetail } from "./SalesBonusDetail";
 import { ServiceBonusDetail } from "./ServiceBonusDetail";
@@ -21,7 +22,6 @@ import { UnloadBonusDetail } from "./UnloadBonusDetail";
 import { WarehouseBonusDetail } from "./WarehouseBonusDetail";
 import {
     branchMonth,
-    inCalculation,
     periodLines,
     withBranchQuery,
 } from "./mock";
@@ -31,34 +31,33 @@ export function BonusLines() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { branchId, period } = useBranchLocation();
-    const store = useBranchStore();
     const listRef = useRef<HTMLDivElement>(null);
     const [edges, setEdges] = useState({ left: false, right: false });
     const directory = useBranchDirectory();
-    const settings = useMotivationRoles();
     const employee = findStaffSegment(directory.employees, params.employeeId, searchParams.get("from"));
+    const account = technicalAccount(params.employeeId);
     const part = searchParams.get("part");
     const month = employee && employee.branchId === branchId ? branchMonth(branchId, period) : null;
-    const slice = store.slice(branchId, period, directory.employees, settings);
-    const roleId = employee ? (slice.savedRoles[roleKey(employee)] ?? null) : null;
-    const participating = employee ? inCalculation(employee, roleId) : false;
-    const lines = employee && participating && month ? periodLines(employee.id, period, month.calculated) : [];
+    const lines = employee && month ? periodLines(employee.id, period, month.calculated) : [];
     const salesIndicator = directory.indicators.find((indicator) => indicator.title === "Продажа товара");
     const releaseIndicator = directory.indicators.find((indicator) => indicator.title === "Выдача товара");
+    const kassaIndicator = directory.indicators.find((indicator) => indicator.title === "Кассовые операции");
     const mockBaskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
-    const liveBaskets = [salesIndicator, releaseIndicator].flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
+    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator].flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
     const baskets = month?.calculated && mockBaskets.length > 0 ? mockBaskets : liveBaskets;
     const knownPart = part !== null && baskets.some(([basketId]) => basketId === part);
     const tab = knownPart && part ? part : (baskets[0]?.[0] ?? "");
 
     useEffect(() => {
-        if (!employee || employee.branchId !== branchId || baskets.length === 0) {
+        const personId = account?.id ?? employee?.id ?? params.employeeId;
+        if (!personId || (employee && employee.branchId !== branchId) || baskets.length === 0) {
             return;
         }
         if (!knownPart) {
-            router.replace(segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, baskets[0][0]), employee.activeFrom));
+            const href = withBranchQuery(`/branch/bonuses/${personId}/lines`, branchId, period, baskets[0][0]);
+            router.replace(employee ? segmentHref(href, employee.activeFrom) : href);
         }
-    }, [baskets, branchId, employee, knownPart, period, router]);
+    }, [account?.id, baskets, branchId, employee, knownPart, params.employeeId, period, router]);
 
     useEffect(() => {
         const node = listRef.current;
@@ -104,11 +103,12 @@ export function BonusLines() {
         node.scrollBy({ left: direction * node.clientWidth, behavior: "smooth" });
     }
 
-    if (!employee || employee.branchId !== branchId) {
+    const personId = account?.id ?? employee?.id ?? params.employeeId ?? null;
+    if (!personId || (employee && employee.branchId !== branchId)) {
         return null;
     }
-    if (!participating) {
-        return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Сотрудник в этом месяце вне расчёта.</p>;
+    if (directory.loading && baskets.length === 0) {
+        return <DataTableSkeleton columns={4} />;
     }
     if (baskets.length === 0) {
         return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Расчёт за этот месяц ещё не готов.</p>;
@@ -123,7 +123,8 @@ export function BonusLines() {
                 <Tabs
                     value={tab}
                     onValueChange={(next) => {
-                        router.replace(segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, next), employee.activeFrom));
+                        const href = withBranchQuery(`/branch/bonuses/${personId}/lines`, branchId, period, next);
+                        router.replace(employee ? segmentHref(href, employee.activeFrom) : href);
                     }}
                     className="min-w-0 gap-0"
                 >
@@ -193,25 +194,27 @@ export function BonusLines() {
             </div>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {tab === "sales" || tab === salesIndicator?.id ? (
-                    <SalesBonusDetail employeeId={employee.id} period={period} />
+                    <SalesBonusDetail employeeId={personId} period={period} />
                 ) : tab === releaseIndicator?.id ? (
-                    <ReleaseBonusDetail employeeId={employee.id} period={period} />
+                    <ReleaseBonusDetail employeeId={personId} period={period} />
+                ) : tab === kassaIndicator?.id ? (
+                    <KassaBonusDetail employeeId={personId} period={period} />
                 ) : tab === "issue" ? (
-                    <IssueBonusDetail employeeId={employee.id} period={period} />
+                    <IssueBonusDetail employeeId={personId} period={period} />
                 ) : tab === "picking" ? (
-                    <PickingBonusDetail employeeId={employee.id} period={period} />
+                    <PickingBonusDetail employeeId={personId} period={period} />
                 ) : tab === "unload" ? (
-                    <UnloadBonusDetail employeeId={employee.id} period={period} />
+                    <UnloadBonusDetail employeeId={personId} period={period} />
                 ) : tab === "warehouse" ? (
-                    <WarehouseBonusDetail employeeId={employee.id} period={period} />
+                    <WarehouseBonusDetail employeeId={personId} period={period} />
                 ) : tab === "display" ? (
-                    <DisplayBonusDetail employeeId={employee.id} period={period} />
+                    <DisplayBonusDetail employeeId={personId} period={period} />
                 ) : tab === "services" ? (
-                    <ServiceBonusDetail employeeId={employee.id} period={period} kind="services" />
+                    <ServiceBonusDetail employeeId={personId} period={period} kind="services" />
                 ) : tab === "kbt" ? (
-                    <ServiceBonusDetail employeeId={employee.id} period={period} kind="kbt" />
+                    <ServiceBonusDetail employeeId={personId} period={period} kind="kbt" />
                 ) : tab === "warranty" || tab === "delivery" || tab === "sim" || tab === "credits" ? (
-                    <DocumentPremiumDetail employeeId={employee.id} period={period} kind={tab} />
+                    <DocumentPremiumDetail employeeId={personId} period={period} kind={tab} />
                 ) : null}
             </div>
         </div>

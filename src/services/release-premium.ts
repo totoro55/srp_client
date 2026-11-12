@@ -1,80 +1,69 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { DETAIL_STATEMENT_TIMEOUT_MS } from "@/lib/detail-timeout";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { AccessView } from "@/server/authz/resolve-access";
+import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
-import { branchVisible, SalePremiumError } from "@/services/sale-premium";
+import { assignmentSql } from "@/services/promoter-premium";
+import { branchVisible, premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-const SNAPSHOT_COLUMNS = "period, territory_uuid, branch_uuid, employee_uuid, version_id, category_code, quantity_tariff, volume_tariff, item_count, volume, premium, link_doc, document_number, document_date, product_name";
+const RELEASE_INDICATOR = "Выдача товара";
 
-export async function calculateReleasePremium(period: string): Promise<number> {
+export async function calculateReleasePremium(period: string, refreshSchedule = true, run?: PremiumRun): Promise<number> {
     if (!PERIOD.test(period)) {
         throw new SalePremiumError("Укажите месяц");
     }
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
-    if (!monthIsOpen(period.slice(0, 7), policy)) {
+    if (!run?.allowClosed && !monthIsOpen(period.slice(0, 7), policy)) {
         throw new SalePremiumError(closedPeriodMessage(policy));
     }
+    const asOf = premiumAsOf(run);
     const selectSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
-    const params = [period, null, null, null, null];
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
         await query("SET LOCAL statement_timeout = 0");
-        await query(
-            `
-            DELETE FROM main.release_premium_lines
-            WHERE period = $1::date
-              AND version_id IN (
-                  SELECT version.id
-                  FROM baskets basket
-                  JOIN indicators indicator ON indicator.id = basket.indicator_id
-                  JOIN basket_versions version ON version.basket_id = basket.id
-                  WHERE indicator.name = 'Выдача товара'
-                    AND version.version_no = 1
-                    AND version.data_table = 'release_v1'
-              )
-            `,
-            [period],
-        );
-        await query(`INSERT INTO main.release_premium_lines (${SNAPSHOT_COLUMNS})\n${selectSql}`, params);
-        const rows = await query<{ lines: number }>(
-            `
-            SELECT count(*)::int AS lines
-            FROM main.release_premium_lines
-            WHERE period = $1::date
-              AND version_id IN (
-                  SELECT version.id
-                  FROM baskets basket
-                  JOIN indicators indicator ON indicator.id = basket.indicator_id
-                  JOIN basket_versions version ON version.basket_id = basket.id
-                  WHERE indicator.name = 'Выдача товара'
-                    AND version.version_no = 1
-                    AND version.data_table = 'release_v1'
-              )
-            `,
-            [period],
-        );
-        const lines = rows[0]?.lines ?? 0;
-        return typeof lines === "number" ? lines : Number(lines);
+        if (refreshSchedule) {
+            await replaceAuthorDays(query, period, asOf);
+        }
+        return writeOpenPremiumDays(query, period, RELEASE_INDICATOR, [selectSql], { ...run, asOf });
     });
+}
+
+export async function sumDocumentBranchReleasePremium(period: string, branchId: string, employeeId: string): Promise<number> {
+    const selectSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const rows = await db.query<{ premium: number | string }>(
+        `
+        SELECT COALESCE(SUM(line.premium), 0)::float8 AS premium
+        FROM (
+${selectSql}
+        ) line
+        `,
+        [period, employeeId, branchId, null, null, null],
+    );
+    const premium = rows[0]?.premium;
+    const amount = typeof premium === "number" ? premium : Number(premium);
+    return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
 }
 
 export async function readBranchReleasePremiumDays(period: string, branchId: string): Promise<{ id: string; day: string; amount: number }[]> {
     const rows = await db.query<{ id: string; day: string; amount: number | string }>(
         `
-        SELECT lower(employee_uuid) AS id,
-               to_char(COALESCE(document_date::date, period), 'YYYY-MM-DD') AS day,
-               SUM(premium)::float8 AS amount
-        FROM main.release_premium_lines
-        WHERE period = $1::date
-          AND branch_uuid = $2::uuid
-        GROUP BY lower(employee_uuid), COALESCE(document_date::date, period)
+        SELECT lower(day.employee_uuid) AS id,
+               to_char(day.day, 'YYYY-MM-DD') AS day,
+               day.premium::float8 AS amount
+        FROM main.basket_premium_days day
+        JOIN baskets basket ON basket.id = day.basket_id
+        JOIN indicators indicator ON indicator.id = basket.indicator_id
+        WHERE day.period = $1::date
+          AND day.branch_uuid = $2::uuid
+          AND indicator.name = 'Выдача товара'
         `,
         [period, branchId],
     );
@@ -97,24 +86,9 @@ export interface ReleasePremiumDetailLine {
     productName: string;
 }
 
-export interface ReleasePremiumDetailGroup {
-    id: string;
-    title: string;
-    amount: number;
-    lines: ReleasePremiumDetailLine[];
-}
-
-export interface ReleasePremiumDetailQuery {
-    mode: "category" | "document";
-    page: number;
-    pageSize: number;
-    query: string;
-}
-
 export interface ReleasePremiumDetail {
     rowLabel: string;
-    groupCount: number;
-    groups: ReleasePremiumDetailGroup[];
+    lines: ReleasePremiumDetailLine[];
 }
 
 interface ReleaseDetailRow {
@@ -138,7 +112,6 @@ export async function readReleasePremiumDetail(
     employeeId: string,
     activeFrom: string | null,
     activeUntil: string | null,
-    pageQuery: ReleasePremiumDetailQuery,
 ): Promise<ReleasePremiumDetail | null> {
     if (!PERIOD.test(period) || !UUID.test(branchId) || !UUID.test(employeeId)) {
         return null;
@@ -148,7 +121,10 @@ export async function readReleasePremiumDetail(
     if (!await branchVisible(access, period, branchId)) {
         return null;
     }
-    const rows = await db.query<ReleaseDetailRow>(
+    const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, RELEASE_INDICATOR);
+    const sourceSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const selectSql = await assignmentSql(sourceSql, period, employeeId);
+    const rows = await db.queryWithTimeout<ReleaseDetailRow>(
         `
         WITH matched AS MATERIALIZED (
             SELECT line.category_code,
@@ -161,14 +137,9 @@ export async function readReleasePremiumDetail(
                    line.document_number,
                    line.document_date,
                    line.product_name
-            FROM main.release_premium_lines line
-            WHERE line.period = $1::date
-              AND line.branch_uuid = $3::uuid
-              AND line.employee_uuid = lower(btrim($2))
-              AND (
-                  $4::date IS NULL
-                  OR COALESCE(line.document_date::date, line.period) BETWEEN $4::date AND COALESCE($5::date, $4::date)
-              )
+            FROM (
+${selectSql}
+            ) line
         )
         SELECT matched.category_code AS "categoryCode",
                COALESCE(category.name, NULLIF(matched.category_code, ''), 'Без категории') AS "categoryTitle",
@@ -188,7 +159,8 @@ export async function readReleasePremiumDetail(
                     THEN matched.category_code::uuid
             END
         `,
-        [period, employeeId, branchId, from, until],
+        [period, employeeId, branchId, from, until, accrualId],
+        DETAIL_STATEMENT_TIMEOUT_MS,
     );
     const lines = rows.map((row, index) => {
         const documentNumber = row.documentNumber?.trim() || "Без номера";
@@ -204,59 +176,10 @@ export async function readReleasePremiumDetail(
             productName: row.productName?.trim() || "Без названия",
         };
     });
-    const groups = pageQuery.mode === "document"
-        ? groupLines(lines, (line) => line.documentId, (id) => id, (line) => line.documentTitle)
-        : groupLines(lines, (line) => line.categoryTitle, (title) => `category:${title}`);
-    for (const group of groups) {
-        group.lines.sort((left, right) => right.amount - left.amount || left.id.localeCompare(right.id));
-        group.amount = group.lines.reduce((sum, line) => sum + line.amount, 0);
-    }
-    const needle = pageQuery.query.trim().toLowerCase();
-    const filtered = needle
-        ? groups.filter((group) => `${group.title} ${group.lines.map((line) => `${line.productName} ${line.categoryTitle} ${line.documentTitle} ${line.calculation}`).join(" ")}`.toLowerCase().includes(needle))
-        : groups;
-    filtered.sort((left, right) => {
-        const value = pageQuery.mode === "document"
-            ? documentTime(right.title) - documentTime(left.title)
-            : right.amount - left.amount;
-        return value || left.id.localeCompare(right.id, "ru");
-    });
-    const start = pageQuery.page * pageQuery.pageSize;
     return {
         rowLabel: "Категория",
-        groupCount: filtered.length,
-        groups: filtered.slice(start, start + pageQuery.pageSize),
+        lines,
     };
-}
-
-function groupLines(
-    lines: ReleasePremiumDetailLine[],
-    keyOf: (line: ReleasePremiumDetailLine) => string,
-    idOf: (key: string) => string,
-    titleOf: (line: ReleasePremiumDetailLine) => string = (line) => line.categoryTitle,
-): ReleasePremiumDetailGroup[] {
-    const groups = new Map<string, ReleasePremiumDetailGroup>();
-    for (const line of lines) {
-        const key = keyOf(line);
-        const current = groups.get(key);
-        if (current) {
-            current.lines.push(line);
-            current.amount += line.amount;
-            continue;
-        }
-        groups.set(key, { id: idOf(key), title: titleOf(line), amount: line.amount, lines: [line] });
-    }
-    return [...groups.values()];
-}
-
-function documentTime(title: string): number {
-    const match = title.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
-    if (!match) return 0;
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    let year = match[3] ? Number(match[3]) : 2026;
-    if (year < 100) year += 2000;
-    return Date.UTC(year, month - 1, day);
 }
 
 function calculationLabel(row: ReleaseDetailRow): string {

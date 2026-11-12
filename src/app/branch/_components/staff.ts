@@ -92,8 +92,19 @@ export function salaryFromTimesheet(hourly: number, timesheetHours: number | nul
     return hourlyAfterNdfl(hourly) * timesheetHours;
 }
 
+/** В кабинете филиала сотрудник виден, только если по табелю есть часы. */
+export function hasTimesheetHours(timesheetHours: number | null): boolean {
+    return timesheetHours !== null && timesheetHours > 0;
+}
+
 /** Среднемесячная норма часов для фиксированной премии. */
 export const AVERAGE_MONTH_HOURS = 165;
+
+/** Месяц завершён с первого числа следующего месяца по Москве. */
+export function monthHasEnded(period: string, now = new Date()): boolean {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    return period < `${today.slice(0, 7)}-01`;
+}
 
 export function fixedPremium(
     payLevel: number | null,
@@ -110,15 +121,23 @@ export function fixedPremium(
     return amount < 0 ? 0 : amount;
 }
 
-/** Оклад и фиксированная премия по табелю плюс уже посчитанные премии корзин. */
-export function currentPay(salary: number | null, fixed: number | null, basketPremium: number): number | null {
+/** Пустая премия сервиса или корзины в сумму не входит. */
+export function earnedPremium(amounts: readonly (number | null | undefined)[]): number {
+    return amounts.reduce<number>((sum, amount) => sum + (amount ?? 0), 0);
+}
+
+/** Оклад и фикс по табелю, премии всех корзин, доп. сервисы и общая премия. */
+export function currentPay(salary: number | null, fixed: number | null, earned: number): number | null {
     if (salary === null || fixed === null) {
         return null;
     }
-    return salary + fixed + basketPremium;
+    return salary + fixed + earned;
 }
 
-/** Те же части, что у текущей ЗП, но оклад и фикс — на часы графика, премии корзин — в доле графика к табелю. */
+/**
+ * Часовая ставка и фикс на часы графика.
+ * Общая премия, корзины и доп. сервисы — в доле часов графика к часам табеля.
+ */
 export function forecastPay(
     hourly: number,
     payLevel: number | null,
@@ -126,7 +145,7 @@ export function forecastPay(
     priceGrowth: number,
     scheduleHours: number | null,
     timesheetHours: number | null,
-    basketPremium: number,
+    earned: number,
 ): number | null {
     if (scheduleHours === null || timesheetHours === null || timesheetHours <= 0) {
         return null;
@@ -136,7 +155,7 @@ export function forecastPay(
     if (salary === null || fixed === null) {
         return null;
     }
-    return salary + fixed + basketPremium * (scheduleHours / timesheetHours);
+    return salary + fixed + earned * (scheduleHours / timesheetHours);
 }
 
 export function cabinetMovement(row: {

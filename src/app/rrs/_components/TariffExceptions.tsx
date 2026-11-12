@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner } from "@/components/loading-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { tariffAxisTitle, type TariffAxis } from "@/lib/baskets";
 import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { PinnedTable } from "@/components/pinned-table";
+import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
 import { notifySuccess } from "@/lib/notify";
 import {
     calculateAlgorithmTariffs,
@@ -85,6 +87,7 @@ export function TariffExceptions({ embedded }: {
     const [filter, setFilter] = useState("");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [confirmSave, setConfirmSave] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [weights, setWeights] = useState<WeightDraft | null>(null);
     const weightsRef = useRef<WeightDraft | null>(null);
@@ -272,10 +275,12 @@ export function TariffExceptions({ embedded }: {
         weightFlushRef.current?.();
         const current = linesRef.current;
         if (!page) {
+            setConfirmSave(false);
             return;
         }
         if (current.some((row) => !tariffRowComplete(row))) {
             setError(EMPTY_TARIFF_SAVE_MESSAGE);
+            setConfirmSave(false);
             return;
         }
         const rows = current.map((line) => {
@@ -293,6 +298,7 @@ export function TariffExceptions({ embedded }: {
         });
         if (rows.some((row) => row === null)) {
             setError(EMPTY_TARIFF_SAVE_MESSAGE);
+            setConfirmSave(false);
             return;
         }
         setSaving(true);
@@ -311,9 +317,11 @@ export function TariffExceptions({ embedded }: {
         setSaving(false);
         if (!json.success) {
             setError(json.error.message);
+            setConfirmSave(false);
             return;
         }
         notifySuccess("Тарифы сохранены");
+        setConfirmSave(false);
         await load(page.period);
     }
 
@@ -348,8 +356,26 @@ export function TariffExceptions({ embedded }: {
         });
     }, [incomplete, lines, page, reference, reportDraft, weights]);
 
-    return (
+        return (
         <div className="flex flex-col gap-4">
+            {embeddedMode ? null : (
+                <ConfirmDialog
+                    open={confirmSave}
+                    title="Сохранить тарифы"
+                    description={page
+                        ? premiumSaveDescription(
+                            `Тарифы по продажам для «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`,
+                            page.period,
+                            "После сохранения будет пересчитана премия по корзине продаж для всей этой территории за тот же месяц.",
+                        )
+                        : ""}
+                    confirmLabel="Сохранить"
+                    confirmVariant="default"
+                    isPending={saving}
+                    onConfirm={() => void save()}
+                    onOpenChange={setConfirmSave}
+                />
+            )}
             {embeddedMode ? null : <RrsSectionNav
                 territoryUuid={territoryUuid}
                 territoryName={page?.territory.name}
@@ -371,7 +397,7 @@ export function TariffExceptions({ embedded }: {
                         />
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
-                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => void save()}>
+                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => { flushEditRef.current?.(); weightFlushRef.current?.(); setConfirmSave(true); }}>
                                 {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>

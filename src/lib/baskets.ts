@@ -180,6 +180,11 @@ export interface BasketVersionChange {
     createdAt: string;
 }
 
+export interface BasketVersionArticle {
+    id: number;
+    title: string;
+}
+
 export interface BasketVersion {
     id: number;
     versionNo: number;
@@ -188,6 +193,7 @@ export interface BasketVersion {
     status: BasketVersionStatus;
     settings: VersionSettings;
     publishedAt: string | null;
+    wikiArticle: BasketVersionArticle | null;
     changes: BasketVersionChange[];
 }
 
@@ -228,6 +234,7 @@ export interface BasketVersionDraftInput {
     description: string;
     comment: string;
     settings: VersionSettings;
+    wikiArticleId: number | null;
 }
 
 export function settingsSchemaTitle(code: string): string {

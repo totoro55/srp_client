@@ -33,6 +33,7 @@ const EXTERNAL_TABLES = new Set([
     "hr_ktu",
     "sale",
     "grafiki_tabeli",
+    "kassa_oper",
 ]);
 
 function skipString(text: string, start: number): number {

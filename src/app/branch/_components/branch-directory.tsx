@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { currentBranchPeriod, isBranchId, isBranchPeriod } from "./mock";
 import { useBranchStore } from "./branch-store";
@@ -23,8 +23,22 @@ interface BranchDirectoryValue {
     indicators: { id: string; title: string }[];
     salePremiums: Record<string, number>;
     releasePremiums: Record<string, number>;
+    kassaPremiums: Record<string, number>;
+    sharedPremiums: Record<string, number>;
+    sharedPremiumRoleIds: string[];
     baseBonus: number | null;
     priceGrowth: number;
+    rosterPeriod: string | null;
+    rolesEditable: boolean;
+    closedMessage: string | null;
+    replaceSharedPremiums: (shares: Record<string, number>) => void;
+    replaceSharedPremiumRoleIds: (roleIds: string[]) => void;
+    replacePremiums: (premiums: {
+        salePremiums: Record<string, number>;
+        releasePremiums: Record<string, number>;
+        kassaPremiums: Record<string, number>;
+        sharedPremiums: Record<string, number>;
+    }) => void;
 }
 
 const BranchDirectoryContext = createContext<BranchDirectoryValue | null>(null);
@@ -56,8 +70,14 @@ interface StaffResponse {
         indicators?: { id: string; title: string }[];
         salePremiums?: Record<string, number>;
         releasePremiums?: Record<string, number>;
+        kassaPremiums?: Record<string, number>;
+        sharedPremiums?: Record<string, number>;
+        sharedPremiumRoleIds?: string[];
         baseBonus: number | null;
         priceGrowth: number;
+        rosterPeriod?: string | null;
+        rolesEditable?: boolean;
+        closedMessage?: string | null;
     };
     error?: { message?: string };
 }
@@ -69,7 +89,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
     const requestedBranch = searchParams.get("branch");
     const period = isBranchPeriod(requestedPeriod) ? requestedPeriod : currentBranchPeriod();
     const branchId = isBranchId(requestedBranch) ? requestedBranch : "";
-    const [value, setValue] = useState<BranchDirectoryValue>({
+    const [value, setValue] = useState<BranchDirectoryState>({
         loading: true,
         error: null,
         branches: [],
@@ -79,13 +99,35 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         indicators: [],
         salePremiums: {},
         releasePremiums: {},
+        kassaPremiums: {},
+        sharedPremiums: {},
+        sharedPremiumRoleIds: [],
         baseBonus: null,
         priceGrowth: 0,
+        rosterPeriod: null,
+        rolesEditable: false,
+        closedMessage: null,
     });
+    const replaceSharedPremiums = useCallback((shares: Record<string, number>) => {
+        setValue((current) => ({ ...current, sharedPremiums: shares }));
+    }, []);
+    const replaceSharedPremiumRoleIds = useCallback((roleIds: string[]) => {
+        setValue((current) => ({ ...current, sharedPremiumRoleIds: roleIds }));
+    }, []);
+    const replacePremiums = useCallback((premiums: {
+        salePremiums: Record<string, number>;
+        releasePremiums: Record<string, number>;
+        kassaPremiums: Record<string, number>;
+        sharedPremiums: Record<string, number>;
+    }) => {
+        setValue((current) => ({ ...current, ...premiums }));
+    }, []);
 
     useEffect(() => {
         const controller = new AbortController();
-        setValue((current) => current.branches.length > 0 ? current : { ...current, loading: true, error: null });
+        setValue((current) => current.employees.length > 0 && current.loadedBranchId !== ""
+            ? current
+            : { ...current, loading: true, error: null });
         const params = new URLSearchParams({ period });
         if (branchId) {
             params.set("branch", branchId);
@@ -100,20 +142,27 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     throw new Error(body.error?.message || "Не удалось прочитать штатное расписание");
                 }
                 const roleOverrides = readOverrides(body.data.roleOverrides);
-                if (branchId) {
-                    store.hydrateRoles(branchId, roleOverrides);
+                const matched = branchId !== "" && body.data.branches.some((item) => item.id.toLowerCase() === branchId.toLowerCase());
+                if (matched) {
+                    store.hydrateRoles(branchId, period, roleOverrides);
                 }
                 setValue({
-                    loading: false,
+                    loading: !matched && body.data.branches.length > 0,
                     error: null,
                     branches: body.data.branches,
-                    loadedBranchId: branchId,
+                    loadedBranchId: matched ? branchId : "",
                     roleOverrides,
                     indicators: readIndicators(body.data.indicators),
                     salePremiums: readPremiums(body.data.salePremiums),
                     releasePremiums: readPremiums(body.data.releasePremiums),
+                    kassaPremiums: readPremiums(body.data.kassaPremiums),
+                    sharedPremiums: readPremiums(body.data.sharedPremiums),
+                    sharedPremiumRoleIds: readRoleIds(body.data.sharedPremiumRoleIds),
                     baseBonus: body.data.baseBonus,
                     priceGrowth: body.data.priceGrowth,
+                    rosterPeriod: typeof body.data.rosterPeriod === "string" ? body.data.rosterPeriod : null,
+                    rolesEditable: body.data.rolesEditable === true,
+                    closedMessage: typeof body.data.closedMessage === "string" ? body.data.closedMessage : null,
                     employees: body.data.employees.map((employee) => {
                         const mark = cabinetMovement(employee);
                         return {
@@ -154,15 +203,27 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     indicators: current.indicators,
                     salePremiums: current.salePremiums,
                     releasePremiums: current.releasePremiums,
+                    kassaPremiums: current.kassaPremiums,
+                    sharedPremiums: current.sharedPremiums,
+                    sharedPremiumRoleIds: current.sharedPremiumRoleIds,
                     baseBonus: current.baseBonus,
                     priceGrowth: current.priceGrowth,
+                    rosterPeriod: current.rosterPeriod,
+                    rolesEditable: current.rolesEditable,
+                    closedMessage: current.closedMessage,
                 }));
             });
         return () => controller.abort();
     }, [branchId, period, store.hydrateRoles]);
 
-    return <BranchDirectoryContext.Provider value={value}>{children}</BranchDirectoryContext.Provider>;
+    return (
+        <BranchDirectoryContext.Provider value={{ ...value, replaceSharedPremiums, replaceSharedPremiumRoleIds, replacePremiums }}>
+            {children}
+        </BranchDirectoryContext.Provider>
+    );
 }
+
+type BranchDirectoryState = Omit<BranchDirectoryValue, "replaceSharedPremiums" | "replaceSharedPremiumRoleIds" | "replacePremiums">;
 
 export function useBranchDirectory(): BranchDirectoryValue {
     const value = useContext(BranchDirectoryContext);
@@ -170,6 +231,13 @@ export function useBranchDirectory(): BranchDirectoryValue {
         throw new Error("Штатное расписание читается внутри кабинета филиала");
     }
     return value;
+}
+
+function readRoleIds(value: string[] | undefined): string[] {
+    if (!value) {
+        return [];
+    }
+    return value.filter((roleId) => typeof roleId === "string" && roleId.trim() !== "").map((roleId) => roleId.toLowerCase());
 }
 
 function readPremiums(value: Record<string, number> | undefined): Record<string, number> {

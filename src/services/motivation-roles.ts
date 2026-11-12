@@ -3,6 +3,8 @@ import {
     type MotivationSettings,
     type RuleKtu,
 } from "@/lib/motivation-roles";
+import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
+import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 
 export class MotivationSettingsError extends Error {
@@ -125,87 +127,65 @@ export async function replaceMotivationSettings(input: MotivationSettings): Prom
     return readMotivationSettings();
 }
 
-export async function readBranchRoleOverrides(branchId: string): Promise<Record<string, string | null>> {
-    const rows = await db.query<AssignmentRow>(
-        `
-        SELECT employee_uuid, role_id
-        FROM branch_motivation_roles
-        WHERE lower(branch_uuid) = lower($1)
-        ORDER BY employee_uuid
-        `,
-        [branchId],
-    );
-    const overrides: Record<string, string | null> = {};
-    for (const row of rows) {
-        overrides[row.employee_uuid] = row.role_id;
-    }
-    return overrides;
+const ROLE_PERIOD = /^\d{4}-\d{2}-01$/;
+
+export async function readBranchRoleOverrides(branchId: string, period: string): Promise<Record<string, string | null>> {
+    const rows = await readRoleSlice((text, params) => db.query(text, params), branchId, period, true);
+    return Object.fromEntries(rows);
 }
 
 const EMPLOYEE_ID = /^[0-9a-zA-Z-]{8,80}$/;
 
-
 export async function setBranchEmployeeRole(
     branchId: string,
     employeeId: string,
+    period: string,
     roleId: string | null,
 ): Promise<void> {
     if (!EMPLOYEE_ID.test(employeeId)) {
         throw new MotivationSettingsError("Некорректный сотрудник");
     }
-    if (roleId !== null) {
-        const found = await db.query<{ id: string }>(
-            `SELECT id FROM motivation_roles WHERE id = $1`,
-            [roleId],
-        );
-        if (found.length === 0) {
-            throw new MotivationSettingsError("Выберите роль из списка");
-        }
-    }
-    const branch = branchId.toLowerCase();
-    const employee = employeeId.toLowerCase();
-    await db.query(
-        `
-        INSERT INTO branch_motivation_roles (branch_uuid, employee_uuid, role_id)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (branch_uuid, employee_uuid)
-        DO UPDATE SET role_id = EXCLUDED.role_id
-        `,
-        [branch, employee, roleId],
-    );
+    const current = await readBranchRoleOverrides(branchId, period);
+    current[employeeId.toLowerCase()] = roleId;
+    await saveBranchRoleOverrides(branchId, period, current);
 }
 
-export async function clearBranchEmployeeRole(branchId: string, employeeId: string): Promise<void> {
+export async function clearBranchEmployeeRole(branchId: string, employeeId: string, period: string): Promise<void> {
     if (!EMPLOYEE_ID.test(employeeId)) {
         throw new MotivationSettingsError("Некорректный сотрудник");
     }
-    await db.query(
-        `
-        DELETE FROM branch_motivation_roles
-        WHERE lower(branch_uuid) = lower($1)
-          AND lower(employee_uuid) = lower($2)
-        `,
-        [branchId, employeeId],
-    );
+    const current = await readBranchRoleOverrides(branchId, period);
+    delete current[employeeId.toLowerCase()];
+    await saveBranchRoleOverrides(branchId, period, current);
 }
 
 export async function saveBranchRoleOverrides(
     branchId: string,
+    period: string,
     overrides: Record<string, string | null>,
 ): Promise<void> {
-    const entries = Object.entries(overrides);
-    if (entries.length > 500) {
-        throw new MotivationSettingsError("Слишком много назначений");
+    if (!ROLE_PERIOD.test(period)) {
+        throw new MotivationSettingsError("Укажите месяц");
     }
-    for (const [employeeId, roleId] of entries) {
+    const settings = await getAppSettings();
+    const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    if (!monthIsOpen(period.slice(0, 7), policy)) {
+        throw new MotivationSettingsError(closedPeriodMessage(policy));
+    }
+    const desired = new Map<string, string | null>();
+    for (const [employeeId, roleId] of Object.entries(overrides)) {
         if (!EMPLOYEE_ID.test(employeeId)) {
             throw new MotivationSettingsError("Некорректный сотрудник");
         }
         if (roleId !== null && typeof roleId !== "string") {
             throw new MotivationSettingsError("Выберите роль из списка");
         }
+        desired.set(employeeId.toLowerCase(), roleId);
     }
-    const roleIds = [...new Set(entries.flatMap(([, roleId]) => (roleId ? [roleId] : [])))];
+    if (desired.size > 500) {
+        throw new MotivationSettingsError("Слишком много назначений");
+    }
+    const roleIds = [...new Set([...desired.values()].flatMap((roleId) => (roleId ? [roleId] : [])))];
     if (roleIds.length > 0) {
         const found = await db.query<{ id: string }>(
             `SELECT id FROM motivation_roles WHERE id = ANY($1::text[])`,
@@ -217,22 +197,90 @@ export async function saveBranchRoleOverrides(
     }
     const branch = branchId.toLowerCase();
     await db.transaction(async (query) => {
-        await query(
-            `DELETE FROM branch_motivation_roles WHERE lower(branch_uuid) = lower($1)`,
-            [branch],
+        const inherited = await readRoleSlice(query, branch, period, false);
+        const stored = await query<{ employee: string }>(
+            `
+            SELECT lower(employee_uuid) AS employee
+            FROM branch_motivation_roles
+            WHERE lower(branch_uuid) = lower($1)
+              AND period = $2::date
+            `,
+            [branch, period],
         );
-        if (entries.length === 0) {
+        const employees = new Set<string>([...inherited.keys(), ...desired.keys(), ...stored.map((row) => row.employee)]);
+        const remove: string[] = [];
+        const keepEmployees: string[] = [];
+        const keepRoles: (string | null)[] = [];
+        const keepAutomatic: boolean[] = [];
+        for (const employee of employees) {
+            const wantAutomatic = !desired.has(employee);
+            const wantRole = wantAutomatic ? null : desired.get(employee) ?? null;
+            const hadAutomatic = !inherited.has(employee);
+            const hadRole = hadAutomatic ? null : inherited.get(employee) ?? null;
+            if (wantAutomatic === hadAutomatic && wantRole === hadRole) {
+                remove.push(employee);
+                continue;
+            }
+            keepEmployees.push(employee);
+            keepRoles.push(wantRole);
+            keepAutomatic.push(wantAutomatic);
+        }
+        if (remove.length > 0) {
+            await query(
+                `
+                DELETE FROM branch_motivation_roles
+                WHERE lower(branch_uuid) = lower($1)
+                  AND period = $2::date
+                  AND lower(employee_uuid) = ANY($3::text[])
+                `,
+                [branch, period, remove],
+            );
+        }
+        if (keepEmployees.length === 0) {
             return;
         }
         await query(
             `
-            INSERT INTO branch_motivation_roles (branch_uuid, employee_uuid, role_id)
-            SELECT $1, employee_id, role_id
-            FROM unnest($2::text[], $3::text[]) AS assignment(employee_id, role_id)
+            INSERT INTO branch_motivation_roles (branch_uuid, employee_uuid, period, role_id, automatic)
+            SELECT $1, employee_id, $2::date, role_id, automatic
+            FROM unnest($3::text[], $4::text[], $5::boolean[]) AS assignment(employee_id, role_id, automatic)
+            ON CONFLICT (branch_uuid, employee_uuid, period)
+            DO UPDATE SET role_id = EXCLUDED.role_id,
+                          automatic = EXCLUDED.automatic
             `,
-            [branch, entries.map(([employeeId]) => employeeId), entries.map(([, roleId]) => roleId)],
+            [branch, period, keepEmployees, keepRoles, keepAutomatic],
         );
     });
+}
+
+async function readRoleSlice(
+    query: (text: string, params?: unknown[]) => Promise<AssignmentRow[]>,
+    branchId: string,
+    period: string,
+    includePeriod: boolean,
+): Promise<Map<string, string | null>> {
+    const rows = await query(
+        `
+        SELECT employee_uuid, role_id
+        FROM (
+            SELECT DISTINCT ON (lower(employee_uuid))
+                   lower(employee_uuid) AS employee_uuid,
+                   role_id,
+                   automatic
+            FROM branch_motivation_roles
+            WHERE lower(branch_uuid) = lower($1)
+              AND period ${includePeriod ? "<=" : "<"} $2::date
+            ORDER BY lower(employee_uuid), period DESC
+        ) latest
+        WHERE NOT automatic
+        `,
+        [branchId, period],
+    );
+    const overrides = new Map<string, string | null>();
+    for (const row of rows) {
+        overrides.set(row.employee_uuid, row.role_id);
+    }
+    return overrides;
 }
 
 function isForeignKeyError(error: unknown): boolean {

@@ -9,10 +9,10 @@ import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { cn } from "@/lib/utils";
 import { BonusDistributionChart } from "./BonusDistributionChart";
 import { useBranchDirectory } from "./branch-directory";
-import { currentPay, findStaffSegment, fixedPremium, forecastPay, formatHours, roleKey, salaryFromTimesheet, segmentHref } from "./staff";
+import { currentPay, earnedPremium, findStaffSegment, fixedPremium, forecastPay, formatHours, monthHasEnded, roleKey, salaryFromTimesheet, segmentHref } from "./staff";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
-import { EmployeeNameLine, StaffSegmentNote } from "./EmployeeMovementMark";
+import { EmployeeNameLine } from "./EmployeeMovementMark";
 import {
     basketGroups,
     branchMonth,
@@ -44,39 +44,42 @@ export function EmployeeBonus() {
     const settings = useMotivationRoles();
     const slice = store.slice(branchId, period, directory.employees, settings);
     const roleId = employee ? slice.savedRoles[roleKey(employee)] ?? null : null;
-    const listed = employee !== null && employee.branchId === branchId && roleId !== null;
+    const participating = employee ? inCalculation(employee, roleId) : false;
+    const listed = employee !== null && employee.branchId === branchId && participating;
 
     useEffect(() => {
         if (directory.loading || !branchId || employee === null || employee.branchId !== branchId) {
             return;
         }
-        if (roleId !== null) {
+        if (participating) {
             return;
         }
         router.replace(withBranchQuery("/branch/bonuses", branchId, period));
-    }, [branchId, directory.loading, employee, period, roleId, router]);
+    }, [branchId, directory.loading, employee, participating, period, router]);
 
     if (directory.loading || !listed || employee === null) {
         return null;
     }
     const role = roleCaption(employee, roleId, settings);
-    const participating = inCalculation(employee, roleId);
     const salary = salaryFromTimesheet(employee.hourly, employee.timesheetHours);
     const premium = fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, employee.timesheetHours);
     const salePremium = directory.salePremiums[roleKey(employee)] ?? 0;
     const releasePremium = directory.releasePremiums[roleKey(employee)] ?? 0;
-    const current = currentPay(salary, premium, salePremium + releasePremium);
-    const forecast = forecastPay(employee.hourly, employee.payLevel, directory.baseBonus, directory.priceGrowth, employee.scheduleHours, employee.timesheetHours, salePremium + releasePremium);
-    const groups = employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)]);
+    const kassaPremium = directory.kassaPremiums[roleKey(employee)] ?? 0;
+    const sharedPremium = directory.sharedPremiums[roleKey(employee)] ?? 0;
+    const earned = earnedPremium([salePremium, releasePremium, kassaPremium, sharedPremium]);
+    const current = currentPay(salary, premium, earned);
+    const forecast = forecastPay(employee.hourly, employee.payLevel, directory.baseBonus, directory.priceGrowth, employee.scheduleHours, employee.timesheetHours, earned);
+    const showForecast = !monthHasEnded(period);
+    const groups = employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]);
 
     return (
         <div className="grid items-stretch gap-4 lg:grid-cols-3">
                 <Card className="h-full min-w-0">
                     <CardHeader>
                         <CardTitle>
-                            <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} markClassName="px-1.5 py-0.5 text-xs" />
+                            <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
                         </CardTitle>
-                        <StaffSegmentNote partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
                         <p className="text-sm text-muted-foreground">
                             {employee.title || "Должность не указана"}
                             {employee.probation ? " · испытательный срок" : ""}
@@ -84,12 +87,14 @@ export function EmployeeBonus() {
                     </CardHeader>
                     <CardContent className="flex flex-col gap-4">
                         <dl className="grid grid-cols-2 gap-3">
-                            <Fact
-                                label="Прогноз ЗП"
-                                value={forecast === null ? "—" : formatMoney(forecast)}
-                                prominent
-                                className="rounded-lg bg-emerald-100 px-3 py-2 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-50"
-                            />
+                            {showForecast ? (
+                                <Fact
+                                    label="Прогноз ЗП"
+                                    value={forecast === null ? "—" : formatMoney(forecast)}
+                                    prominent
+                                    className="rounded-lg bg-emerald-100 px-3 py-2 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-50"
+                                />
+                            ) : null}
                             <Fact
                                 label="Текущая ЗП"
                                 value={current === null ? "—" : formatMoney(current)}
@@ -161,6 +166,7 @@ function employeeBaskets(
     indicators: { id: string; title: string }[],
     salePremium: number | undefined,
     releasePremium: number | undefined,
+    kassaPremium: number | undefined,
 ): BasketGroup[] {
     if (employeeById(employeeId)) {
         return basketGroups(periodLines(employeeId, period, branchMonth(branchId, period).calculated));
@@ -173,6 +179,10 @@ function employeeBaskets(
     const release = indicators.find((indicator) => indicator.title === "Выдача товара");
     if (release && releasePremium !== undefined) {
         groups.push({ basketId: release.id, title: release.title, amount: releasePremium, facts: [] });
+    }
+    const kassa = indicators.find((indicator) => indicator.title === "Кассовые операции");
+    if (kassa && kassaPremium !== undefined) {
+        groups.push({ basketId: kassa.id, title: kassa.title, amount: kassaPremium, facts: [] });
     }
     return groups;
 }

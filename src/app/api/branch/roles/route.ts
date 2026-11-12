@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
+import { staffParticipationChanged } from "@/lib/motivation-roles";
+import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { getAppSettings } from "@/services/app-settings";
+import { PremiumRecalcBusyError } from "@/services/basket-updates";
+import { recalculateBranchPremiums } from "@/services/branch-premium-recalc";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
-import { MotivationSettingsError, saveBranchRoleOverrides } from "@/services/motivation-roles";
+import { MotivationSettingsError, readBranchRoleOverrides, readMotivationSettings, saveBranchRoleOverrides } from "@/services/motivation-roles";
+import { SalePremiumError } from "@/services/sale-premium";
 import type { ApiResponse } from "@/types/api";
 
 const BRANCH_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface BranchRolesPayload {
     saved: true;
+    recalculated: boolean;
+    closed: boolean;
+    recalcMessage: string | null;
+    salePremiums: Record<string, number>;
+    releasePremiums: Record<string, number>;
+    kassaPremiums: Record<string, number>;
+    shares: Record<string, number>;
 }
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<BranchRolesPayload>>> {
@@ -29,8 +42,49 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         if (!allowed) {
             return createErrorResponse("FORBIDDEN", "Филиал недоступен", 403);
         }
-        await saveBranchRoleOverrides(branchId, overrides);
-        return NextResponse.json({ success: true, data: { saved: true } });
+        const settings = await getAppSettings();
+        const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+        if (!monthIsOpen(period.slice(0, 7), policy)) {
+            return createErrorResponse("BAD_REQUEST", closedPeriodMessage(policy), 400);
+        }
+        const [motivation, before] = await Promise.all([
+            readMotivationSettings(),
+            readBranchRoleOverrides(branchId, period),
+        ]);
+        const participationChanged = staffParticipationChanged(visible.employees, before, overrides, motivation);
+        await saveBranchRoleOverrides(branchId, period, overrides);
+        let recalculated = false;
+        let recalcMessage: string | null = null;
+        if (participationChanged) {
+            try {
+                await recalculateBranchPremiums({
+                    period,
+                    branchId,
+                    actor: access.username,
+                    trigger: "branch.roles",
+                });
+                recalculated = true;
+            } catch (error) {
+                recalcMessage = error instanceof SalePremiumError || error instanceof PremiumRecalcBusyError
+                    ? error.message
+                    : "Не удалось пересчитать премию филиала";
+                console.error("Не удалось пересчитать премию филиала после смены участия в расчёте", error);
+            }
+        }
+        const fresh = recalculated ? await readBranchStaff(access, period, branchId) : null;
+        return NextResponse.json({
+            success: true,
+            data: {
+                saved: true,
+                recalculated,
+                closed: false,
+                recalcMessage,
+                salePremiums: fresh?.salePremiums ?? {},
+                releasePremiums: fresh?.releasePremiums ?? {},
+                kassaPremiums: fresh?.kassaPremiums ?? {},
+                shares: fresh?.sharedPremiums ?? {},
+            },
+        });
     } catch (error) {
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) {

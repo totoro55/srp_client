@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, type DragEvent, type ReactNode } from "react";
+import { useSession } from "next-auth/react";
 import { ArrowRightLeft, CircleOff, GripVertical, LayoutGrid, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, UserMinus, Users, WandSparkles } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,11 +20,12 @@ import { HelpDrawer } from "@/components/help-drawer";
 import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
+import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
-import { useBranchDirectory } from "./branch-directory";
+import { useBranchDirectory, type BranchChoice } from "./branch-directory";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
-import { EmployeeNameLine, StaffSegmentNote } from "./EmployeeMovementMark";
+import { EmployeeNameLine } from "./EmployeeMovementMark";
 import { KtuMark } from "./ktu-mark";
 import {
     formatMoney,
@@ -32,24 +37,194 @@ import { latestStaffSegments, roleKey, type StaffEmployee } from "./staff";
 
 const brigadeLaneClass = "flex w-full shrink-0 flex-col lg:h-full lg:min-h-0 lg:max-[1919px]:w-[calc((100%-2.25rem-1px)/4)] min-[1920px]:w-[calc((100%-3rem-1px)/5)]";
 const brigadeBodyClass = "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-foreground/25";
+const RECALC_DELAY_SECONDS = 15;
+const PARTICIPATION_NOTICE = "Изменено участие сотрудников в расчёте: признак «В расчёте» меняется между значениями «Нет» и «Да». Будут пересчитаны премии корзин этого филиала и общая премия сотрудников за выбранный месяц. Продолжение станет доступно через 15 секунд. Назначения других месяцев не меняются.";
+const SHARED_ROLE_NOTICE = "Изменён перечень ролей, между которыми распределяется общая премия. Общая премия сотрудников филиала будет пересчитана. Продолжение станет доступно через 15 секунд. Если месяц закрыт, перечень сохранится без пересчёта.";
 
 export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
+    const directory = useBranchDirectory();
 
     return (
         <Tabs defaultValue="staff" className="min-w-0 gap-4">
             <TabsList>
                 <TabsTrigger value="staff">Сотрудники</TabsTrigger>
                 <TabsTrigger value="brigades">Бригады</TabsTrigger>
+                <TabsTrigger value="shared">Общая премия</TabsTrigger>
             </TabsList>
             <TabsContent value="staff">
-                <Staff branchId={branchId} period={period} closed={false} inMotivation />
+                <Staff branchId={branchId} period={period} closed={!directory.rolesEditable} inMotivation />
             </TabsContent>
             <TabsContent value="brigades">
                 <Brigades branchId={branchId} period={period} closed={false} inMotivation />
             </TabsContent>
+            <TabsContent value="shared">
+                <SharedPremiumTab branchId={branchId} period={period} />
+            </TabsContent>
         </Tabs>
     );
+}
+
+function SharedPremiumTab({ branchId, period }: { branchId: string; period: string }) {
+    const directory = useBranchDirectory();
+
+    return (
+        <div className="flex flex-col gap-3">
+            {directory.error ? <Notice>{directory.error}</Notice> : null}
+            <SharedPremiumRoles branchId={branchId} period={period} disabled={directory.loading} />
+        </div>
+    );
+}
+
+function SharedPremiumRoles({
+    branchId,
+    period,
+    disabled,
+}: {
+    branchId: string;
+    period: string;
+    disabled: boolean;
+}) {
+    const directory = useBranchDirectory();
+    const session = useSession();
+    const actor = session.data?.user?.username ?? "";
+    const roles = useMotivationRoles().roles;
+    const savedKey = `${directory.loadedBranchId}:${directory.sharedPremiumRoleIds.join(",")}`;
+    const [seenKey, setSeenKey] = useState(savedKey);
+    const [selected, setSelected] = useState(directory.sharedPremiumRoleIds);
+    const [saving, setSaving] = useState(false);
+    const [noticeOpen, setNoticeOpen] = useState(false);
+    if (savedKey !== seenKey) {
+        setSeenKey(savedKey);
+        setSelected(directory.sharedPremiumRoleIds);
+    }
+    const dirty = !sameRoleIds(selected, directory.sharedPremiumRoleIds);
+
+    function toggle(roleId: string, checked: boolean) {
+        setSelected((current) => {
+            const next = new Set(current);
+            if (checked) {
+                next.add(roleId);
+            } else {
+                next.delete(roleId);
+            }
+            return [...next];
+        });
+    }
+
+    async function save() {
+        setSaving(true);
+        try {
+            const response = await fetch("/api/branch/shared-premium-roles", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ branchId, period, roleIds: selected }),
+            });
+            const json = await response.json() as {
+                success?: boolean;
+                data?: { recalculated?: boolean; recalcMessage?: string | null; roleIds?: string[]; shares?: Record<string, number> };
+                error?: { message?: string };
+            };
+            if (!response.ok || !json.success || !json.data) {
+                notifyError(json.error?.message || "Не удалось сохранить роли общей премии");
+                return false;
+            }
+            const roleIds = json.data.roleIds ?? [];
+            directory.replaceSharedPremiumRoleIds(roleIds);
+            if (json.data.recalculated && json.data.shares) {
+                directory.replaceSharedPremiums(json.data.shares);
+            }
+            if (json.data.recalcMessage) {
+                notifyError(json.data.recalcMessage);
+            } else {
+                notifySuccess(json.data.recalculated
+                    ? "Роли общей премии сохранены, доли пересчитаны"
+                    : "Роли общей премии сохранены. Этот месяц закрыт, доли не пересчитаны");
+            }
+            if (!json.data.recalculated) {
+                clearRecalcPlan();
+            }
+            return true;
+        } catch {
+            notifyError("Не удалось сохранить роли общей премии");
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    return (
+        <Card>
+            <ConfirmDialog
+                open={noticeOpen}
+                title="Пересчёт премии сотрудников"
+                description={SHARED_ROLE_NOTICE}
+                confirmLabel="Продолжить"
+                confirmVariant="default"
+                confirmDelaySeconds={RECALC_DELAY_SECONDS}
+                onConfirm={() => {
+                    const scopeLabel = branchScopeLabel(directory.branches, branchId);
+                    openRecalcConsole({
+                        period,
+                        kinds: ["shared"],
+                        reason: "branch.shared-roles",
+                        actor,
+                        scopeLevel: "branch",
+                        scopeLabel,
+                        title: `${scopeLabel}, роли общей премии`,
+                    });
+                    setNoticeOpen(false);
+                    void save().then((saved) => {
+                        if (!saved) {
+                            clearRecalcPlan();
+                        }
+                    });
+                }}
+                onOpenChange={setNoticeOpen}
+            />
+            <CardHeader>
+                <CardTitle>Общая премия</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                    {selected.length === 0
+                        ? "Роли не выбраны: премия делится между всеми, у кого «В расчёте» — да."
+                        : "Премия делится только между выбранными ролями. Берётся ручная роль, а если её нет — автоматическая."}
+                </p>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-wrap gap-2">
+                    {roles.map((role) => (
+                        <Label key={role.id} className="rounded-md border px-3 py-2 font-normal">
+                            <Checkbox
+                                checked={selected.includes(role.id)}
+                                disabled={disabled || saving || !branchId}
+                                onCheckedChange={(checked) => toggle(role.id, checked === true)}
+                            />
+                            {role.title}
+                        </Label>
+                    ))}
+                </div>
+                <div>
+                    <Button type="button" size="sm" disabled={disabled || saving || !branchId || !dirty} onClick={() => setNoticeOpen(true)}>
+                        {saving ? <ButtonSpinner /> : <Save />}
+                        Сохранить
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function sameRoleIds(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    const keys = new Set(right);
+    return left.every((roleId) => keys.has(roleId));
+}
+
+function branchScopeLabel(branches: BranchChoice[], branchId: string): string {
+    const name = branches.find((branch) => branch.id.toLowerCase() === branchId.toLowerCase())?.name;
+    return name ? `Филиал «${name}»` : "Филиал";
 }
 
 function Staff({
@@ -64,31 +239,77 @@ function Staff({
     inMotivation: boolean;
 }) {
     const directory = useBranchDirectory();
+    const session = useSession();
+    const actor = session.data?.user?.username ?? "";
     const store = useBranchStore();
     const settings = useMotivationRoles();
     const employees = directory.employees;
     const slice = store.slice(branchId, period, employees, settings);
     const [saving, setSaving] = useState(false);
     const [resetOpen, setResetOpen] = useState(false);
+    const [noticeOpen, setNoticeOpen] = useState(false);
     const hasManual = employees.some((employee) => slice.roleManual[employee.id]);
+    const participationChanged = employees.some((employee) => {
+        const key = roleKey(employee);
+        return inCalculation(employee, slice.savedRoles[key] ?? null) !== inCalculation(employee, slice.draftRoles[key] ?? null);
+    });
 
-    async function save() {
+    async function save(): Promise<boolean> {
         setSaving(true);
         try {
             const response = await fetch("/api/branch/roles", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ branchId, period, overrides: store.roleDraft(branchId) }),
+                body: JSON.stringify({ branchId, period, overrides: store.roleDraft(branchId, period) }),
             });
-            const json = await response.json() as { success?: boolean; error?: { message?: string } };
-            if (!response.ok || !json.success) {
+            const json = await response.json() as {
+                success?: boolean;
+                data?: {
+                    recalculated?: boolean;
+                    closed?: boolean;
+                    recalcMessage?: string | null;
+                    salePremiums?: Record<string, number>;
+                    releasePremiums?: Record<string, number>;
+                    kassaPremiums?: Record<string, number>;
+                    shares?: Record<string, number>;
+                };
+                error?: { message?: string };
+            };
+            if (!response.ok || !json.success || !json.data) {
                 notifyError(json.error?.message || "Не удалось сохранить роли");
-                return;
+                return false;
             }
-            store.saveRoles(branchId);
-            notifySuccess("Роли сохранены");
+            store.saveRoles(branchId, period);
+            if (
+                json.data.recalculated
+                && json.data.salePremiums
+                && json.data.releasePremiums
+                && json.data.kassaPremiums
+                && json.data.shares
+            ) {
+                directory.replacePremiums({
+                    salePremiums: json.data.salePremiums,
+                    releasePremiums: json.data.releasePremiums,
+                    kassaPremiums: json.data.kassaPremiums,
+                    sharedPremiums: json.data.shares,
+                });
+            }
+            if (json.data.recalcMessage) {
+                notifyError(json.data.recalcMessage);
+            } else if (json.data.recalculated) {
+                notifySuccess("Роли сохранены, премия филиала пересчитана");
+            } else if (json.data.closed) {
+                notifySuccess("Роли сохранены. Этот месяц закрыт, премия не пересчитана");
+            } else {
+                notifySuccess("Роли сохранены");
+            }
+            if (!json.data.recalculated) {
+                clearRecalcPlan();
+            }
+            return true;
         } catch {
             notifyError("Не удалось сохранить роли");
+            return false;
         } finally {
             setSaving(false);
         }
@@ -97,24 +318,61 @@ function Staff({
     return (
         <div className="flex flex-col gap-3">
             {directory.error ? <Notice>{directory.error}</Notice> : null}
+            {directory.closedMessage ? <Notice>{directory.closedMessage}</Notice> : null}
+            {directory.rosterPeriod && directory.rosterPeriod !== period ? (
+                <Notice>{`Штатное расписание за ${monthLabel(period)} ещё не загружено. Показан состав за ${monthLabel(directory.rosterPeriod)} Назначение этого месяца не добавляет сотрудника в расписание.`}</Notice>
+            ) : null}
             <ConfirmDialog
                 open={resetOpen}
                 title="Сбросить роли"
-                description="Ручные назначения ролей всех сотрудников филиала будут отменены. Роль каждого сотрудника будет определена действующим правилом. Изменение применяется после сохранения."
+                description="С выбранного месяца ручные роли возвращаются к правилу. Более ранние месяцы не меняются. Изменение применяется после сохранения."
                 confirmLabel="Сбросить"
                 confirmVariant="default"
                 onConfirm={() => {
-                    store.resetRoles(branchId);
+                    store.resetRoles(branchId, period);
                     setResetOpen(false);
                 }}
                 onOpenChange={setResetOpen}
             />
+            <ConfirmDialog
+                open={noticeOpen}
+                title="Пересчёт премии сотрудников"
+                description={PARTICIPATION_NOTICE}
+                confirmLabel="Продолжить"
+                confirmVariant="default"
+                confirmDelaySeconds={RECALC_DELAY_SECONDS}
+                onConfirm={() => {
+                    const scopeLabel = branchScopeLabel(directory.branches, branchId);
+                    openRecalcConsole({
+                        period,
+                        kinds: ["sale", "release", "kassa", "shared"],
+                        reason: "branch.roles",
+                        actor,
+                        scopeLevel: "branch",
+                        scopeLabel,
+                        title: `${scopeLabel}, смена ролей`,
+                    });
+                    setNoticeOpen(false);
+                    void save().then((saved) => {
+                        if (!saved) {
+                            clearRecalcPlan();
+                        }
+                    });
+                }}
+                onOpenChange={setNoticeOpen}
+            />
             <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" disabled={saving || closed || !slice.rolesDirty} onClick={() => void save()}>
+                <Button type="button" size="sm" disabled={saving || closed || !slice.rolesDirty} onClick={() => {
+                    if (participationChanged) {
+                        setNoticeOpen(true);
+                        return;
+                    }
+                    void save();
+                }}>
                     {saving ? <ButtonSpinner /> : <Save />}
                     Сохранить
                 </Button>
-                <Button type="button" size="sm" variant="outline" disabled={saving || closed || !slice.rolesDirty} onClick={() => store.revertRoles(branchId)}>
+                <Button type="button" size="sm" variant="outline" disabled={saving || closed || !slice.rolesDirty} onClick={() => store.revertRoles(branchId, period)}>
                     <Undo2 />
                     Отменить
                 </Button>
@@ -162,8 +420,7 @@ function Staff({
                             <TableRow key={roleKey(employee)}>
                                 <TableCell>
                                     <div className="font-medium">
-                                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} />
-                                        <StaffSegmentNote partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
+                                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
                                     </div>
                                     <div className="text-muted-foreground">
                                         {employee.title || "Должность не указана"}
@@ -183,17 +440,19 @@ function Staff({
                                         disabled={closed || saving}
                                         onChange={(next) => {
                                             if (next === "auto") {
-                                                store.clearRole(branchId, employee.id);
+                                                store.clearRole(branchId, period, employee.id);
                                                 return;
                                             }
-                                            store.setRole(branchId, employee.id, next);
+                                            store.setRole(branchId, period, employee.id, next);
                                         }}
                                     />
                                 </TableCell>
                                 <TableCell className="w-10 px-2">
                                     <RoleSource manual={manual} />
                                 </TableCell>
-                                <TableCell>{participating ? "Да" : "Нет"}</TableCell>
+                                <TableCell>
+                                    <CalculationMark on={participating} />
+                                </TableCell>
                             </TableRow>
                         );
                     })}
@@ -256,7 +515,7 @@ function StaffRoleHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Назначение</h3>
                 <p className="text-muted-foreground">
-                    Роль закрепляется за сотрудником в филиале и действует до следующего изменения. Повторное назначение на каждый расчётный месяц не требуется. При переводе в другой филиал назначение не переносится: роль определяется заново по должности и признаку КТУ на новом месте.
+                    Роль записывается с выбранного месяца и действует, пока для этого сотрудника не сохранена следующая. В одном месяце роль одна. Будущий месяц можно заполнить заранее. Если его штатное расписание ещё не загружено, на экране остаётся последний известный состав: роль не добавляет сотрудника в расписание и не мешает последующей загрузке. Закрытый месяц больше не меняется, по тем же правилам, что и остальные настройки. При переводе в другой филиал назначение не переносится.
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
@@ -280,10 +539,23 @@ function StaffRoleHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Сброс</h3>
                 <p className="text-muted-foreground">
-                    Кнопка «Сбросить до автоматических» отменяет ручные назначения всех сотрудников филиала. Изменение применяется после сохранения. Кнопка «Отменить» восстанавливает назначения, действовавшие до сохранения.
+                    Кнопка «Сбросить до автоматических» с выбранного месяца возвращает роли по правилу. Более ранние месяцы остаются как были. Изменение применяется после сохранения. Кнопка «Отменить» восстанавливает назначения, действовавшие до сохранения.
                 </p>
             </section>
         </div>
+    );
+}
+
+function CalculationMark({ on }: { on: boolean }) {
+    return (
+        <Badge
+            variant="outline"
+            className={on
+                ? "h-6 border-emerald-700/15 bg-emerald-600 px-2.5 font-semibold text-white dark:border-emerald-300/20 dark:bg-emerald-500 dark:text-emerald-950"
+                : "h-6 border-rose-700/15 bg-rose-600 px-2.5 font-semibold text-white dark:border-rose-300/20 dark:bg-rose-500 dark:text-rose-950"}
+        >
+            {on ? "Да" : "Нет"}
+        </Badge>
     );
 }
 
@@ -860,6 +1132,13 @@ function EmployeeMark({ employee, roleId }: { employee: StaffEmployee; roleId: s
             </Tooltip>
         </span>
     );
+}
+
+const monthLabelFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "Europe/Moscow" });
+
+function monthLabel(period: string): string {
+    const label = monthLabelFormat.format(new Date(`${period.slice(0, 7)}-01T00:00:00+03:00`));
+    return label.endsWith(".") ? label : `${label}.`;
 }
 
 function Notice({ children }: { children: string }) {

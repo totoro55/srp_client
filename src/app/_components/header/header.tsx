@@ -4,18 +4,16 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { usePathname } from "next/navigation";
 import { getPageHeading } from "@/lib/routes-config";
-import { useAccess } from "@/hooks/useAccess";
 import { Menu, X } from "lucide-react";
 import { NotificationBell } from "@/app/_components/header/NotificationBell";
+import { RecalcJournalButton } from "@/app/_components/header/RecalcJournalButton";
 import { PageHeadingTrail, usePageHeadingTrail } from "@/app/_components/header/page-heading";
 
 export default function Header() {
     const pathname = usePathname();
     const heading = getPageHeading(pathname);
     const trail = usePageHeadingTrail();
-    const access = useAccess();
     const { openMobile, toggleSidebar } = useSidebar();
-    const identity = access.roleName ? `${access.roleName} · ${access.scopeLabel}` : access.scopeLabel;
 
     return (
         <>
@@ -40,10 +38,8 @@ export default function Header() {
                     ) : null}
                 </div>
             )}
-            <div className="ml-auto flex min-w-0 shrink-0 items-center">
-                {identity ? (
-                    <p className="hidden min-w-0 max-w-[40vw] truncate px-3 text-xs text-muted-foreground sm:block">{identity}</p>
-                ) : null}
+            <div className="ml-auto flex min-w-0 shrink-0 items-center gap-3">
+                <RecalcJournalButton />
                 <NotificationBell />
             </div>
         </header>

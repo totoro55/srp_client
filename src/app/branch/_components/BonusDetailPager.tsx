@@ -172,7 +172,7 @@ export function BonusDetailTableFrame({
     className?: string;
 }) {
     return (
-        <div className={cn(detailTableFrameClass, "min-h-0", className)}>
+        <div className={cn(detailTableFrameClass, className)}>
             <div className={cn(detailTableInnerClass, minWidthClass)}>
                 {children}
             </div>
@@ -195,10 +195,10 @@ export function BonusDetailShell({
     scrollRef?: Ref<HTMLDivElement | null>;
 }) {
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:h-auto max-sm:flex-none max-sm:gap-2">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 pb-3 max-sm:h-auto max-sm:flex-none max-sm:gap-2 md:pb-4 [@media(max-height:500px)]:pb-2!">
             <div className="shrink-0">{toolbar}</div>
             <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:h-auto max-sm:flex-none">
-                <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain max-sm:h-auto max-sm:flex-none max-sm:overflow-visible">
+                <div ref={scrollRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-sm:h-auto max-sm:flex-none max-sm:overflow-visible">
                     {children}
                 </div>
                 {pagination ? <div className="shrink-0">{pagination}</div> : null}

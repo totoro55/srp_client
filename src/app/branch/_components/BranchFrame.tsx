@@ -8,7 +8,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
+import { technicalAccount } from "@/lib/technical-accounts";
 import { useBranchDirectory } from "./branch-directory";
+import { useSharedPremiumAuthors } from "./use-shared-premium-authors";
 import {
     currentBranchPeriod,
     isBranchId,
@@ -27,8 +29,24 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const { branchId, period } = useBranchLocation();
     const branch = directory.branches.find((item) => item.id === branchId) ?? null;
     const employeeId = typeof params.employeeId === "string" ? params.employeeId : null;
-    const employee = employeeId ? directory.employees.find((item) => item.id === employeeId) ?? null : null;
     const onLines = pathname.endsWith("/lines");
+    const technical = technicalAccount(employeeId);
+    const employee = employeeId ? directory.employees.find((item) => item.id === employeeId) ?? null : null;
+    const staffReady = !directory.loading
+        && directory.loadedBranchId !== ""
+        && directory.loadedBranchId.toLowerCase() === branchId.toLowerCase();
+    const needsAuthor = onLines && Boolean(employeeId) && !technical && staffReady && !employee;
+    const authorState = useSharedPremiumAuthors(needsAuthor ? branchId : "", needsAuthor ? period : "");
+    const storedAuthor = employeeId
+        ? authorState.authors.find((item) => item.id === employeeId.toLowerCase()) ?? null
+        : null;
+    const person = employee
+        ? { id: employee.id, name: employee.name }
+        : technical
+            ? { id: technical.id, name: technical.name }
+            : storedAuthor
+                ? { id: storedAuthor.id, name: storedAuthor.name }
+                : null;
     const bonusList = pathname === "/branch/bonuses";
     const fillViewport = bonusList || onLines;
     const query = searchParams.toString();
@@ -83,10 +101,10 @@ export function BranchFrame({ children }: { children: ReactNode }) {
             return;
         }
         const listMatchesBranch = directory.employees.every((item) => item.branchId === branchId);
-        if (!employee && listMatchesBranch) {
+        if (needsAuthor && !authorState.loading && !storedAuthor && listMatchesBranch) {
             router.replace(withBranchQuery("/branch/bonuses", branchId, period));
         }
-    }, [branchId, directory.employees, directory.loading, employee, employeeId, period, router]);
+    }, [authorState.loading, branchId, directory.employees, directory.loading, employeeId, needsAuthor, period, router, storedAuthor]);
 
     function replaceQuery(nextBranch: string, nextPeriod: string) {
         const part = searchParams.get("part");
@@ -111,15 +129,26 @@ export function BranchFrame({ children }: { children: ReactNode }) {
             ? directory.branches.map((item) => ({ id: item.id, label: item.own ? `${item.name} · свой` : item.name }))
             : undefined,
     };
-    const trail: PageHeadingCrumb[] = employee
+    const trail: PageHeadingCrumb[] = person
         ? [
             { href: withBranchQuery("/branch/bonuses", branchId, period), label: "Кабинет филиала", compactLabel: "Кабинет" },
             branchCrumb,
             onLines
-                ? { href: withBranchQuery(`/branch/bonuses/${employee.id}`, branchId, period), label: employee.name }
-                : { label: employee.name },
+                ? {
+                    href: technical || (storedAuthor !== null && storedAuthor.kind !== "staff")
+                        ? withBranchQuery("/branch/bonuses/common", branchId, period)
+                        : withBranchQuery(`/branch/bonuses/${person.id}`, branchId, period),
+                    label: person.name,
+                }
+                : { label: person.name },
             ...(onLines ? [{ label: "Детализация" }] : []),
         ]
+        : pathname === "/branch/bonuses/common"
+            ? [
+                { href: withBranchQuery("/branch/bonuses", branchId, period), label: "Кабинет филиала", compactLabel: "Кабинет" },
+                branchCrumb,
+                { label: "Общая премия" },
+            ]
         : pathname.startsWith("/branch/tariffs/sales")
             ? [
                 { href: withBranchQuery("/branch/tariffs", branchId, period), label: "Тарифы" },

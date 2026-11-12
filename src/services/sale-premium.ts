@@ -1,11 +1,255 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import type { QueryResultRow } from "pg";
+import { DETAIL_STATEMENT_TIMEOUT_MS } from "@/lib/detail-timeout";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { AccessView } from "@/server/authz/resolve-access";
+import { replaceAuthorDays } from "@/services/author-days";
+import { moscowToday, prepareClosedSegments } from "@/services/segment-locks";
+import type { StaffLockReason } from "@/lib/recalc-window";
+import { assignmentSql } from "@/services/promoter-premium";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
+const SALE_INDICATOR = "Продажа товара";
+
+const OPEN_DAYS_DELETE = `
+    DELETE FROM main.basket_premium_days day
+    WHERE day.period = $1::date
+      AND day.basket_id = (
+          SELECT basket.id
+          FROM baskets basket
+          JOIN indicators indicator ON indicator.id = basket.indicator_id
+          WHERE indicator.name = $2
+          LIMIT 1
+      )
+      AND ($3::date IS NULL OR day.day BETWEEN $3::date AND COALESCE($4::date, $3::date))
+      AND ($5::uuid IS NULL OR day.branch_uuid = $5::uuid)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM main.premium_accruals accrual
+          WHERE accrual.period = day.period
+            AND lower(accrual.employee_uuid) = lower(day.employee_uuid)
+            AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = day.branch_uuid)
+            AND day.day BETWEEN accrual.active_from AND accrual.active_until
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM closed_staff_segments closed
+          WHERE closed.employee_uuid = lower(day.employee_uuid)
+            AND closed.branch_uuid = day.branch_uuid
+            AND day.day BETWEEN closed.active_from AND closed.active_until
+      )
+`;
+
+const ACCRUAL_LINK = `
+    UPDATE main.basket_premium_days day
+    SET accrual_id = accrual.id
+    FROM main.premium_accruals accrual
+    WHERE day.period = $1::date
+      AND day.basket_id = (
+          SELECT basket.id
+          FROM baskets basket
+          JOIN indicators indicator ON indicator.id = basket.indicator_id
+          WHERE indicator.name = $2
+          LIMIT 1
+      )
+      AND day.accrual_id IS NULL
+      AND accrual.period = day.period
+      AND lower(accrual.employee_uuid) = lower(day.employee_uuid)
+      AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = day.branch_uuid)
+      AND day.day BETWEEN accrual.active_from AND accrual.active_until
+`;
+
+const DAY_COUNT = `
+    SELECT count(*)::int AS lines
+    FROM main.basket_premium_days day
+    WHERE day.period = $1::date
+      AND day.basket_id = (
+          SELECT basket.id
+          FROM baskets basket
+          JOIN indicators indicator ON indicator.id = basket.indicator_id
+          WHERE indicator.name = $2
+          LIMIT 1
+      )
+      AND ($3::uuid IS NULL OR day.branch_uuid = $3::uuid)
+`;
+
+export function premiumDayInsertSql(selectSql: string, indicatorName: string): string {
+    const indicator = indicatorName.replaceAll("'", "''");
+    return `
+        INSERT INTO main.basket_premium_days (
+            period, territory_uuid, branch_uuid, employee_uuid, basket_id, day, premium
+        )
+        SELECT priced_line.period,
+               priced_line.territory_uuid,
+               priced_line.branch_uuid,
+               priced_line.employee_uuid,
+               basket.id,
+               COALESCE(priced_line.document_date::date, priced_line.period),
+               ROUND(SUM(priced_line.premium), 2)
+        FROM (
+${selectSql}
+        ) priced_line
+        JOIN baskets basket ON basket.id = (
+            SELECT found.id
+            FROM baskets found
+            JOIN indicators indicator ON indicator.id = found.indicator_id
+            WHERE indicator.name = '${indicator}'
+            LIMIT 1
+        )
+        WHERE priced_line.author_kind = 'staff'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM main.premium_accruals accrual
+            WHERE accrual.period = priced_line.period
+              AND lower(accrual.employee_uuid) = lower(priced_line.employee_uuid)
+              AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = priced_line.branch_uuid)
+              AND COALESCE(priced_line.document_date::date, priced_line.period)
+                  BETWEEN accrual.active_from AND accrual.active_until
+        )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM closed_staff_segments closed
+            JOIN main.basket_premium_days existing
+                ON existing.period = priced_line.period
+               AND existing.basket_id = basket.id
+               AND existing.branch_uuid = priced_line.branch_uuid
+               AND lower(existing.employee_uuid) = lower(priced_line.employee_uuid)
+               AND existing.day = COALESCE(priced_line.document_date::date, priced_line.period)
+            WHERE closed.employee_uuid = lower(priced_line.employee_uuid)
+              AND closed.branch_uuid = priced_line.branch_uuid
+              AND COALESCE(priced_line.document_date::date, priced_line.period)
+                  BETWEEN closed.active_from AND closed.active_until
+        )
+        GROUP BY priced_line.period,
+                 priced_line.territory_uuid,
+                 priced_line.branch_uuid,
+                 priced_line.employee_uuid,
+                 basket.id,
+                 COALESCE(priced_line.document_date::date, priced_line.period)
+    `;
+}
+
+type PremiumQuery = <R extends QueryResultRow>(sql: string, params?: unknown[]) => Promise<R[]>;
+
+const PRICED_LINES = `
+    CREATE TEMP TABLE IF NOT EXISTS priced_premium_lines (
+        period date,
+        territory_uuid uuid,
+        branch_uuid uuid,
+        employee_uuid text,
+        author_kind text,
+        document_date timestamp,
+        premium numeric
+    ) ON COMMIT DROP
+`;
+
+function dayInsertFromTemp(indicatorName: string): string {
+    return premiumDayInsertSql("SELECT * FROM priced_premium_lines", indicatorName)
+        .replace("FROM (\nSELECT * FROM priced_premium_lines\n        ) priced_line", "FROM priced_premium_lines priced_line");
+}
+
+export interface PremiumRun {
+    asOf?: string;
+    from?: string;
+    until?: string;
+    allowClosed?: boolean;
+    earliest?: string;
+    /** Пусто — все филиалы. Иначе удаляются и записываются только дни этого филиала. */
+    branch?: string;
+    /** Пусто — закрыты увольнение, перевод и смена должности. Пустой список пересчитывает все три. */
+    protect?: readonly StaffLockReason[];
+}
+
+export function premiumAsOf(run?: PremiumRun): string {
+    const asOf = run?.asOf ?? moscowToday();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+        throw new SalePremiumError("Укажите день расчёта");
+    }
+    return asOf;
+}
+
+export async function writeOpenPremiumDays(
+    query: PremiumQuery,
+    period: string,
+    indicatorName: string,
+    selects: string[],
+    run?: PremiumRun,
+): Promise<number> {
+    const asOf = premiumAsOf(run);
+    const from = run?.from ?? null;
+    const until = run?.until ?? null;
+    const earliest = run?.earliest ?? period;
+    const branch = run?.branch ?? null;
+    await prepareClosedSegments(query, asOf, earliest, run?.protect);
+    const lineParams = [period, null, branch, from, until, null];
+    await query(PRICED_LINES);
+    await query(OPEN_DAYS_DELETE, [period, indicatorName, from, until, branch]);
+    for (const selectSql of selects) {
+        await query("TRUNCATE priced_premium_lines");
+        await query(
+            `
+            INSERT INTO priced_premium_lines (
+                period, territory_uuid, branch_uuid, employee_uuid, author_kind, document_date, premium
+            )
+            SELECT line.period,
+                   line.territory_uuid,
+                   line.branch_uuid,
+                   line.employee_uuid,
+                   line.author_kind,
+                   line.document_date,
+                   line.premium
+            FROM (
+${selectSql}
+            ) line
+            `,
+            lineParams,
+        );
+        await query(dayInsertFromTemp(indicatorName));
+    }
+    await query(ACCRUAL_LINK, [period, indicatorName]);
+    const rows = await query<{ lines: number }>(DAY_COUNT, [period, indicatorName, branch]);
+    const lines = rows[0]?.lines ?? 0;
+    return typeof lines === "number" ? lines : Number(lines);
+}
+
+export async function premiumAccrualId(
+    period: string,
+    branchId: string,
+    employeeId: string,
+    from: string | null,
+    until: string | null,
+    indicatorName: string,
+): Promise<number | null> {
+    if (!from) {
+        return null;
+    }
+    const rows = await db.query<{ id: number }>(
+        `
+        SELECT accrual.id
+        FROM main.premium_accruals accrual
+        WHERE accrual.period = $1::date
+          AND lower(accrual.employee_uuid) = lower(btrim($2))
+          AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = $3::uuid)
+          AND accrual.active_from <= $4::date
+          AND accrual.active_until >= COALESCE($5::date, $4::date)
+          AND EXISTS (
+              SELECT 1
+              FROM main.premium_accrual_coefficients frozen
+              JOIN baskets basket ON basket.id = frozen.basket_id
+              JOIN indicators indicator ON indicator.id = basket.indicator_id
+              WHERE frozen.accrual_id = accrual.id
+                AND indicator.name = $6
+          )
+        ORDER BY accrual.accrued_at DESC
+        LIMIT 1
+        `,
+        [period, employeeId, branchId, from, until, indicatorName],
+    );
+    return rows[0]?.id ?? null;
+}
 
 export class SalePremiumError extends Error {
     readonly status = 400;
@@ -16,56 +260,104 @@ export class SalePremiumError extends Error {
     }
 }
 
-export async function calculateSalePremium(period: string): Promise<number> {
+export async function calculateSalePremium(period: string, refreshSchedule = true, run?: PremiumRun): Promise<number> {
     if (!PERIOD.test(period)) {
         throw new SalePremiumError("Укажите месяц");
     }
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
-    if (!monthIsOpen(period.slice(0, 7), policy)) {
+    if (!run?.allowClosed && !monthIsOpen(period.slice(0, 7), policy)) {
         throw new SalePremiumError(closedPeriodMessage(policy));
     }
+    const asOf = premiumAsOf(run);
     const [categorySql, kindSql] = await Promise.all([
         readSaleQuery("sale-premium-category.sql"),
         readSaleQuery("sale-premium-kind.sql"),
     ]);
-    const params = [period, null, null, null, null];
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
         await query("SET LOCAL statement_timeout = 0");
-        await query("DELETE FROM main.sale_premium_lines WHERE period = $1::date", [period]);
-        await query(insertSaleSnapshot(categorySql), params);
-        await query(insertSaleSnapshot(kindSql), params);
-        const rows = await query<{ lines: number }>(
-            "SELECT count(*)::int AS lines FROM main.sale_premium_lines WHERE period = $1::date",
-            [period],
-        );
-        const lines = rows[0]?.lines ?? 0;
-        return typeof lines === "number" ? lines : Number(lines);
+        if (refreshSchedule) {
+            await replaceAuthorDays(query, period, asOf);
+        }
+        return writeOpenPremiumDays(query, period, SALE_INDICATOR, [categorySql, kindSql], { ...run, asOf });
     });
 }
 
-const SNAPSHOT_COLUMNS = "period, territory_uuid, branch_uuid, employee_uuid, version_id, axis, code, channel, base_mode, tariff, price, item_count, premium, link_doc, document_number, document_date, product_name";
+const saleSqlCache = new Map<string, string>();
 
 async function readSaleQuery(file: "sale-premium-category.sql" | "sale-premium-kind.sql"): Promise<string> {
-    const sql = await readFile(path.join(process.cwd(), "src/services", file), "utf8");
-    return sql.replace(/;\s*$/, "");
+    const cached = saleSqlCache.get(file);
+    if (cached) {
+        return cached;
+    }
+    const sql = (await readFile(path.join(process.cwd(), "src/services", file), "utf8")).replace(/;\s*$/, "");
+    saleSqlCache.set(file, sql);
+    return sql;
 }
 
-function insertSaleSnapshot(selectSql: string): string {
-    return `INSERT INTO main.sale_premium_lines (${SNAPSHOT_COLUMNS})\n${selectSql}`;
+export async function sumDocumentBranchSalePremium(period: string, branchId: string, employeeId: string): Promise<number> {
+    const axis = await saleAxis(period, branchId);
+    if (!axis) {
+        return 0;
+    }
+    const selectSql = await readSaleQuery(axis === "product_kind" ? "sale-premium-kind.sql" : "sale-premium-category.sql");
+    return sumPremium(selectSql, period, branchId, employeeId);
+}
+
+async function saleAxis(period: string, branchId: string): Promise<"category" | "product_kind" | null> {
+    const rows = await db.query<{ axis: string | null }>(
+        `
+        SELECT version.tariff_axis AS axis
+        FROM branches branch
+        JOIN LATERAL (
+            SELECT connection.version_id
+            FROM basket_connections connection
+            JOIN baskets basket ON basket.id = connection.basket_id
+            JOIN indicators indicator ON indicator.id = basket.indicator_id
+            WHERE indicator.name = 'Продажа товара'
+              AND connection.territory_uuid = branch.territory_uuid
+              AND connection.period <= $1::date
+              AND connection.version_id IS NOT NULL
+            ORDER BY connection.period DESC
+            LIMIT 1
+        ) connection ON TRUE
+        JOIN basket_versions version ON version.id = connection.version_id
+        WHERE branch.uuid = $2::uuid
+        `,
+        [period, branchId],
+    );
+    const axis = rows[0]?.axis;
+    return axis === "product_kind" || axis === "category" ? axis : null;
+}
+
+async function sumPremium(selectSql: string, period: string, branchId: string, employeeId: string): Promise<number> {
+    const rows = await db.query<{ premium: number | string }>(
+        `
+        SELECT COALESCE(SUM(line.premium), 0)::float8 AS premium
+        FROM (
+${selectSql}
+        ) line
+        `,
+        [period, employeeId, branchId, null, null, null],
+    );
+    const premium = rows[0]?.premium;
+    const amount = typeof premium === "number" ? premium : Number(premium);
+    return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
 }
 
 export async function readBranchSalePremiumDays(period: string, branchId: string): Promise<{ id: string; day: string; amount: number }[]> {
     const rows = await db.query<{ id: string; day: string; amount: number | string }>(
         `
-        SELECT lower(employee_uuid) AS id,
-               to_char(COALESCE(document_date::date, period), 'YYYY-MM-DD') AS day,
-               SUM(premium)::float8 AS amount
-        FROM main.sale_premium_lines
-        WHERE period = $1::date
-          AND branch_uuid = $2::uuid
-        GROUP BY lower(employee_uuid), COALESCE(document_date::date, period)
+        SELECT lower(day.employee_uuid) AS id,
+               to_char(day.day, 'YYYY-MM-DD') AS day,
+               day.premium::float8 AS amount
+        FROM main.basket_premium_days day
+        JOIN baskets basket ON basket.id = day.basket_id
+        JOIN indicators indicator ON indicator.id = basket.indicator_id
+        WHERE day.period = $1::date
+          AND day.branch_uuid = $2::uuid
+          AND indicator.name = 'Продажа товара'
         `,
         [period, branchId],
     );
@@ -93,24 +385,9 @@ export interface SalePremiumDetailLine {
     doubled: boolean;
 }
 
-export interface SalePremiumDetailGroup {
-    id: string;
-    title: string;
-    amount: number;
-    lines: SalePremiumDetailLine[];
-}
-
-export interface SalePremiumDetailQuery {
-    mode: "category" | "document";
-    page: number;
-    pageSize: number;
-    query: string;
-}
-
 export interface SalePremiumDetail {
     rowLabel: string;
-    groupCount: number;
-    groups: SalePremiumDetailGroup[];
+    lines: SalePremiumDetailLine[];
 }
 
 interface PremiumDetailRow {
@@ -136,7 +413,6 @@ export async function readSalePremiumDetail(
     employeeId: string,
     activeFrom: string | null,
     activeUntil: string | null,
-    pageQuery: SalePremiumDetailQuery,
 ): Promise<SalePremiumDetail | null> {
     if (!PERIOD.test(period) || !UUID.test(branchId) || !UUID.test(employeeId)) {
         return null;
@@ -171,7 +447,8 @@ export async function readSalePremiumDetail(
     if (!axis) {
         return null;
     }
-    return queryPremiumPage(axis, period, branchId, employeeId, from, until, pageQuery);
+    const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, SALE_INDICATOR);
+    return queryPremiumPage(axis, period, branchId, employeeId, from, until, accrualId);
 }
 
 async function queryPremiumPage(
@@ -181,9 +458,11 @@ async function queryPremiumPage(
     employeeId: string,
     from: string | null,
     until: string | null,
-    pageQuery: SalePremiumDetailQuery,
+    accrualId: number | null,
 ): Promise<SalePremiumDetail> {
-    const rows = await db.query<PremiumDetailRow>(
+    const sourceSql = await readSaleQuery(axis === "product_kind" ? "sale-premium-kind.sql" : "sale-premium-category.sql");
+    const selectSql = await assignmentSql(sourceSql, period, employeeId);
+    const rows = await db.queryWithTimeout<PremiumDetailRow>(
         `
         WITH matched AS MATERIALIZED (
             SELECT line.code,
@@ -198,15 +477,9 @@ async function queryPremiumPage(
                    line.document_number,
                    line.document_date,
                    line.product_name
-            FROM main.sale_premium_lines line
-            WHERE line.period = $1::date
-              AND line.branch_uuid = $3::uuid
-              AND line.employee_uuid = lower(btrim($2))
-              AND line.axis = $6
-              AND (
-                  $4::date IS NULL
-                  OR COALESCE(line.document_date::date, line.period) BETWEEN $4::date AND COALESCE($5::date, $4::date)
-              )
+            FROM (
+${selectSql}
+            ) line
         )
         SELECT matched.code,
                COALESCE(category.name, kind.name, matched.code) AS "itemTitle",
@@ -234,7 +507,10 @@ async function queryPremiumPage(
                    THEN matched.code::uuid
            END
         `,
-        [period, employeeId, branchId, from, until, axis],
+        [period, employeeId, branchId, from, until, accrualId],
+        DETAIL_STATEMENT_TIMEOUT_MS,
+        // Тарифы месяца соединяются одним проходом. Вложенный цикл читает весь список на каждую строку.
+        { hashJoins: true },
     );
     const lines = rows.map((row, index) => {
         const amount = finiteNumber(row.premium) ?? 0;
@@ -254,59 +530,10 @@ async function queryPremiumPage(
             doubled: row.baseMode === "per_unit" && (row.channel === "stm" || row.channel === "not_stm" || row.channel === "main") && price !== null && price >= 100000,
         };
     });
-    const groups = pageQuery.mode === "document"
-        ? groupLines(lines, (line) => line.documentId, (id) => id, (line) => line.documentTitle)
-        : groupLines(lines, (line) => line.categoryTitle, (title) => `category:${title}`);
-    for (const group of groups) {
-        group.lines.sort((left, right) => right.amount - left.amount || left.id.localeCompare(right.id));
-        group.amount = group.lines.reduce((sum, line) => sum + line.amount, 0);
-    }
-    const needle = pageQuery.query.trim().toLowerCase();
-    const filtered = needle
-        ? groups.filter((group) => `${group.title} ${group.lines.map((line) => `${line.productName} ${line.categoryTitle} ${line.documentTitle} ${line.channel} ${line.calculation}`).join(" ")}`.toLowerCase().includes(needle))
-        : groups;
-    filtered.sort((left, right) => {
-        const value = pageQuery.mode === "document"
-            ? documentTime(right.title) - documentTime(left.title)
-            : right.amount - left.amount;
-        return value || left.id.localeCompare(right.id, "ru");
-    });
-    const start = pageQuery.page * pageQuery.pageSize;
     return {
         rowLabel: axis === "product_kind" ? "Изделие" : "Категория",
-        groupCount: filtered.length,
-        groups: filtered.slice(start, start + pageQuery.pageSize),
+        lines,
     };
-}
-
-function groupLines(
-    lines: SalePremiumDetailLine[],
-    keyOf: (line: SalePremiumDetailLine) => string,
-    idOf: (key: string) => string,
-    titleOf: (line: SalePremiumDetailLine) => string = (line) => line.categoryTitle,
-): SalePremiumDetailGroup[] {
-    const groups = new Map<string, SalePremiumDetailGroup>();
-    for (const line of lines) {
-        const key = keyOf(line);
-        const current = groups.get(key);
-        if (current) {
-            current.lines.push(line);
-            current.amount += line.amount;
-            continue;
-        }
-        groups.set(key, { id: idOf(key), title: titleOf(line), amount: line.amount, lines: [line] });
-    }
-    return [...groups.values()];
-}
-
-function documentTime(title: string): number {
-    const match = title.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
-    if (!match) return 0;
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    let year = match[3] ? Number(match[3]) : 2026;
-    if (year < 100) year += 2000;
-    return Date.UTC(year, month - 1, day);
 }
 
 function calculationLabel(row: PremiumDetailRow): string {

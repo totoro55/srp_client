@@ -74,6 +74,10 @@ const NOTES: Record<string, string> = {
     "app_settings.notice_message": "Текст объявления в верхней полосе",
     "app_settings.role_preview_enabled": "Администратор может открыть приложение от имени другой роли без права записи",
     "app_settings.updated_by": "Кто последним сохранил настройки. Можно не заполнять",
+    "premium_auto_schedules.kind": "sale_tariffs — тарифы корзины продаж, baskets — снимки продажи и выдачи",
+    "premium_auto_schedules.day_of_month": "День месяца для тарифов, от 1 до 28. У ежедневных расчётов пусто",
+    "premium_auto_schedules.run_time": "Время запуска, часы и минуты. Пустая строка — время не задано",
+    "premium_auto_schedules.updated_by": "Кто последним сохранил это расписание. Можно не заполнять",
     "stm_brands.name": "Название бренда, как в продаже. Сравнение без учёта регистра и крайних пробелов",
     "stm_brands.set_at": "Когда бренд добавили",
     "stm_brands.set_by": "Кто добавил бренд",
@@ -94,6 +98,7 @@ const NOTES: Record<string, string> = {
     "basket_versions.settings": "Параметры версии",
     "basket_versions.published_at": "Когда версию впервые опубликовали. Пусто у черновика",
     "basket_versions.name": "Название версии",
+    "basket_versions.wiki_article_id": "Статья базы знаний для кнопки «Описание» в тарифах. Пусто — кнопки нет",
 
     "basket_version_changes.version_id": "Версия, к которой относится запись",
     "basket_version_changes.comment": "Комментарий сохранения",
@@ -157,6 +162,12 @@ const NOTES: Record<string, string> = {
     "basket_kind_tariffs.calculated_at": "Когда посчитали снимок",
     "basket_tariff_month.territory_uuid": "Территория, для которой записана опора расчёта",
     "basket_tariff_month.period": "Месяц, на который действует опора расчёта",
+    "sale_tariff_auto_runs.territory_uuid": "Территория автоматического расчёта тарифов",
+    "sale_tariff_auto_runs.period": "Месяц расчёта, первое число",
+    "sale_tariff_auto_runs.status": "success — тарифы записаны, failed — запись не выполнена и попытка повторится",
+    "sale_tariff_auto_runs.saved": "Сколько строк тарифа записано. Пусто, если запись не выполнена",
+    "sale_tariff_auto_runs.detail": "Причина, по которой расчёт не записан. Пусто при успехе",
+    "sale_tariff_auto_runs.updated_at": "Когда завершилась эта попытка",
     "basket_tariff_month.reference": "Опора расчёта: mean, median, trimmed или priceAdjusted. По умолчанию mean",
 
     "basket_branch_motivation.enabled": "Филиал участвует в мотивации",
@@ -260,6 +271,7 @@ const INTRO: Record<string, string> = {
     scope_grants: "Территория, выданная сотруднику сверх его области.",
     audit_events: "Журнал действий в администрировании доступа.",
     app_settings: "Одна строка настроек приложения.",
+    premium_auto_schedules: "Расписания автоматических пересчётов. Тарифы корзины продаж — раз в месяц, снимки продажи и выдачи — каждый день.",
     price_growth_allowances: "Надбавка в связи с ростом цен. Одна на компанию с указанного месяца. Сотрудникам не показывается.",
     stm_brands: "Бренды СТМ. Один список на компанию. Розница такого бренда берёт коэффициент СТМ.",
     indicators: "Показатель корзины: продажа или выдача.",
@@ -275,6 +287,12 @@ const INTRO: Record<string, string> = {
     basket_branch_coefficients_log: "Предыдущий снимок коэффициента перед исправлением.",
     basket_tariff_exceptions_log: "Предыдущий снимок исключения тарифа перед исправлением.",
     basket_tariff_month: "Опора расчёта тарифов территории за месяц. На территорию и месяц приходится одна запись. По умолчанию применяется среднее.",
+    sale_tariff_auto_runs: "Автоматический расчёт тарифов по продажам. Одна строка на территорию и месяц. Успешный расчёт повторно не запускается.",
+    basket_premium_days: "Сумма премии за день документа. Филиал — филиал сотрудника по штатному расписанию. Строки товаров не хранятся.",
+    shared_premiums: "Доля общей премии филиала за отрезок штатного расписания. Пересчёт не меняет отрезок, который пересекается с начислением зарплаты.",
+    branch_shared_premium_roles: "Роли филиала, между которыми делится общая премия. Нет строк — премия делится между всеми, кто в расчёте.",
+    premium_accruals: "Отрезок сотрудника с уже начисленной зарплатой. Пересчёт не меняет дни внутри отрезка. Пока начисления нет, таблица пустая.",
+    premium_accrual_coefficients: "Коэффициенты закрытого отрезка. Детализация читает их вместо текущих значений филиала.",
 };
 
 export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
@@ -287,7 +305,7 @@ export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
     },
     {
         title: "Настройки",
-        tables: ["app_settings", "price_growth_allowances", "stm_brands"],
+        tables: ["app_settings", "premium_auto_schedules", "price_growth_allowances", "stm_brands"],
     },
     {
         title: "Корзины",
@@ -296,7 +314,8 @@ export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
             "basket_connections", "basket_connections_log",
             "tariff_algorithms", "tariff_algorithm_weight_grants", "tariff_algorithm_territory_weights", "tariff_algorithm_reference_grants",
             "basket_tariff_exceptions", "basket_tariff_exceptions_log",
-            "basket_category_tariffs", "basket_kind_tariffs", "basket_tariff_month",
+            "basket_category_tariffs", "basket_kind_tariffs", "basket_tariff_month", "sale_tariff_auto_runs",
+            "basket_premium_days", "shared_premiums", "branch_shared_premium_roles", "premium_accruals", "premium_accrual_coefficients",
         ],
     },
     {

@@ -2,7 +2,7 @@ import type { QueryResultRow } from "pg";
 import { SALES_INDICATOR_NAME, isTariffAxis, readVersionSettings, TARIFF_BOUND_KEYS, type TariffAxis } from "@/lib/baskets";
 import { resolveConnectionValues } from "@/lib/rrs";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
-import { calculateAlgorithmTariffs, calculateServiceTariffs, DEFAULT_TARIFF_REFERENCE, isTariffReference, rowBecomesException, tariffRowComplete, territoryMean, territoryReference, type TariffReference, type TariffSaveRow, type TariffServiceContext } from "@/lib/tariff-calculation";
+import { calculateAlgorithmTariffs, calculateServiceTariffs, DEFAULT_TARIFF_REFERENCE, EMPTY_TARIFF_SAVE_MESSAGE, isTariffReference, rowBecomesException, tariffRowComplete, territoryMean, territoryReference, type TariffReference, type TariffSaveRow, type TariffServiceContext } from "@/lib/tariff-calculation";
 import { isTariffBaseMode, type TariffCategoryFolder, type TariffExceptionInput, type TariffExceptionLine, type TariffExceptionPage, type TariffExceptionReport, type TariffExceptionReportRow, type TariffSegmentMatch, type CalculatedTariffRow } from "@/lib/tariff-exceptions";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { getRrsCard, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
@@ -634,32 +634,68 @@ export async function saveRecalculatedTariffs(
         throw new RrsRuleError(400, "В статистике этого месяца нет категорий для расчёта");
     }
     if (rows.some((row) => !tariffRowComplete(row))) {
-        throw new RrsRuleError(400, "Нельзя сохранить тарифы, пока хотя бы одно поле пустое");
+        throw new RrsRuleError(400, EMPTY_TARIFF_SAVE_MESSAGE);
     }
-    const source = AXIS_TABLE[axis];
-    await db.transaction(async (query) => {
-        await writeMonthReference(query, territoryUuid, period, chosen);
-        for (const row of rows) {
-            await query(
-                `
-                INSERT INTO ${source.tariffs} (
-                    territory_uuid, period, version_id, code, title, base_mode, main, im, b2b
-                )
-                VALUES ($1, $2::date, $3, $4::uuid, $5, $6, $7, $8, $9)
-                ON CONFLICT (territory_uuid, period, code) DO UPDATE
-                SET version_id = EXCLUDED.version_id,
-                    title = EXCLUDED.title,
-                    base_mode = EXCLUDED.base_mode,
-                    main = EXCLUDED.main,
-                    im = EXCLUDED.im,
-                    b2b = EXCLUDED.b2b,
-                    calculated_at = NOW()
-                `,
-                [territoryUuid, period, versionId, row.code, row.title, row.baseMode, Number(row.main), Number(row.im), Number(row.b2b)],
-            );
-        }
-    });
+    await writeCalculatedSaleTariffs(territoryUuid, period, versionId, axis, chosen, rows);
     return { saved: rows.length };
+}
+
+export interface SaleTariffAutoResult {
+    status: "success" | "skipped" | "failed";
+    saved: number;
+    detail: string;
+}
+
+const SYSTEM_ACCESS: AccessView = {
+    username: "system",
+    title: "Система",
+    role: null,
+    scopeLabel: "",
+    fullAccess: false,
+    actorFullAccess: false,
+    permissions: [],
+    previewRoleName: null,
+    conflict: false,
+    previewChoices: [],
+};
+
+/** Тот же расчёт, что ручное сохранение пересчёта. Исключения вне статистики месяца не применяются и не удаляются. */
+export async function calculateAndSaveSaleTariffs(territoryUuid: string, period: string): Promise<SaleTariffAutoResult> {
+    const settings = await getAppSettings();
+    const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    if (!monthIsOpen(period.slice(0, 7), policy)) {
+        return { status: "failed", saved: 0, detail: closedPeriodMessage(policy) };
+    }
+    const connection = await loadSalesConnection(territoryUuid, period);
+    if (!connection?.versionId) {
+        return { status: "skipped", saved: 0, detail: "Корзина продаж не подключена" };
+    }
+    const axis = connection.axis;
+    if (!axis) {
+        return { status: "skipped", saved: 0, detail: "У версии не выбран вид расчёта тарифов" };
+    }
+    const stats = await loadSalesStats(territoryUuid, period, axis);
+    if (stats.length === 0) {
+        return { status: "skipped", saved: 0, detail: "Нет статистики этого месяца" };
+    }
+    const present = new Set(stats.map((stat) => stat.code));
+    const slices = await loadSlices(territoryUuid, period);
+    const exceptions = slices
+        .filter((row) => row.axis === axis && !row.removed)
+        .map((row) => toLine(row, present.has(row.code)));
+    const reference = await loadMonthReference(territoryUuid, period);
+    const rows = calculatePeriodTariffs({
+        exceptions,
+        stats,
+        weights: await loadAlgorithmWeights(SYSTEM_ACCESS, territoryUuid, axis),
+        bounds: await loadTariffBounds(territoryUuid, period, connection.versionId),
+        reference,
+    });
+    if (rows.some((row) => !tariffRowComplete(row))) {
+        return { status: "failed", saved: 0, detail: EMPTY_TARIFF_SAVE_MESSAGE };
+    }
+    await writeCalculatedSaleTariffs(territoryUuid, period, connection.versionId, axis, reference, rows);
+    return { status: "success", saved: rows.length, detail: "" };
 }
 
 export async function previewConnectionTariffs(
@@ -864,7 +900,42 @@ async function openTariffPeriod(access: AccessView, territoryUuid: string, perio
     return page;
 }
 
-function calculatePeriodTariffs(page: TariffExceptionPage, reference: TariffReference = page.reference): CalculatedTariffRow[] {
+type TariffCalculationSource = Pick<TariffExceptionPage, "exceptions" | "stats" | "weights" | "bounds" | "reference">;
+
+async function writeCalculatedSaleTariffs(
+    territoryUuid: string,
+    period: string,
+    versionId: number,
+    axis: TariffAxis,
+    reference: TariffReference,
+    rows: CalculatedTariffRow[],
+): Promise<void> {
+    const source = AXIS_TABLE[axis];
+    await db.transaction(async (query) => {
+        await writeMonthReference(query, territoryUuid, period, reference);
+        for (const row of rows) {
+            await query(
+                `
+                INSERT INTO ${source.tariffs} (
+                    territory_uuid, period, version_id, code, title, base_mode, main, im, b2b
+                )
+                VALUES ($1, $2::date, $3, $4::uuid, $5, $6, $7, $8, $9)
+                ON CONFLICT (territory_uuid, period, code) DO UPDATE
+                SET version_id = EXCLUDED.version_id,
+                    title = EXCLUDED.title,
+                    base_mode = EXCLUDED.base_mode,
+                    main = EXCLUDED.main,
+                    im = EXCLUDED.im,
+                    b2b = EXCLUDED.b2b,
+                    calculated_at = NOW()
+                `,
+                [territoryUuid, period, versionId, row.code, row.title, row.baseMode, Number(row.main), Number(row.im), Number(row.b2b)],
+            );
+        }
+    });
+}
+
+function calculatePeriodTariffs(page: TariffCalculationSource, reference: TariffReference = page.reference): CalculatedTariffRow[] {
     const context = tariffServiceContext(page, reference);
     const byCode = new Map(page.exceptions.map((line) => [line.code, line]));
     return page.stats.map((stat) => {
@@ -895,7 +966,7 @@ function calculatePeriodTariffs(page: TariffExceptionPage, reference: TariffRefe
     });
 }
 
-function tariffServiceContext(page: TariffExceptionPage, reference: TariffReference = page.reference): TariffServiceContext | null {
+function tariffServiceContext(page: TariffCalculationSource, reference: TariffReference = page.reference): TariffServiceContext | null {
     if (!page.weights) {
         return null;
     }

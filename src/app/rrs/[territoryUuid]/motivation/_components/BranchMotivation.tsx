@@ -19,6 +19,7 @@ import { ApiResponse } from "@/types/api";
 import { PeriodChangeHistory } from "../../../_components/PeriodChangeHistory";
 import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
+import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
 import { formatMonth } from "../../../_components/model";
 
 export function BranchMotivation() {
@@ -142,7 +143,11 @@ export function BranchMotivation() {
                 open={confirmSave}
                 title="Сохранить участие"
                 description={page
-                    ? `Участие филиалов «${page.territory.name}» в мотивации будет записано за ${formatMonth(page.period)}.`
+                    ? premiumSaveDescription(
+                        `Участие филиалов «${page.territory.name}» будет записано за ${formatMonth(page.period)}.`,
+                        page.period,
+                        "Премия по корзинам территории будет пересчитана для филиалов, участие которых изменено.",
+                    )
                     : ""}
                 confirmLabel="Сохранить"
                 confirmVariant="default"

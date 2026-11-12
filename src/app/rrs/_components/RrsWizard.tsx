@@ -17,6 +17,7 @@ import { SALES_INDICATOR_NAME } from "@/lib/baskets";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { useAccess } from "@/hooks/useAccess";
 import { useSession } from "next-auth/react";
+import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
 import { formatBaseBonus, withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
     closedPeriodMessage,
@@ -65,6 +66,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [tariffDraft, setTariffDraft] = useState<WizardTariffDraft | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [confirmSave, setConfirmSave] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [branches, setBranches] = useState<RrsBranch[]>([]);
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
@@ -406,8 +408,10 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             const json = (await response.json()) as ApiResponse<{ saved: true }>;
             if (!json.success) {
                 setError(`${json.error.message} Черновик сохранён в этом браузере.`);
+                setConfirmSave(false);
                 return;
             }
+            setConfirmSave(false);
             setWizardFinished(true);
             if (username) {
                 deleteDraft(username, territoryUuid, month);
@@ -415,6 +419,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             router.push(`/rrs/${territoryUuid}/baskets?period=${period}`);
         } catch {
             setError(editing ? "Не удалось сохранить карточку РРС. Черновик сохранён в этом браузере." : "Не удалось создать карточку РРС. Черновик сохранён в этом браузере.");
+            setConfirmSave(false);
         } finally {
             setSaving(false);
         }
@@ -712,6 +717,22 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
 
     return (
         <form className="flex w-full flex-col" onSubmit={onSubmit}>
+            <ConfirmDialog
+                open={confirmSave}
+                title={editing ? "Сохранить карточку" : "Создать карточку"}
+                description={premiumSaveDescription(
+                    `${editing ? "Карточка" : "Новая карточка"} «${territoryName || "РРС"}» будет записана за ${formatMonth(month)}.`,
+                    `${month}-01`,
+                    salesTariffStep
+                        ? "После сохранения будет пересчитана премия за этот месяц: по корзине продаж — для всей территории, по коэффициентам и участию филиалов — для изменённых филиалов."
+                        : "После сохранения премия по изменённым корзинам будет пересчитана для филиалов, коэффициенты или участие которых изменены.",
+                )}
+                confirmLabel={editing ? "Сохранить" : "Создать"}
+                confirmVariant="default"
+                isPending={saving}
+                onConfirm={() => void saveCard()}
+                onOpenChange={setConfirmSave}
+            />
             <ConfirmDialog
                 open={resumeDraft !== null}
                 title="Найден черновик"
@@ -1047,7 +1068,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                         key="wizard-save"
                         type="button"
                         disabled={saving || loading || !tailReady || !territoryUuid || !month || (policy != null && !monthIsOpen(month, policy)) || basketSetIssue() !== null || coefficientLines.some((line) => coefficientValueIssue(coefficientValues[line.id] ?? "1", line.coefficient)) || (salesTariffStep && (!tariffDraft || tariffDraft.incomplete))}
-                        onClick={() => void saveCard()}
+                        onClick={() => setConfirmSave(true)}
                     >
                         {saving ? <ButtonSpinner /> : null}
                         {editing ? "Сохранить" : "Создать карточку"}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from "react";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -21,6 +22,7 @@ interface ConfirmDialogProps {
     confirmVariant?: "default" | "destructive";
     showCancel?: boolean;
     isPending?: boolean;
+    confirmDelaySeconds?: number;
     onConfirm: () => void | Promise<void>;
     onOpenChange: (open: boolean) => void;
 }
@@ -34,12 +36,34 @@ export function ConfirmDialog({
     confirmVariant = "destructive",
     showCancel = true,
     isPending = false,
+    confirmDelaySeconds = 0,
     onConfirm,
     onOpenChange,
 }: ConfirmDialogProps) {
+    const [remaining, setRemaining] = useState(confirmDelaySeconds);
+    useEffect(() => {
+        if (!open || confirmDelaySeconds <= 0) {
+            setRemaining(0);
+            return;
+        }
+        setRemaining(confirmDelaySeconds);
+        const timer = window.setInterval(() => {
+            setRemaining((current) => {
+                if (current <= 1) {
+                    window.clearInterval(timer);
+                    return 0;
+                }
+                return current - 1;
+            });
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, [open, confirmDelaySeconds]);
+
     const handleConfirm = async () => {
         await onConfirm();
     };
+    const waiting = remaining > 0;
+    const label = waiting ? `${confirmLabel} через ${remaining} с` : confirmLabel;
 
     return (
         <AlertDialog open={open} onOpenChange={(nextOpen) => {
@@ -59,14 +83,17 @@ export function ConfirmDialog({
                     )}
                     <AlertDialogAction
                         variant={confirmVariant}
-                        disabled={isPending}
+                        disabled={isPending || waiting}
                         onClick={(event) => {
                             event.preventDefault();
+                            if (waiting) {
+                                return;
+                            }
                             void handleConfirm();
                         }}
                     >
                         {isPending ? <ButtonSpinner /> : null}
-                        {confirmLabel}
+                        {label}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

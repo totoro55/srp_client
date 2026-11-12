@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { TariffAxis } from "@/lib/baskets";
 import { calculateAlgorithmTariffs, calculateServiceTariffs, parseTariffRate, rowBecomesException, tariffRowComplete } from "@/lib/tariff-calculation";
 import type { CalculatedTariffRow, TariffBaseMode, TariffExceptionInput, TariffExceptionReport } from "@/lib/tariff-exceptions";
+import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
 import { notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
@@ -50,6 +51,7 @@ export function EnabledExceptions() {
     const [preview, setPreview] = useState<CalculatedTariffRow[] | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [savingTariffs, setSavingTariffs] = useState(false);
+    const [confirmTariffs, setConfirmTariffs] = useState(false);
     const fetchKey = `${territoryUuid}|${requestedPeriod ?? ""}`;
     const [preparedFetchKey, setPreparedFetchKey] = useState<string | null>(null);
     if (fetchKey !== preparedFetchKey) {
@@ -305,6 +307,7 @@ export function EnabledExceptions() {
 
     async function saveTariffs() {
         if (!page || !preview) {
+            setConfirmTariffs(false);
             return;
         }
         setSavingTariffs(true);
@@ -318,12 +321,15 @@ export function EnabledExceptions() {
             const json = (await response.json()) as ApiResponse<{ saved: number }>;
             if (!json.success) {
                 setPreviewError(json.error.message);
+                setConfirmTariffs(false);
                 return;
             }
             notifySuccess("Тарифы сохранены");
+            setConfirmTariffs(false);
             setPreview(null);
         } catch {
             setPreviewError("Не удалось сохранить тарифы");
+            setConfirmTariffs(false);
         } finally {
             setSavingTariffs(false);
         }
@@ -495,6 +501,22 @@ export function EnabledExceptions() {
                 </DialogContent>
             </Dialog>
             <ConfirmDialog
+                open={confirmTariffs}
+                title="Сохранить тарифы"
+                description={page
+                    ? premiumSaveDescription(
+                        `Рассчитанные тарифы по продажам для «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`,
+                        page.period,
+                        "После сохранения будет пересчитана премия по корзине продаж для всей этой территории за тот же месяц.",
+                    )
+                    : ""}
+                confirmLabel="Сохранить"
+                confirmVariant="default"
+                isPending={savingTariffs}
+                onConfirm={() => void saveTariffs()}
+                onOpenChange={setConfirmTariffs}
+            />
+            <ConfirmDialog
                 open={recalcPrompt}
                 title="Нужен пересчёт тарифов"
                 description="Исключения сохранены. Тарифы этого месяца нужно пересчитать заново."
@@ -549,7 +571,7 @@ export function EnabledExceptions() {
                     </div>
                     <DialogFooter>
                         <Button type="button" variant="outline" size="sm" disabled={savingTariffs} onClick={() => { setPreview(null); setRecalcPending(true); }}>Закрыть</Button>
-                        <Button type="button" size="sm" disabled={previewIncomplete || savingTariffs || !preview?.length} onClick={() => void saveTariffs()}>
+                        <Button type="button" size="sm" disabled={previewIncomplete || savingTariffs || !preview?.length} onClick={() => setConfirmTariffs(true)}>
                             {savingTariffs ? <ButtonSpinner /> : <Save />}
                             Сохранить в базу
                         </Button>

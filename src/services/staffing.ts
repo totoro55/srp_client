@@ -164,7 +164,7 @@ export async function readStaffing(
                staff.hourly_rate AS "hourlyRate",
                bonus.base_bonus AS "baseBonus",
                assignment.role_id AS "manualRoleId",
-               assignment.employee_uuid IS NOT NULL AS manual
+               COALESCE(NOT assignment.automatic, false) AS manual
         FROM raw.hr_ktu staff
         LEFT JOIN employees employee
             ON lower(employee.uuid::text) = lower(staff.employees_uuid)
@@ -175,9 +175,15 @@ export async function readStaffing(
         LEFT JOIN raw.basic_bonuses bonus
             ON bonus.period = staff.period
            AND lower(bonus.branch_uuid::text) = lower(staff.branch_uuid)
-        LEFT JOIN branch_motivation_roles assignment
-            ON lower(assignment.branch_uuid) = lower(staff.branch_uuid)
-           AND lower(assignment.employee_uuid) = lower(staff.employees_uuid)
+        LEFT JOIN LATERAL (
+            SELECT role.role_id, role.automatic
+            FROM branch_motivation_roles role
+            WHERE lower(role.branch_uuid) = lower(staff.branch_uuid)
+              AND lower(role.employee_uuid) = lower(staff.employees_uuid)
+              AND role.period <= staff.period
+            ORDER BY role.period DESC
+            LIMIT 1
+        ) assignment ON true
         WHERE staff.period = $3::date
           AND ${SCOPE}
           AND (

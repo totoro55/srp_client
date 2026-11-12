@@ -1,8 +1,9 @@
 -- Премия за продажу, ось «вид изделия». Запрос только читает.
 -- $1 — первое число месяца.
--- Колонки совпадают с sale-premium-category.sql и со снимком main.sale_premium_lines.
+-- Колонки совпадают с sale-premium-category.sql.
+-- $6 — начисление с сохранёнными коэффициентами. Пусто — текущие коэффициенты филиала.
 -- tariff в результате — готовый тариф, коэффициенты в колонки не выводятся.
--- Запись в main.sale_premium_lines этим файлом не выполняется: результат вставляет пересчёт премии.
+-- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
 -- Уже входит в формулу:
 --   последняя подключённая версия корзины «Продажа товара» с осью product_kind;
@@ -23,7 +24,8 @@
 --   строка без количества или без цены при ставке от цены не входит;
 --   продавец — author, а для этих четырёх авторов интернет-магазина — author2;
 --   отбор сотрудника идёт по автору до поиска филиала, месяц целиком не читается;
---   филиал строки — филиал продавца по raw.hr_ktu на дату документа.
+--   филиал строки — филиал автора из main.author_days на дату документа;
+--   автокасса и терминал берут филиал документа, штатная строка важнее промоутера.
 --   смена должности на том же филиале начинает новый отрезок с date_modified:
 --   операция до этой даты остаётся на предыдущей строке.
 
@@ -80,10 +82,15 @@ sale_hits AS (
     FROM raw.sale sale
     WHERE $2::text IS NULL
       AND sale.period = $1::timestamp
+      AND (
+          $4::date IS NULL
+          OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
+      )
 ),
 sale_lines AS (
     SELECT attributed.territory_uuid,
            attributed.branch_uuid,
+           attributed.author_kind,
            attributed.employee_uuid,
            attributed.version_id,
            attributed.code,
@@ -99,6 +106,7 @@ sale_lines AS (
     FROM (
         SELECT branch.territory_uuid,
                assignment.branch_uuid,
+               assignment.author_kind,
                seller.employee_uuid,
                connected.version_id,
                lower(btrim(sale.kinde)) AS code,
@@ -130,15 +138,17 @@ sale_lines AS (
                        ELSE NULLIF(lower(btrim(sale.author)), '')
                    END AS employee_uuid
         ) seller
-        JOIN LATERAL (
-            SELECT lower(btrim(staff.branch_uuid))::uuid AS branch_uuid
-            FROM raw.hr_ktu staff
-            WHERE lower(staff.employees_uuid) = seller.employee_uuid
-              AND staff.date_modified <= COALESCE(sale.date::date, $1::date)
-              AND btrim(staff.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            ORDER BY staff.date_modified DESC
-            LIMIT 1
-        ) assignment ON TRUE
+        JOIN main.author_days author_day
+            ON author_day.period = $1::date
+           AND author_day.employee_uuid = seller.employee_uuid
+           AND author_day.day = COALESCE(sale.date::date, $1::date)
+        CROSS JOIN LATERAL (
+            SELECT CASE
+                       WHEN author_day.author_kind = 'system' THEN sale.firm_uuid
+                       ELSE author_day.branch_uuid
+                   END AS branch_uuid,
+                   author_day.author_kind
+        ) assignment
         JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
         JOIN connected ON connected.territory_uuid = branch.territory_uuid
         WHERE sale.period = $1::timestamp
@@ -157,9 +167,22 @@ territory_base AS (
            basket_data.connection_base(connected.data_table, connected.territory_uuid, $1::date) AS rate
     FROM connected
 ),
+-- Тарифы месяца читаются один раз. Отбор тот же: период, территория, версия и код.
+month_tariffs AS MATERIALIZED (
+    SELECT tariff.territory_uuid,
+           tariff.version_id,
+           tariff.code,
+           tariff.base_mode,
+           tariff.main,
+           tariff.im,
+           tariff.b2b
+    FROM basket_data.basket_kind_tariffs tariff
+    WHERE tariff.period = $1::date
+),
 tariffs AS (
     SELECT sale_lines.territory_uuid,
            sale_lines.branch_uuid,
+           sale_lines.author_kind,
            sale_lines.employee_uuid,
            sale_lines.version_id,
            sale_lines.code,
@@ -183,9 +206,8 @@ tariffs AS (
            sale_lines.document_date,
            sale_lines.product_name
     FROM sale_lines
-    LEFT JOIN basket_data.basket_kind_tariffs tariff
+    LEFT JOIN month_tariffs tariff
         ON tariff.territory_uuid = sale_lines.territory_uuid
-       AND tariff.period = $1::date
        AND tariff.version_id = sale_lines.version_id
        AND tariff.code = sale_lines.code_uuid
     LEFT JOIN territory_base
@@ -205,22 +227,37 @@ coefficients AS (
         FROM tariffs
     ) branch
     LEFT JOIN LATERAL (
-        SELECT DISTINCT ON (coefficient.coefficient_key)
-               coefficient.coefficient_key,
-               coefficient.value
-        FROM basket_branch_coefficients coefficient
-        WHERE coefficient.basket_id = (SELECT id FROM sale_basket)
-          AND coefficient.territory_uuid = branch.territory_uuid
-          AND coefficient.branch_uuid = branch.branch_uuid
-          AND coefficient.coefficient_key IN ('stm_coef', 'not_stm_coef', 'b2b_coef', 'im_coef', 'sale_coef')
-          AND coefficient.period <= $1::date
-        ORDER BY coefficient.coefficient_key, coefficient.period DESC
+        SELECT DISTINCT ON (source.coefficient_key)
+               source.coefficient_key,
+               source.value
+        FROM (
+            SELECT coefficient.coefficient_key,
+                   coefficient.value,
+                   coefficient.period
+            FROM basket_branch_coefficients coefficient
+            WHERE $6::bigint IS NULL
+              AND coefficient.basket_id = (SELECT id FROM sale_basket)
+              AND coefficient.territory_uuid = branch.territory_uuid
+              AND coefficient.branch_uuid = branch.branch_uuid
+              AND coefficient.coefficient_key IN ('stm_coef', 'not_stm_coef', 'b2b_coef', 'im_coef', 'sale_coef')
+              AND coefficient.period <= $1::date
+            UNION ALL
+            SELECT frozen.coefficient_key,
+                   frozen.value,
+                   $1::date AS period
+            FROM main.premium_accrual_coefficients frozen
+            WHERE frozen.accrual_id = $6::bigint
+              AND frozen.basket_id = (SELECT id FROM sale_basket)
+              AND frozen.coefficient_key IN ('stm_coef', 'not_stm_coef', 'b2b_coef', 'im_coef', 'sale_coef')
+        ) source
+        ORDER BY source.coefficient_key, source.period DESC
     ) coefficient ON TRUE
     GROUP BY branch.territory_uuid, branch.branch_uuid
 ),
 priced AS (
     SELECT tariffs.territory_uuid,
            tariffs.branch_uuid,
+           tariffs.author_kind,
            tariffs.employee_uuid,
            tariffs.version_id,
            tariffs.code,
@@ -260,6 +297,7 @@ priced AS (
 SELECT $1::date AS period,
        territory_uuid,
        branch_uuid,
+       author_kind,
        employee_uuid,
        version_id,
        'product_kind'::text AS axis,

@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowUp, ArrowUpDown, BookOpen, ListFilter, RotateCcw, Search, X } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { ArrowUp, ArrowUpDown, ListFilter, RotateCcw, Search, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DataTableSkeleton } from "@/components/loading-state";
 import { cn } from "@/lib/utils";
-import { useBranchLocation } from "../../_components/BranchFrame";
-import { branchMonth, salesConditions, salesRowLabel } from "../../_components/mock";
+import { salesRowLabel } from "../../_components/mock";
+import { TariffDescriptionLink } from "./TariffDescriptionLink";
+import { useBranchTariffs } from "./use-branch-tariffs";
 import {
     compareSalesRows,
     nextSalesSort,
@@ -23,6 +24,7 @@ import {
 
 const SORT_OPTIONS: { key: SalesSortColumn; label: (axis: string) => string }[] = [
     { key: "title", label: salesRowLabel },
+    { key: "mode", label: () => "Вид ставки" },
     { key: "stm", label: () => "СТМ" },
     { key: "nonStm", label: () => "Не СТМ" },
     { key: "im", label: () => "ИМ" },
@@ -31,27 +33,32 @@ const SORT_OPTIONS: { key: SalesSortColumn; label: (axis: string) => string }[] 
 
 const UNIT_OPTIONS = [
     { id: "percent", label: "Процент" },
-    { id: "money", label: "Рубли" },
+    { id: "per_unit", label: "Количество" },
 ] as const;
 
 type UnitId = (typeof UNIT_OPTIONS)[number]["id"];
 
 export function BranchSalesTariffs() {
-    const { branchId, period } = useBranchLocation();
-    const month = branchMonth(branchId, period);
-    const sales = salesConditions(branchId);
+    const { pending, error, page } = useBranchTariffs();
+    const sales = page?.sales ?? null;
     const [query, setQuery] = useState("");
     const [units, setUnits] = useState<UnitId[]>([]);
     const [sort, setSort] = useState<SalesSort>({ key: "title", direction: "asc" });
 
-    if (!month.inMotivation) {
+    if (pending) {
+        return <DataTableSkeleton columns={6} />;
+    }
+    if (error || !page) {
+        return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">{error ?? "Не удалось прочитать тарифы"}</p>;
+    }
+    if (!page.inMotivation) {
         return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">Филиал в этом месяце не участвует в мотивации. Ставки как действующие не показаны.</p>;
     }
 
     const needle = query.trim().toLowerCase();
     const filtersActive = needle !== "" || units.length > 0;
     const rowLabel = sales ? salesRowLabel(sales.axis) : "Категория";
-    const visible = !month.tariffsSaved || !sales
+    const visible = !sales
         ? []
         : sales.rows
             .filter((row) => {
@@ -71,23 +78,11 @@ export function BranchSalesTariffs() {
             <Card className="min-w-0 max-w-full overflow-visible [--card-spacing:--spacing(3)] sm:[--card-spacing:--spacing(6)]">
                 <CardHeader className="gap-1 sm:gap-1.5">
                     <CardTitle className="min-w-0">Продажа товара</CardTitle>
-                    {sales ? <CardDescription>{sales.axis}</CardDescription> : null}
-                    <CardAction>
-                        <Link
-                            href="/wiki"
-                            className={cn(
-                                buttonVariants({ variant: "outline", size: "icon-sm" }),
-                                "sm:h-8 sm:w-auto sm:gap-1.5 sm:px-2.5",
-                            )}
-                            aria-label="Описание"
-                        >
-                            <BookOpen className="size-4" />
-                            <span className="hidden sm:inline">Описание</span>
-                        </Link>
-                    </CardAction>
+                    {sales && sales.rows.length > 0 ? <CardDescription>{sales.axis}</CardDescription> : null}
+                    <TariffDescriptionLink articleId={sales?.articleId ?? null} />
                 </CardHeader>
                 <CardContent className="flex min-w-0 flex-col gap-2 sm:gap-3">
-                    {!month.tariffsSaved || !sales ? (
+                    {!sales || sales.rows.length === 0 ? (
                         <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
                     ) : (
                         <>

@@ -1,6 +1,7 @@
 import { Pool, QueryResultRow } from "pg";
 import path from "path";
 import { readFile, readdir } from "fs/promises";
+import { QueryTimeoutError } from "@/lib/detail-timeout";
 
 class DbService {
     private static instance: DbService;
@@ -117,6 +118,32 @@ class DbService {
         return res.rows;
     }
 
+    public async queryWithTimeout<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        params: unknown[] | undefined,
+        timeoutMs: number,
+        options?: { hashJoins?: boolean },
+    ): Promise<T[]> {
+        const timeout = Math.trunc(timeoutMs);
+        if (!Number.isInteger(timeout) || timeout < 1) {
+            throw new Error("Некорректный таймаут запроса");
+        }
+        try {
+            return await this.transaction(async (query) => {
+                await query(`SET LOCAL statement_timeout = ${timeout}`);
+                if (options?.hashJoins) {
+                    await query("SET LOCAL enable_nestloop = off");
+                }
+                return query<T>(text, params);
+            });
+        } catch (error) {
+            if (isStatementTimeout(error)) {
+                throw new QueryTimeoutError();
+            }
+            throw error;
+        }
+    }
+
     public async transaction<T>(
         fn: (query: <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>) => Promise<T>
     ): Promise<T> {
@@ -185,3 +212,10 @@ class DbService {
 }
 
 export const db = DbService.getInstance();
+
+function isStatementTimeout(error: unknown): boolean {
+    return typeof error === "object"
+        && error !== null
+        && "code" in error
+        && (error as { code: unknown }).code === "57014";
+}

@@ -58,12 +58,27 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
         }
         tariffAxis = rawAxis;
     }
+    const wikiArticleId = parseWikiArticleId(record.wikiArticleId);
+    if (typeof wikiArticleId !== "number" && wikiArticleId !== null) {
+        return wikiArticleId;
+    }
     return {
         name,
         description,
         comment,
         settings: { parameters: parsed.parameters, coefficients: coefficients.coefficients, tariffAxis },
+        wikiArticleId,
     };
+}
+
+function parseWikiArticleId(value: unknown): number | null | { error: string } {
+    if (value === null) {
+        return null;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        return { error: "Выберите статью базы знаний или уберите связь" };
+    }
+    return value;
 }
 
 export async function PATCH(

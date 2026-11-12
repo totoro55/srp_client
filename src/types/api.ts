@@ -5,7 +5,9 @@ export type ApiErrorCode =
     | 'NOT_FOUND'
     | 'SERVICE_UNAVAILABLE'
     | 'INTERNAL_SERVER_ERROR'
-    | 'DATABASE_ERROR';
+    | 'DATABASE_ERROR'
+    | 'TIMEOUT'
+    | 'CONFLICT';
 
 export interface ApiErrorResponse {
     success: false;

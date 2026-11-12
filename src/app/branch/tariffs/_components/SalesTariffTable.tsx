@@ -4,19 +4,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { salesRowLabel, type TariffRow } from "../../_components/mock";
 
-export type SalesSortColumn = "title" | "stm" | "nonStm" | "im" | "b2b";
+export type SalesSortColumn = "title" | "mode" | "stm" | "nonStm" | "im" | "b2b";
 export type SalesSortDirection = "asc" | "desc";
 export type SalesSort = { key: SalesSortColumn; direction: SalesSortDirection };
 
 const COLUMNS: { key: SalesSortColumn; label: (axis: string) => string }[] = [
     { key: "title", label: salesRowLabel },
+    { key: "mode", label: () => "Вид ставки" },
     { key: "stm", label: () => "СТМ" },
     { key: "nonStm", label: () => "Не СТМ" },
     { key: "im", label: () => "ИМ" },
     { key: "b2b", label: () => "Безнал" },
 ];
 
-const RATE_COLUMNS = COLUMNS.filter((column) => column.key !== "title");
+const RATE_COLUMNS = COLUMNS.filter((column) => column.key !== "title" && column.key !== "mode");
 
 export function SalesTariffTable({
     axis,
@@ -50,11 +51,17 @@ export function SalesTariffTable({
                     <TableBody>
                         {rows.map((row) => (
                             <TableRow key={row.title}>
-                                <TableCell className="max-w-40 font-medium whitespace-normal">{row.title}</TableCell>
-                                <TableCell className="tabular-nums">{row.stm}</TableCell>
-                                <TableCell className="tabular-nums">{row.nonStm}</TableCell>
-                                <TableCell className="tabular-nums">{row.im}</TableCell>
-                                <TableCell className="tabular-nums">{row.b2b}</TableCell>
+                                {COLUMNS.map((column) => (
+                                    <TableCell
+                                        key={column.key}
+                                        className={cn(
+                                            column.key === "title" && "max-w-40 font-medium whitespace-normal",
+                                            column.key !== "title" && column.key !== "mode" && "tabular-nums",
+                                        )}
+                                    >
+                                        {cellText(row, column.key)}
+                                    </TableCell>
+                                ))}
                             </TableRow>
                         ))}
                     </TableBody>
@@ -72,6 +79,7 @@ export function SalesTariffTable({
                     rows.map((row) => (
                         <article key={row.title} className="rounded-lg border px-2.5 py-2">
                             <h3 className="text-sm leading-snug font-medium">{row.title}</h3>
+                            <p className="text-xs text-muted-foreground">{salesRateKindLabel(row)}</p>
                             <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
                                 {RATE_COLUMNS.map((column) => (
                                     <div key={column.key} className="min-w-0">
@@ -131,11 +139,18 @@ export function SalesTariffTable({
                         ) : (
                             rows.map((row) => (
                                 <TableRow key={row.title}>
-                                    <TableCell className={cn("font-medium whitespace-normal", cellBorder)}>{row.title}</TableCell>
-                                    <TableCell className={cn(cellBorder, "tabular-nums")}>{row.stm}</TableCell>
-                                    <TableCell className={cn(cellBorder, "tabular-nums")}>{row.nonStm}</TableCell>
-                                    <TableCell className={cn(cellBorder, "tabular-nums")}>{row.im}</TableCell>
-                                    <TableCell className={cn(cellBorder, "tabular-nums")}>{row.b2b}</TableCell>
+                                    {COLUMNS.map((column) => (
+                                        <TableCell
+                                            key={column.key}
+                                            className={cn(
+                                                column.key === "title" && "font-medium whitespace-normal",
+                                                column.key !== "title" && column.key !== "mode" && "tabular-nums",
+                                                cellBorder,
+                                            )}
+                                        >
+                                            {cellText(row, column.key)}
+                                        </TableCell>
+                                    ))}
                                 </TableRow>
                             ))
                         )}
@@ -166,6 +181,9 @@ function directedCompare(left: TariffRow, right: TariffRow, key: SalesSortColumn
     if (key === "title") {
         return left.title.localeCompare(right.title, "ru") * order;
     }
+    if (key === "mode") {
+        return salesRateKindLabel(left).localeCompare(salesRateKindLabel(right), "ru") * order;
+    }
     return (tariffNumber(left[key]) - tariffNumber(right[key])) * order;
 }
 
@@ -175,6 +193,23 @@ function tariffNumber(value: string): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function salesRowUnit(row: TariffRow): "percent" | "money" {
-    return row.stm.includes("%") ? "percent" : "money";
+export function salesRowUnit(row: TariffRow): "percent" | "per_unit" {
+    if (row.mode === "percent" || row.mode === "per_unit") {
+        return row.mode;
+    }
+    return row.stm.includes("%") ? "percent" : "per_unit";
+}
+
+export function salesRateKindLabel(row: TariffRow): string {
+    return salesRowUnit(row) === "percent" ? "Процент" : "Количество";
+}
+
+function cellText(row: TariffRow, key: SalesSortColumn): string {
+    if (key === "title") {
+        return row.title;
+    }
+    if (key === "mode") {
+        return salesRateKindLabel(row);
+    }
+    return row[key];
 }

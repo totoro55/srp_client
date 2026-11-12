@@ -42,6 +42,45 @@ export function automaticRole(title: string, ktu: MotivationKtu | null, source: 
     return rule?.roleId ?? null;
 }
 
+function assignedRole(
+    employeeId: string,
+    title: string,
+    ktu: MotivationKtu | null,
+    overrides: Record<string, string | null>,
+    source: MotivationSettings,
+): string | null {
+    if (Object.prototype.hasOwnProperty.call(overrides, employeeId)) {
+        return overrides[employeeId] ?? null;
+    }
+    return automaticRole(title, ktu, source);
+}
+
+/** Ручная роль меняет признак «В расчёте», если сотрудник без КТУ+ входит в расчёт или выходит из него. */
+export function staffParticipationChanged(
+    employees: { id: string; title: string; ktu: boolean | null }[],
+    before: Record<string, string | null>,
+    after: Record<string, string | null>,
+    source: MotivationSettings,
+): boolean {
+    const previous = lowerOverrides(before);
+    const next = lowerOverrides(after);
+    return employees.some((employee) => {
+        const id = employee.id.toLowerCase();
+        const ktu = employee.ktu === true ? "plus" : employee.ktu === false ? "minus" : null;
+        const wasIn = employee.ktu === true || assignedRole(id, employee.title, ktu, previous, source) !== null;
+        const nowIn = employee.ktu === true || assignedRole(id, employee.title, ktu, next, source) !== null;
+        return wasIn !== nowIn;
+    });
+}
+
+function lowerOverrides(overrides: Record<string, string | null>): Record<string, string | null> {
+    const result: Record<string, string | null> = {};
+    for (const [employeeId, roleId] of Object.entries(overrides)) {
+        result[employeeId.toLowerCase()] = roleId;
+    }
+    return result;
+}
+
 export function roleTitle(roleId: string | null, source: MotivationSettings): string {
     if (!roleId) {
         return "Пусто";

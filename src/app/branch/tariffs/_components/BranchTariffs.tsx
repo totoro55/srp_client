@@ -2,51 +2,25 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StackSkeleton } from "@/components/loading-state";
 import { cn } from "@/lib/utils";
 import { useBranchLocation } from "../../_components/BranchFrame";
-import {
-    basketConditions,
-    branchMonth,
-    kbtTariffs,
-    PREMIUM_INDICATORS,
-    salesAllLabel,
-    salesConditions,
-    SALES_TARIFF_PREVIEW,
-    SERVICE_TARIFF_PREVIEW,
-    serviceTariffs,
-    withBranchQuery,
-    type BasketConditions,
-} from "../../_components/mock";
+import { salesAllLabel, SALES_TARIFF_PREVIEW, withBranchQuery } from "../../_components/mock";
 import { SalesTariffTable } from "./SalesTariffTable";
-import { ServiceTariffTable } from "./ServiceTariffTable";
+import { TariffDescriptionLink } from "./TariffDescriptionLink";
+import { useBranchTariffs } from "./use-branch-tariffs";
+import type { BranchTariffBasket } from "@/services/branch-tariffs";
 
-const OPERATION_IDS = new Set<string>(PREMIUM_INDICATORS.map((indicator) => indicator.id));
-
-function WikiLink() {
-    return (
-        <CardAction>
-            <Link
-                href="/wiki"
-                className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "sm:h-8 sm:w-auto sm:gap-1.5 sm:px-2.5")}
-                aria-label="Описание"
-            >
-                <BookOpen className="size-4" />
-                <span className="hidden sm:inline">Описание</span>
-            </Link>
-        </CardAction>
-    );
-}
-
-function ParameterCards({ baskets }: { baskets: BasketConditions[] }) {
+function ParameterCards({ baskets }: { baskets: BranchTariffBasket[] }) {
     return baskets.map((basket) => (
         <Card key={basket.id}>
             <CardHeader>
                 <CardTitle>{basket.title}</CardTitle>
-                <WikiLink />
+                <TariffDescriptionLink articleId={basket.articleId} />
             </CardHeader>
             <CardContent>
                 <dl className="grid gap-3 sm:grid-cols-2">
@@ -66,25 +40,22 @@ export function BranchTariffs() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { branchId, period } = useBranchLocation();
-    const month = branchMonth(branchId, period);
+    const { pending, error, page } = useBranchTariffs();
     const tab = searchParams.get("tab") === "extras" ? "extras" : "operations";
 
-    if (!month.inMotivation) {
+    if (pending) {
+        return <StackSkeleton rows={3} />;
+    }
+    if (error || !page) {
+        return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">{error ?? "Не удалось прочитать тарифы"}</p>;
+    }
+    if (!page.inMotivation) {
         return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">Филиал в этом месяце не участвует в мотивации. Ставки как действующие не показаны.</p>;
     }
 
-    const sales = salesConditions(branchId);
-    const services = serviceTariffs(branchId);
-    const kbt = kbtTariffs(branchId);
-    const baskets = basketConditions(branchId);
-    const operationBaskets = baskets.filter((basket) => OPERATION_IDS.has(basket.id) && basket.id !== "sales");
-    const extraBaskets = baskets.filter((basket) => !OPERATION_IDS.has(basket.id) && basket.id !== "services" && basket.id !== "kbt");
+    const sales = page.sales;
     const previewSales = sales?.rows.slice(0, SALES_TARIFF_PREVIEW) ?? [];
-    const previewServices = services.slice(0, SERVICE_TARIFF_PREVIEW);
-    const previewKbt = kbt.slice(0, SERVICE_TARIFF_PREVIEW);
     const hasMoreSales = (sales?.rows.length ?? 0) > SALES_TARIFF_PREVIEW;
-    const hasMoreServices = services.length > SERVICE_TARIFF_PREVIEW;
-    const hasMoreKbt = kbt.length > SERVICE_TARIFF_PREVIEW;
 
     return (
         <Tabs
@@ -102,11 +73,11 @@ export function BranchTariffs() {
                 <Card className="min-w-0 max-w-full">
                     <CardHeader>
                         <CardTitle>Продажа товара</CardTitle>
-                        {sales ? <CardDescription>{sales.axis}</CardDescription> : null}
-                        <WikiLink />
+                        {sales && sales.rows.length > 0 ? <CardDescription>{sales.axis}</CardDescription> : null}
+                        <TariffDescriptionLink articleId={sales?.articleId ?? null} />
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3">
-                        {!month.tariffsSaved || !sales ? (
+                        {!sales || sales.rows.length === 0 ? (
                             <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
                         ) : (
                             <>
@@ -124,58 +95,10 @@ export function BranchTariffs() {
                         )}
                     </CardContent>
                 </Card>
-                <ParameterCards baskets={operationBaskets} />
+                <ParameterCards baskets={page.baskets} />
             </TabsContent>
             <TabsContent value="extras" className="flex flex-col gap-4">
-                <Card className="min-w-0 max-w-full">
-                    <CardHeader>
-                        <CardTitle>Услуги</CardTitle>
-                        <WikiLink />
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-3">
-                        {!month.tariffsSaved ? (
-                            <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
-                        ) : (
-                            <>
-                                <ServiceTariffTable rows={previewServices} />
-                                {hasMoreServices ? (
-                                    <Link
-                                        href={withBranchQuery("/branch/tariffs/services", branchId, period)}
-                                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-fit")}
-                                    >
-                                        Все услуги
-                                        <ChevronRight data-icon="inline-end" />
-                                    </Link>
-                                ) : null}
-                            </>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card className="min-w-0 max-w-full">
-                    <CardHeader>
-                        <CardTitle>Услуги КБТ</CardTitle>
-                        <WikiLink />
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-3">
-                        {!month.tariffsSaved ? (
-                            <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
-                        ) : (
-                            <>
-                                <ServiceTariffTable rows={previewKbt} />
-                                {hasMoreKbt ? (
-                                    <Link
-                                        href={withBranchQuery("/branch/tariffs/kbt", branchId, period)}
-                                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-fit")}
-                                    >
-                                        Все услуги КБТ
-                                        <ChevronRight data-icon="inline-end" />
-                                    </Link>
-                                ) : null}
-                            </>
-                        )}
-                    </CardContent>
-                </Card>
-                <ParameterCards baskets={extraBaskets} />
+                <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">Дополнительные сервисы не подключены.</p>
             </TabsContent>
         </Tabs>
     );

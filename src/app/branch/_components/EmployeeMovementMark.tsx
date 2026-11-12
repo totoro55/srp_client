@@ -1,6 +1,9 @@
+"use client";
+
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { EmployeeMovement } from "./mock";
-import { formatSegmentRange } from "./staff";
 
 const LABEL: Record<EmployeeMovement, string> = {
     dismissed: "уволен",
@@ -11,7 +14,7 @@ const LABEL: Record<EmployeeMovement, string> = {
 
 export function movementLabel(movement: EmployeeMovement, on?: string | null): string {
     const day = formatDayMonth(on);
-    return day ? `(${LABEL[movement]} ${day})` : `(${LABEL[movement]})`;
+    return day ? `${LABEL[movement]} ${day}` : LABEL[movement];
 }
 
 function formatDayMonth(value: string | null | undefined): string {
@@ -22,7 +25,11 @@ function formatDayMonth(value: string | null | undefined): string {
     if (!month || !day) {
         return "";
     }
-    return `${day}/${month}`;
+    return `${day}.${month}`;
+}
+
+function shortRange(from: string, until: string): string {
+    return `${formatDayMonth(from)}–${formatDayMonth(until)}`;
 }
 
 export function movementNameClass(movement: EmployeeMovement | undefined): string | undefined {
@@ -51,71 +58,91 @@ export function movementValueClass(movement: EmployeeMovement | undefined): stri
     return undefined;
 }
 
+function movementMetaClass(movement: EmployeeMovement | undefined): string {
+    if (movement === "dismissed") {
+        return "text-rose-800 dark:text-rose-200";
+    }
+    if (movement === "transferred") {
+        return "text-amber-900 dark:text-amber-200";
+    }
+    if (movement === "absent") {
+        return "text-slate-700 dark:text-slate-300";
+    }
+    if (movement === "title") {
+        return "text-violet-800 dark:text-violet-200";
+    }
+    return "text-muted-foreground";
+}
+
+export function employeeStatusText(input: {
+    movement?: EmployeeMovement;
+    movementOn?: string | null;
+    partial?: boolean;
+    from?: string;
+    until?: string;
+}): string {
+    const status = input.movement ? movementLabel(input.movement, input.partial ? null : input.movementOn) : "";
+    const range = input.partial && input.from && input.until ? shortRange(input.from, input.until) : "";
+    return [status, range].filter(Boolean).join(" · ");
+}
+
+export function EmployeeStatusNote({
+    className,
+    ...input
+}: {
+    movement?: EmployeeMovement;
+    movementOn?: string | null;
+    partial?: boolean;
+    from?: string;
+    until?: string;
+    className?: string;
+}) {
+    const text = employeeStatusText(input);
+    if (!text) {
+        return null;
+    }
+    return <span className={cn("block truncate text-[11px] leading-tight font-normal", movementMetaClass(input.movement), className)}>{text}</span>;
+}
+
 export function EmployeeNameLine({
     name,
-    movement,
-    movementOn = null,
-    markClassName,
-    markAtEnd = false,
+    spoiler = true,
+    fit = false,
+    ...input
 }: {
     name: string;
     movement?: EmployeeMovement;
     movementOn?: string | null;
-    markClassName?: string;
-    markAtEnd?: boolean;
+    partial?: boolean;
+    from?: string;
+    until?: string;
+    spoiler?: boolean;
+    fit?: boolean;
 }) {
-    return (
-        <span className={cn("flex min-w-0 items-center gap-x-1.5", markAtEnd ? "w-full flex-nowrap" : "max-w-full flex-wrap gap-y-0.5")}>
-            <span className={cn("truncate", markAtEnd ? "min-w-0" : "max-w-full shrink-0")}>{name}</span>
-            {movement ? <EmployeeMovementMark movement={movement} on={movementOn} className={cn(markAtEnd && "ml-auto", markClassName)} /> : null}
-        </span>
-    );
-}
-
-export function StaffSegmentNote({
-    partial,
-    from,
-    until,
-}: {
-    partial: boolean;
-    from: string;
-    until: string;
-}) {
-    if (!partial) {
-        return null;
+    const text = employeeStatusText(input);
+    const [open, setOpen] = useState(false);
+    const nameClass = fit ? "whitespace-nowrap" : "truncate";
+    if (!text || !spoiler) {
+        return <span className={cn("block", nameClass)}>{name}</span>;
     }
     return (
-        <span className="text-[10px] leading-tight font-normal text-muted-foreground">
-            {formatSegmentRange(from, until)}
-        </span>
-    );
-}
-
-export function EmployeeMovementMark({
-    movement,
-    on = null,
-    className,
-}: {
-    movement: EmployeeMovement;
-    on?: string | null;
-    className?: string;
-}) {
-    const tone = movement === "dismissed"
-        ? "bg-rose-600 text-white dark:bg-rose-500 dark:text-rose-950"
-        : movement === "absent"
-            ? "bg-slate-600 text-white dark:bg-slate-400 dark:text-slate-950"
-            : movement === "title"
-                ? "bg-violet-600 text-white dark:bg-violet-400 dark:text-violet-950"
-                : "bg-amber-500 text-amber-950 dark:bg-amber-400";
-    return (
-        <span
-            className={cn(
-                "inline-flex shrink-0 rounded px-1 py-px text-[10px] leading-tight font-semibold",
-                tone,
-                className,
-            )}
-        >
-            {movementLabel(movement, on)}
+        <span className={cn("block", fit ? "w-max" : "min-w-0")}>
+            <span className={cn("flex items-center gap-0.5", fit ? "w-max" : "min-w-0")}>
+                <span className={nameClass}>{name}</span>
+                <button
+                    type="button"
+                    aria-expanded={open}
+                    aria-label={open ? "Скрыть статус" : "Показать статус"}
+                    className={cn("inline-flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-foreground/10", movementMetaClass(input.movement))}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setOpen((current) => !current);
+                    }}
+                >
+                    <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+                </button>
+            </span>
+            {open ? <EmployeeStatusNote {...input} className={cn("mt-0.5", fit && "w-0 min-w-full")} /> : null}
         </span>
     );
 }

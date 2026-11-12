@@ -1,5 +1,5 @@
 import type { PermissionCode } from "@/lib/permissions";
-import { Grid3X3, KeyRound, List, MapPinned, Settings, Settings2, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags, TrendingUp, IdCard } from "lucide-react";
+import { Grid3X3, KeyRound, List, MapPinned, Settings, Settings2, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags, TrendingUp, IdCard, Activity } from "lucide-react";
 
 export interface RouteItem {
     name: string;
@@ -80,6 +80,14 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 icon: ShoppingBasket,
                 title: "Настройка корзин",
                 description: "Каталог схем расчёта и их версии",
+                permission: "baskets:read",
+            },
+            {
+                name: "Мониторинг",
+                href: "/admin/monitoring",
+                icon: Activity,
+                title: "Мониторинг",
+                description: "Загрузка, настройки тарифов и пересчёт премии",
                 permission: "baskets:read",
             },
             {

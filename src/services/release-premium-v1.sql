@@ -2,13 +2,16 @@
 -- $1 — первое число месяца.
 -- $2 — сотрудник, пусто значит месяц целиком.
 -- $3 — филиал, $4 и $5 — отрезок дат. Для записи месяца они пустые.
--- Колонки совпадают со снимком main.release_premium_lines.
--- Запись в снимок этим файлом не выполняется: результат вставляет пересчёт премии.
+-- $6 — начисление с сохранённым release_coef. Пусто — текущий коэффициент филиала.
+-- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
 -- Уже входит в формулу:
 --   корзина с показателем «Выдача товара», подключённая версия 1, таблица release_v1;
 --   выдача засчитывается author2, пустой author2 не входит;
---   филиал — филиал сотрудника по raw.hr_ktu на дату документа;
+--   поиск сотрудника повторяет условие индекса raw.sale_period_author2_idx,
+--   иначе планировщик читает весь месяц;
+--   филиал — филиал автора из main.author_days на дату документа;
+--   автокасса и терминал берут филиал документа, штатная строка важнее промоутера;
 --   ставка quantity × количество, ставка volume × объём;
 --   обе ставки умножаются на release_coef филиала, коэффициента нет — единица;
 --   нет ставки количества или объёма — строка не входит;
@@ -60,6 +63,8 @@ issue_hits AS (
     FROM raw.sale sale
     WHERE $2::text IS NOT NULL
       AND sale.period = $1::timestamp
+      AND sale.author2 IS NOT NULL
+      AND btrim(sale.author2) <> ''
       AND lower(btrim(sale.author2)) = lower(btrim($2))
     UNION ALL
     SELECT sale.*
@@ -68,10 +73,15 @@ issue_hits AS (
       AND sale.period = $1::timestamp
       AND sale.author2 IS NOT NULL
       AND btrim(sale.author2) <> ''
+      AND (
+          $4::date IS NULL
+          OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
+      )
 )
 SELECT $1::date AS period,
        branch.territory_uuid,
        assignment.branch_uuid,
+       assignment.author_kind,
        issuer.employee_uuid,
        rates.version_id,
        COALESCE(NULLIF(lower(btrim(sale.category)), ''), '') AS category_code,
@@ -92,26 +102,40 @@ FROM issue_hits sale
 CROSS JOIN LATERAL (
     SELECT NULLIF(lower(btrim(sale.author2)), '') AS employee_uuid
 ) issuer
-JOIN LATERAL (
-    SELECT lower(btrim(staff.branch_uuid))::uuid AS branch_uuid
-    FROM raw.hr_ktu staff
-    WHERE lower(staff.employees_uuid) = issuer.employee_uuid
-      AND staff.date_modified <= COALESCE(sale.date::date, $1::date)
-      AND btrim(staff.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-    ORDER BY staff.date_modified DESC
-    LIMIT 1
-) assignment ON TRUE
+JOIN main.author_days author_day
+    ON author_day.period = $1::date
+   AND author_day.employee_uuid = issuer.employee_uuid
+   AND author_day.day = COALESCE(sale.date::date, $1::date)
+CROSS JOIN LATERAL (
+    SELECT CASE
+               WHEN author_day.author_kind = 'system' THEN sale.firm_uuid
+               ELSE author_day.branch_uuid
+           END AS branch_uuid,
+           author_day.author_kind
+) assignment
 JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
 JOIN rates ON rates.territory_uuid = branch.territory_uuid
 LEFT JOIN LATERAL (
-    SELECT coefficient.value
-    FROM basket_branch_coefficients coefficient
-    WHERE coefficient.basket_id = (SELECT id FROM issue_basket)
-      AND coefficient.territory_uuid = branch.territory_uuid
-      AND coefficient.branch_uuid = assignment.branch_uuid
-      AND coefficient.coefficient_key = 'release_coef'
-      AND coefficient.period <= $1::date
-    ORDER BY coefficient.period DESC
+    SELECT source.value
+    FROM (
+        SELECT coefficient.value,
+               coefficient.period
+        FROM basket_branch_coefficients coefficient
+        WHERE $6::bigint IS NULL
+          AND coefficient.basket_id = (SELECT id FROM issue_basket)
+          AND coefficient.territory_uuid = branch.territory_uuid
+          AND coefficient.branch_uuid = assignment.branch_uuid
+          AND coefficient.coefficient_key = 'release_coef'
+          AND coefficient.period <= $1::date
+        UNION ALL
+        SELECT frozen.value,
+               $1::date AS period
+        FROM main.premium_accrual_coefficients frozen
+        WHERE frozen.accrual_id = $6::bigint
+          AND frozen.basket_id = (SELECT id FROM issue_basket)
+          AND frozen.coefficient_key = 'release_coef'
+    ) source
+    ORDER BY source.period DESC
     LIMIT 1
 ) coef ON TRUE
 WHERE issuer.employee_uuid IS NOT NULL

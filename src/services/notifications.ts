@@ -55,6 +55,25 @@ const PROCESSORS = `
     ORDER BY lower(candidate.login), candidate.login
 `;
 
+export async function notifyRecalc(input: {
+    actor: string;
+    body: string;
+    href: string;
+    runId: number;
+}): Promise<void> {
+    const actor = input.actor.trim();
+    if (actor === "" || actor.toLowerCase() === "airflow") {
+        return;
+    }
+    await db.query(
+        `
+        INSERT INTO app_notifications (recipient, kind, body, href, source_key)
+        VALUES ($1, 'recalc', $2, $3, $4)
+        `,
+        [actor, input.body, input.href, `recalc:${input.runId}`],
+    );
+}
+
 export async function notifyFeedback(input: {
     actor: string;
     ticketId: number;

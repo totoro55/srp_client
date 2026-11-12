@@ -45,12 +45,14 @@ import {
     type BasketDetails,
     type BasketParameter,
     type BasketVersion,
+    type BasketVersionArticle,
     type TariffAxis,
 } from "@/lib/baskets";
 import { cn } from "@/lib/utils";
 import { CoefficientDialog } from "./CoefficientDialog";
 import { ParameterDialog } from "./ParameterDialog";
 import { VersionTestTerritories } from "./VersionTestTerritories";
+import { VersionWikiArticle } from "./VersionWikiArticle";
 import { ApiResponse } from "@/types/api";
 
 export function BasketDetail() {
@@ -70,6 +72,7 @@ export function BasketDetail() {
     const [mandatory, setMandatory] = useState(true);
     const [versionName, setVersionName] = useState("");
     const [versionDescription, setVersionDescription] = useState("");
+    const [wikiArticle, setWikiArticle] = useState<BasketVersionArticle | null>(null);
     const [versionComment, setVersionComment] = useState("");
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
     const [coefficients, setCoefficients] = useState<BasketCoefficient[]>([]);
@@ -96,6 +99,7 @@ export function BasketDetail() {
     const versionDirty = selected !== null && canWrite && (
         versionName.trim() !== selected.name
         || versionDescription.trim() !== selected.description.trim()
+        || (wikiArticle?.id ?? null) !== (selected.wikiArticle?.id ?? null)
         || versionComment.trim() !== ""
         || !parametersEqual(parameters, selected.settings.parameters)
         || !coefficientsEqual(coefficients, selected.settings.coefficients)
@@ -141,6 +145,7 @@ export function BasketDetail() {
         setSelectedId(version?.id ?? null);
         setVersionName(version?.name ?? "");
         setVersionDescription(version?.description ?? "");
+        setWikiArticle(version?.wikiArticle ?? null);
         setVersionComment("");
         setParameters(version?.settings.parameters ?? []);
         setCoefficients(version?.settings.coefficients ?? []);
@@ -350,7 +355,7 @@ export function BasketDetail() {
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
-            { name: versionName, description: versionDescription, comment: versionComment, settings: { parameters, coefficients, tariffAxis } },
+            { name: versionName, description: versionDescription, comment: versionComment, wikiArticleId: wikiArticle?.id ?? null, settings: { parameters, coefficients, tariffAxis } },
             selected.id,
             undefined,
             "Версия сохранена",
@@ -966,6 +971,7 @@ export function BasketDetail() {
                                 <p className="text-xs text-muted-foreground">Руководитель видит этот текст, когда выбирает версию.</p>
                                 <Link href={`/wiki/version/${selected.id}`} className="text-xs underline">Описание в базе знаний</Link>
                             </div>
+                            <VersionWikiArticle article={wikiArticle} disabled={!canWrite || saving} onChange={setWikiArticle} />
                             <VersionTestTerritories key={selected.id} basketId={basketId} versionId={selected.id} canWrite={canWrite} />
                                 </div>
                             </div>

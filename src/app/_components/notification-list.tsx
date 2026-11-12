@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { CheckCheck, ChevronDown, Inbox, Mail, MailCheck, MessageSquareText, type LucideIcon } from "lucide-react";
+import { CheckCheck, ChevronDown, Inbox, ListChecks, Mail, MailCheck, MessageSquareText, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,6 +22,7 @@ export interface NotificationEntry {
 
 const NOTIFICATION_KINDS: Record<string, { label: string; icon: LucideIcon }> = {
     feedback: { label: "Обратная связь", icon: MessageSquareText },
+    recalc: { label: "Пересчёт", icon: ListChecks },
 };
 
 const PREVIEW_COUNTS = [5, 10, 20] as const;

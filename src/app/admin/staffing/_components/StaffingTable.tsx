@@ -2,10 +2,11 @@
 
 import { FormEvent, useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CornerDownRight, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, CornerDownRight, Search, X } from "lucide-react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 import { Button } from "@/components/ui/button";
+import { notifyError, notifySuccess } from "@/components/ui/sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -313,10 +314,12 @@ export function StaffingTable({
                             </div>
                         ) : null}
                         {groups.length === 1 ? (
-                            <p className="text-[11px] text-muted-foreground sm:text-xs">
-                                <span className="text-foreground">{groups[0].branchName}</span>
-                                {" · "}
-                                {groups[0].territoryName}
+                            <p className="flex flex-wrap items-center gap-x-1 text-[11px] text-muted-foreground sm:text-xs">
+                                <span className="inline-flex items-center gap-1 text-foreground">
+                                    {groups[0].branchName}
+                                    <CopyUuidButton id={groups[0].branchId} kind="филиала" />
+                                </span>
+                                <span>· {groups[0].territoryName}</span>
                                 {" · "}
                                 {peopleLabel(groups[0].people)}
                                 {" · "}
@@ -542,7 +545,10 @@ function BranchRows({
                     <TableCell colSpan={COLUMN_COUNT} className="bg-muted py-1.5">
                         <div className="sticky left-0 flex w-[100cqw] flex-wrap items-baseline gap-x-3 gap-y-0.5 whitespace-normal">
                             <span className="text-muted-foreground">{group.territoryName}</span>
-                            <span className="font-medium">{group.branchName}</span>
+                            <span className="inline-flex items-center gap-1 font-medium">
+                                {group.branchName}
+                                <CopyUuidButton id={group.branchId} kind="филиала" />
+                            </span>
                             <span className="font-normal text-muted-foreground">{peopleLabel(group.people)}</span>
                             <span className="font-normal text-muted-foreground">
                                 Базовая премия {formatMoney(group.baseBonus)}
@@ -613,7 +619,12 @@ function StayRows({
                             </button>
                         ) : <span className="size-4 shrink-0" />}
                         <span className="min-w-0">
-                            {first ? row.name : (
+                            {first ? (
+                                <span className="inline-flex items-center gap-1">
+                                    {row.name}
+                                    <CopyUuidButton id={row.employeeId} kind="сотрудника" />
+                                </span>
+                            ) : (
                                 <span className="inline-flex items-center gap-1 font-normal text-muted-foreground">
                                     <CornerDownRight className="size-3.5 shrink-0" />
                                     Смена должности
@@ -667,6 +678,64 @@ function VersionCells({
             <TableCell><CalcMark on={participates(row, settings)} /></TableCell>
         </>
     );
+}
+
+function CopyUuidButton({ id, kind }: { id: string; kind: "филиала" | "сотрудника" }) {
+    const label = `Скопировать UUID ${kind}`;
+    return (
+        <button
+            type="button"
+            className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+            aria-label={label}
+            title={label}
+            onClick={() => {
+                void copyUuid(id, kind);
+            }}
+        >
+            <Copy className="size-3" />
+        </button>
+    );
+}
+
+async function copyUuid(id: string, kind: "филиала" | "сотрудника") {
+    const copied = copyThroughSelection(id);
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(id);
+            notifySuccess(`UUID ${kind} скопирован: ${id}`);
+            return;
+        }
+    } catch {
+        if (copied) {
+            notifySuccess(`UUID ${kind} скопирован: ${id}`);
+            return;
+        }
+    }
+    if (copied) {
+        notifySuccess(`UUID ${kind} скопирован: ${id}`);
+        return;
+    }
+    notifyError(`Не удалось скопировать UUID ${kind}: ${id}`);
+}
+
+function copyThroughSelection(value: string): boolean {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "0";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.focus();
+    area.select();
+    let copied = false;
+    try {
+        copied = document.execCommand("copy");
+    } catch {
+        copied = false;
+    }
+    area.remove();
+    return copied;
 }
 
 function StatusMark({ status }: { status: string }) {
@@ -846,7 +915,13 @@ function titleAssignments(rows: StaffingRow[]): Assignment[] {
     const segments: StaffingRow[][] = [];
     for (const row of rows) {
         const last = segments.at(-1);
-        if (!last || last[0]?.title === row.title) {
+        const closed = last?.[last.length - 1]?.status.trim() === "Уволен";
+        // Пометка увольнения с date_modified остаётся в том же назначении, а не отдельной строкой.
+        if (row.status.trim() === "Уволен" && last && !closed) {
+            last.push(row);
+            continue;
+        }
+        if (!closed && (!last || last[0]?.title === row.title)) {
             if (!last) {
                 segments.push([row]);
             } else {
@@ -856,13 +931,26 @@ function titleAssignments(rows: StaffingRow[]): Assignment[] {
         }
         segments.push([row]);
     }
-    return segments.map((segment) => ({
-        head: segment[segment.length - 1] as StaffingRow,
-        earlier: segment.slice(0, -1).map((row, index) => ({
-            row,
-            notes: changeNotes(row, segment[index + 1] as StaffingRow),
-        })),
-    }));
+    return segments.map((segment) => {
+        let end = segment.length;
+        while (end > 0 && segment[end - 1]?.status.trim() === "Уволен") {
+            end -= 1;
+        }
+        const dismissal = end < segment.length ? segment[end] : null;
+        const working = end > 0 ? segment.slice(0, end) : segment.slice(-1);
+        const rawHead = working[working.length - 1] as StaffingRow;
+        const head = dismissal && end > 0
+            ? { ...rawHead, status: "Уволен", changedOn: dismissal.changedOn }
+            : rawHead;
+        const earlierRows = working.slice(0, -1);
+        return {
+            head,
+            earlier: earlierRows.map((row, index) => ({
+                row,
+                notes: changeNotes(row, working[index + 1] as StaffingRow),
+            })),
+        };
+    });
 }
 
 function orderStays(stays: EmployeeStay[], sort: StaffingSort | null, settings: MotivationSettings): EmployeeStay[] {

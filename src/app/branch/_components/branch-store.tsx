@@ -28,13 +28,13 @@ interface BranchStoreValue {
         rolesDirty: boolean;
         brigadesDirty: boolean;
     };
-    setRole: (branchId: string, employeeId: string, roleId: string | null) => void;
-    clearRole: (branchId: string, employeeId: string) => void;
-    resetRoles: (branchId: string) => void;
-    saveRoles: (branchId: string) => void;
-    revertRoles: (branchId: string) => void;
-    roleDraft: (branchId: string) => Record<string, string | null>;
-    hydrateRoles: (branchId: string, overrides: Record<string, string | null>) => void;
+    setRole: (branchId: string, period: string, employeeId: string, roleId: string | null) => void;
+    clearRole: (branchId: string, period: string, employeeId: string) => void;
+    resetRoles: (branchId: string, period: string) => void;
+    saveRoles: (branchId: string, period: string) => void;
+    revertRoles: (branchId: string, period: string) => void;
+    roleDraft: (branchId: string, period: string) => Record<string, string | null>;
+    hydrateRoles: (branchId: string, period: string, overrides: Record<string, string | null>) => void;
     setBrigadeMode: (branchId: string, period: string, mode: BrigadeSetup["mode"]) => void;
     addGroup: (branchId: string, period: string, name: string) => void;
     removeGroup: (branchId: string, period: string, groupId: string) => void;
@@ -76,22 +76,23 @@ function sameOverrides(left: Record<string, string | null>, right: Record<string
 
 export function BranchStoreProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<BranchState>(seed);
-    const hydrateRoles = useCallback((branchId: string, overrides: Record<string, string | null>) => {
+    const hydrateRoles = useCallback((branchId: string, period: string, overrides: Record<string, string | null>) => {
+        const key = keyOf(branchId, period);
         setState((current) => {
-            const saved = current.savedRoles[branchId] ?? {};
+            const saved = current.savedRoles[key] ?? {};
             if (sameOverrides(saved, overrides)) {
                 return current;
             }
-            const draft = current.draftRoles[branchId];
+            const draft = current.draftRoles[key];
             const dirty = draft !== undefined && !sameOverrides(draft, saved);
             const nextSaved = { ...overrides };
             if (dirty) {
-                return { ...current, savedRoles: { ...current.savedRoles, [branchId]: nextSaved } };
+                return { ...current, savedRoles: { ...current.savedRoles, [key]: nextSaved } };
             }
             return {
                 ...current,
-                savedRoles: { ...current.savedRoles, [branchId]: nextSaved },
-                draftRoles: { ...current.draftRoles, [branchId]: { ...overrides } },
+                savedRoles: { ...current.savedRoles, [key]: nextSaved },
+                draftRoles: { ...current.draftRoles, [key]: { ...overrides } },
             };
         });
     }, []);
@@ -99,8 +100,8 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
     const value = useMemo<BranchStoreValue>(() => ({
         slice(branchId, period, employees, settings) {
             const key = keyOf(branchId, period);
-            const savedOverrides = state.savedRoles[branchId] ?? {};
-            const draftOverrides = state.draftRoles[branchId] ?? savedOverrides;
+            const savedOverrides = state.savedRoles[key] ?? {};
+            const draftOverrides = state.draftRoles[key] ?? savedOverrides;
             const savedBrigades = state.savedBrigades[key] ?? EMPTY_BRIGADES;
             const draftBrigades = state.draftBrigades[key] ?? savedBrigades;
             const roleManual: Record<string, boolean> = {};
@@ -117,37 +118,43 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
                 brigadesDirty: JSON.stringify(draftBrigades) !== JSON.stringify(savedBrigades),
             };
         },
-        setRole(branchId, employeeId, roleId) {
+        setRole(branchId, period, employeeId, roleId) {
+            const key = keyOf(branchId, period);
             setState((current) => {
-                const base = { ...(current.draftRoles[branchId] ?? current.savedRoles[branchId] ?? {}) };
+                const base = { ...(current.draftRoles[key] ?? current.savedRoles[key] ?? {}) };
                 base[employeeId] = roleId;
-                return { ...current, draftRoles: { ...current.draftRoles, [branchId]: base } };
+                return { ...current, draftRoles: { ...current.draftRoles, [key]: base } };
             });
         },
-        clearRole(branchId, employeeId) {
+        clearRole(branchId, period, employeeId) {
+            const key = keyOf(branchId, period);
             setState((current) => {
-                const base = { ...(current.draftRoles[branchId] ?? current.savedRoles[branchId] ?? {}) };
+                const base = { ...(current.draftRoles[key] ?? current.savedRoles[key] ?? {}) };
                 delete base[employeeId];
-                return { ...current, draftRoles: { ...current.draftRoles, [branchId]: base } };
+                return { ...current, draftRoles: { ...current.draftRoles, [key]: base } };
             });
         },
-        resetRoles(branchId) {
-            setState((current) => ({ ...current, draftRoles: { ...current.draftRoles, [branchId]: {} } }));
+        resetRoles(branchId, period) {
+            const key = keyOf(branchId, period);
+            setState((current) => ({ ...current, draftRoles: { ...current.draftRoles, [key]: {} } }));
         },
-        saveRoles(branchId) {
+        saveRoles(branchId, period) {
+            const key = keyOf(branchId, period);
             setState((current) => {
-                const draft = { ...(current.draftRoles[branchId] ?? current.savedRoles[branchId] ?? {}) };
-                return { ...current, savedRoles: { ...current.savedRoles, [branchId]: draft } };
+                const draft = { ...(current.draftRoles[key] ?? current.savedRoles[key] ?? {}) };
+                return { ...current, savedRoles: { ...current.savedRoles, [key]: draft } };
             });
         },
-        revertRoles(branchId) {
+        revertRoles(branchId, period) {
+            const key = keyOf(branchId, period);
             setState((current) => {
-                const saved = { ...(current.savedRoles[branchId] ?? {}) };
-                return { ...current, draftRoles: { ...current.draftRoles, [branchId]: saved } };
+                const saved = { ...(current.savedRoles[key] ?? {}) };
+                return { ...current, draftRoles: { ...current.draftRoles, [key]: saved } };
             });
         },
-        roleDraft(branchId) {
-            return { ...(state.draftRoles[branchId] ?? state.savedRoles[branchId] ?? {}) };
+        roleDraft(branchId, period) {
+            const key = keyOf(branchId, period);
+            return { ...(state.draftRoles[key] ?? state.savedRoles[key] ?? {}) };
         },
         hydrateRoles,
         setBrigadeMode(branchId, period, mode) {

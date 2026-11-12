@@ -1,13 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { Cell, Label, Pie, PieChart } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     ChartContainer,
     ChartTooltip,
     ChartTooltipContent,
     type ChartConfig,
 } from "@/components/ui/chart";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { detailModeToggleClass, detailModeToggleItemClass } from "./bonus-detail-ui";
 import { formatMoney, type BasketGroup } from "./mock";
 
 const BASKET_COLORS: Record<string, string> = {
@@ -44,13 +47,24 @@ function sliceColor(basketId: string, index: number): string {
     return BASKET_COLORS[basketId] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
-export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
-    const slices = groups.filter((group) => group.amount > 0);
-    const chartData = slices.map((group, index) => ({
-        basket: group.basketId,
+export interface ChartAuthor {
+    id: string;
+    name: string;
+    amount: number;
+}
+
+export function BonusDistributionChart({ groups, authors }: { groups: BasketGroup[]; authors?: ChartAuthor[] }) {
+    const [mode, setMode] = useState<"indicators" | "authors">("indicators");
+    const source = mode === "authors" && authors ? authorSlices(authors) : groups.filter((group) => group.amount > 0).map((group) => ({
+        id: group.basketId,
         title: group.title,
         amount: group.amount,
-        fill: sliceColor(group.basketId, index),
+    }));
+    const chartData = source.map((item, index) => ({
+        basket: item.id,
+        title: item.title,
+        amount: item.amount,
+        fill: mode === "authors" ? FALLBACK_COLORS[index % FALLBACK_COLORS.length] : sliceColor(item.id, index),
     }));
     const total = chartData.reduce((sum, item) => sum + item.amount, 0);
     const chartConfig = {
@@ -64,12 +78,33 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
         <Card className="h-full min-w-0">
             <CardHeader>
                 <CardTitle>Распределение премии</CardTitle>
+                {authors ? (
+                    <CardAction>
+                        <ToggleGroup
+                            variant="outline"
+                            size="sm"
+                            spacing={0}
+                            value={[mode]}
+                            onValueChange={(values) => {
+                                const next = values[0];
+                                if (next === "indicators" || next === "authors") {
+                                    setMode(next);
+                                }
+                            }}
+                            aria-label="Распределение премии"
+                            className={detailModeToggleClass}
+                        >
+                            <ToggleGroupItem value="indicators" className={detailModeToggleItemClass}>По показателям</ToggleGroupItem>
+                            <ToggleGroupItem value="authors" className={detailModeToggleItemClass}>По авторам</ToggleGroupItem>
+                        </ToggleGroup>
+                    </CardAction>
+                ) : null}
             </CardHeader>
             <CardContent className="flex flex-1 items-center">
                 {chartData.length === 0 ? (
                     <p className="py-10 text-center text-sm text-muted-foreground">Нет данных для диаграммы.</p>
                 ) : (
-                    <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center">
+                    <div className="flex min-h-0 min-w-0 flex-col items-stretch gap-4 sm:flex-row sm:items-center">
                         <ChartContainer config={chartConfig} className="mx-auto aspect-square h-56 w-56 shrink-0 sm:mx-0 sm:h-64 sm:w-64">
                             <PieChart>
                                 <ChartTooltip
@@ -125,7 +160,7 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
                                 </Pie>
                             </PieChart>
                         </ChartContainer>
-                        <ul className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
+                        <ul className="flex max-h-56 min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain pr-1 text-sm sm:max-h-64">
                             {chartData.map((item) => (
                                 <li key={item.basket} className="flex min-w-0 items-center gap-2">
                                     <span className="size-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: item.fill }} />
@@ -133,10 +168,25 @@ export function BonusDistributionChart({ groups }: { groups: BasketGroup[] }) {
                                     <span className="shrink-0 tabular-nums text-foreground">{formatMoney(item.amount)}</span>
                                 </li>
                             ))}
-                        </ul>
-                    </div>
+                            </ul>
+                        </div>
                 )}
             </CardContent>
         </Card>
     );
+}
+
+function authorSlices(authors: ChartAuthor[]): { id: string; title: string; amount: number }[] {
+    const byAuthor = new Map<string, { id: string; title: string; amount: number }>();
+    for (const author of authors) {
+        const current = byAuthor.get(author.id);
+        if (current) {
+            current.amount += author.amount;
+            continue;
+        }
+        byAuthor.set(author.id, { id: author.id, title: author.name, amount: author.amount });
+    }
+    return [...byAuthor.values()]
+        .filter((author) => author.amount > 0)
+        .sort((left, right) => right.amount - left.amount || left.title.localeCompare(right.title, "ru"));
 }

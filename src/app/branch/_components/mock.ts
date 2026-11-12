@@ -43,6 +43,7 @@ export interface TariffRow {
     nonStm: string;
     im: string;
     b2b: string;
+    mode?: "percent" | "per_unit";
 }
 
 export interface SalesConditions {
