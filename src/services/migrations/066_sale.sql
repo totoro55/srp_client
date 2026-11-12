@@ -1,5 +1,5 @@
 -- Сырые строки продаж. Таблицу заполняют снаружи, приложение только читает.
--- Тип контрагента из выгрузки в 071 заменён столбцом b2b.
+-- В таблице уже лежит b2b. Тип контрагента не хранится и сюда не переносится.
 -- Одна таблица на обе корзины: author — кто продал, author2 — кто выдал.
 -- Внешних ключей нет. Повторная загрузка заменяет месяц целиком, прошлые месяцы остаются.
 -- Совсем старый период, четыре–пять лет, можно удалить, если таблица станет слишком большой.
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS raw.sale (
     firm_uuid UUID NULL,
     author TEXT NULL,
     author2 TEXT NULL,
-    contragent_type TEXT NULL,
+    b2b BOOLEAN NULL,
     link_doc TEXT NULL,
     date TIMESTAMP NULL,
     document_number TEXT NULL,
@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS raw.sale (
     volume DOUBLE PRECISION NULL,
     type_document TEXT NULL
 );
+
+ALTER TABLE raw.sale ADD COLUMN IF NOT EXISTS b2b BOOLEAN;
 
 COMMENT ON TABLE raw.sale IS
     'Строка продажи. Заполняется снаружи. Месяцы не удаляются. Совсем старый период, четыре–пять лет, можно удалить, если таблица станет слишком большой. Продажа считается по author, выдача — по author2.';
@@ -39,8 +41,8 @@ COMMENT ON COLUMN raw.sale.author IS
 COMMENT ON COLUMN raw.sale.author2 IS
     'Кто выдал. Uuid сотрудника текстом.';
 
-COMMENT ON COLUMN raw.sale.contragent_type IS
-    'Тип контрагента. Uuid текстом.';
+COMMENT ON COLUMN raw.sale.b2b IS
+    'Безнал. Истина для контрагентов 462d4d24-7fe3-401a-a24c-6f595156845b и 1e8123a5-c7b3-4496-b49d-5efe3ed05c8b, иначе ложь.';
 
 COMMENT ON COLUMN raw.sale.link_doc IS
     'Ссылка на документ.';
