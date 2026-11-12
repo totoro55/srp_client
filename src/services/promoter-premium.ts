@@ -31,7 +31,7 @@ export async function readBranchPromoterPremiums(period: string, branchId: strin
           AND NOT EXISTS (
               SELECT 1
               FROM raw.hr_ktu regular
-              WHERE lower(regular.employees_uuid) = lower(staff.employees_uuid::text)
+              WHERE lower(regular.employees_uuid::text) = lower(staff.employees_uuid::text)
                 AND regular.date_modified < ($1::date + INTERVAL '1 month')
                 AND btrim(regular.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
           )

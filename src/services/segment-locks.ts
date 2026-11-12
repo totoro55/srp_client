@@ -32,8 +32,8 @@ export async function prepareClosedSegments(
     const rows = await query<{ lines: number }>(
         `
         WITH versions AS (
-            SELECT DISTINCT ON (lower(staff.employees_uuid), staff.date_modified)
-                   lower(staff.employees_uuid) AS employee_uuid,
+            SELECT DISTINCT ON (lower(staff.employees_uuid::text), staff.date_modified)
+                   lower(staff.employees_uuid::text) AS employee_uuid,
                    staff.date_modified,
                    lower(btrim(staff.branch_uuid)) AS branch_uuid,
                    btrim(COALESCE(staff.title, '')) AS title,
@@ -43,7 +43,7 @@ export async function prepareClosedSegments(
               AND staff.date_modified IS NOT NULL
               AND staff.date_modified <= $1::date
               AND btrim(staff.branch_uuid) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            ORDER BY lower(staff.employees_uuid), staff.date_modified, staff.period DESC NULLS LAST
+            ORDER BY lower(staff.employees_uuid::text), staff.date_modified, staff.period DESC NULLS LAST
         ),
         events AS (
             SELECT version.employee_uuid,

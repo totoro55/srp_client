@@ -292,7 +292,7 @@ export async function readSharedPremiumAuthors(
             SELECT hr.title
             FROM raw.hr_ktu hr
             WHERE author.author_kind = 'staff'
-              AND lower(hr.employees_uuid) = lower(author.employee_uuid)
+              AND lower(hr.employees_uuid::text) = lower(author.employee_uuid)
               AND hr.date_modified <= author.active_from
             ORDER BY hr.date_modified DESC
             LIMIT 1
@@ -908,7 +908,7 @@ interface VersionRow extends StaffVersion {
 async function readVersions(query: PremiumQuery, period: string, asOf: string): Promise<VersionRow[]> {
     return query<VersionRow>(
         `
-        SELECT lower(staff.employees_uuid) AS id,
+        SELECT lower(staff.employees_uuid::text) AS id,
                COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
                lower(btrim(staff.branch_uuid)) AS "branchId",
@@ -920,12 +920,12 @@ async function readVersions(query: PremiumQuery, period: string, asOf: string): 
                COALESCE(staff.status, '') AS status,
                staff.period = $1::date AS "inMonth"
         FROM raw.hr_ktu staff
-        LEFT JOIN employees employee ON lower(employee.uuid::text) = lower(staff.employees_uuid)
+        LEFT JOIN employees employee ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
         WHERE staff.date_modified >= ($1::date - INTERVAL '1 month')
           AND staff.date_modified < ($1::date + INTERVAL '1 month')
           AND staff.date_modified <= $2::date
-          AND lower(staff.employees_uuid) IN (
-              SELECT lower(person.employees_uuid)
+          AND lower(staff.employees_uuid::text) IN (
+              SELECT lower(person.employees_uuid::text)
               FROM raw.hr_ktu person
               WHERE person.period = $1::date
           )

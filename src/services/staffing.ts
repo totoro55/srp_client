@@ -167,7 +167,7 @@ export async function readStaffing(
                COALESCE(NOT assignment.automatic, false) AS manual
         FROM raw.hr_ktu staff
         LEFT JOIN employees employee
-            ON lower(employee.uuid::text) = lower(staff.employees_uuid)
+            ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
         LEFT JOIN branches branch
             ON lower(branch.uuid::text) = lower(staff.branch_uuid)
         LEFT JOIN territories territory
@@ -179,7 +179,7 @@ export async function readStaffing(
             SELECT role.role_id, role.automatic
             FROM branch_motivation_roles role
             WHERE lower(role.branch_uuid) = lower(staff.branch_uuid)
-              AND lower(role.employee_uuid) = lower(staff.employees_uuid)
+              AND lower(role.employee_uuid) = lower(staff.employees_uuid::text)
               AND role.period <= staff.period
             ORDER BY role.period DESC
             LIMIT 1

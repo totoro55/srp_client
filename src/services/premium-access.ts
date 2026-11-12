@@ -23,7 +23,7 @@ function workedAssignmentsSql(employeeIdSql: string, periodSql: string): string 
                        btrim(COALESCE(staff.status, '')) AS status
                 FROM raw.hr_ktu staff
                 WHERE ${employeeIdSql} IS NOT NULL
-                  AND lower(staff.employees_uuid) = ${employeeIdSql}
+                  AND lower(staff.employees_uuid::text) = ${employeeIdSql}
                   AND staff.date_modified IS NOT NULL
                   AND btrim(staff.branch_uuid) ~* '${BRANCH_UUID}'
                 ORDER BY staff.date_modified, staff.period DESC NULLS LAST
