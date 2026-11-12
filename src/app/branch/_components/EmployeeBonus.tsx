@@ -72,6 +72,7 @@ export function EmployeeBonus() {
     const forecast = forecastPay(employee.hourly, employee.payLevel, directory.baseBonus, directory.priceGrowth, employee.scheduleHours, employee.timesheetHours, earned);
     const showForecast = !monthHasEnded(period);
     const groups = employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]);
+    const lines = directory.foreignDetail || directory.viewerEmployeeId === employee.id.toLowerCase();
 
     return (
         <div className="grid items-stretch gap-4 lg:grid-cols-3">
@@ -124,19 +125,17 @@ export function EmployeeBonus() {
                 </div>
             {groups.length > 0 ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-3">
-                    {groups.map((group) => (
-                        <Link
-                            key={group.basketId}
-                            href={segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, group.basketId), employee.activeFrom)}
-                            className="block h-full min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            <Card className="h-full transition-colors hover:bg-muted/40">
+                    {groups.map((group) => {
+                        const card = (
+                            <Card className={cn("h-full", lines && "transition-colors hover:bg-muted/40")}>
                                 <CardHeader>
                                     <CardTitle>{group.title}</CardTitle>
                                     <p className="text-lg font-medium tabular-nums">{formatMoney(group.amount)}</p>
-                                    <CardAction className="self-center">
-                                        <ArrowRight className="size-7 text-muted-foreground" aria-hidden />
-                                    </CardAction>
+                                    {lines ? (
+                                        <CardAction className="self-center">
+                                            <ArrowRight className="size-7 text-muted-foreground" aria-hidden />
+                                        </CardAction>
+                                    ) : null}
                                 </CardHeader>
                                 {group.facts.length > 0 ? (
                                     <CardContent>
@@ -151,8 +150,19 @@ export function EmployeeBonus() {
                                     </CardContent>
                                 ) : null}
                             </Card>
-                        </Link>
-                    ))}
+                        );
+                        return lines ? (
+                            <Link
+                                key={group.basketId}
+                                href={segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, group.basketId), employee.activeFrom)}
+                                className="block h-full min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                {card}
+                            </Link>
+                        ) : (
+                            <div key={group.basketId} className="h-full min-w-0">{card}</div>
+                        );
+                    })}
                 </div>
             ) : null}
         </div>

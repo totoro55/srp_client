@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
-import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
 import { MotivationSettingsError } from "@/services/motivation-roles";
 import { saveBranchSharedPremiumRoles } from "@/services/shared-premium";
@@ -19,7 +19,7 @@ interface SharedPremiumRolesPayload {
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<SharedPremiumRolesPayload>>> {
     try {
-        const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+        const access = await requirePermission("branch.shared:write");
         const body = await request.json() as { branchId?: unknown; period?: unknown; roleIds?: unknown };
         const branchId = typeof body.branchId === "string" ? body.branchId : "";
         const period = typeof body.period === "string" ? body.period : "";

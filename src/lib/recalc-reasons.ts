@@ -8,7 +8,12 @@ const REASONS: Record<string, string> = {
     "branch.shared-roles": "Роли общей премии",
     tariffs: "Тарифы",
     coefficients: "Коэффициенты",
+    "rrs.wizard": "Настройка корзин",
+    "rrs.connections": "Подключение корзин",
+    "rrs.motivation": "Участие филиалов",
+    "stm-brands": "Бренды СТМ",
     manual: "Ручной запуск",
+    schedule: "Автозагрузка",
 };
 
 export function recalcReasonLabel(trigger: string, origin: "system" | "manual" | null): string {

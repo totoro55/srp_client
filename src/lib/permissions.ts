@@ -15,7 +15,37 @@ export const PERMISSION_CATALOG = [
         code: "bonus.any:read",
         group: "Премия",
         title: "Любая премия",
-        description: "Сумма и состав премии любого сотрудника",
+        description: "Кабинет и детализация любого сотрудника на любом филиале",
+    },
+    {
+        code: "bonus.branch:read",
+        group: "Премия",
+        title: "Кабинет своего филиала",
+        description: "Свой филиал и филиалы, где за месяц есть своя премия. Свою детализацию сотрудник видит сам",
+    },
+    {
+        code: "bonus.granted:read",
+        group: "Премия",
+        title: "Кабинет выданных филиалов",
+        description: "Филиалы территорий, выданных в областях доступа",
+    },
+    {
+        code: "bonus.territory:read",
+        group: "Премия",
+        title: "Кабинет своей территории",
+        description: "Все филиалы территории, указанной у сотрудника",
+    },
+    {
+        code: "bonus.shared:read",
+        group: "Премия",
+        title: "Детализация общей премии",
+        description: "Строки авторов общей премии на филиале, который открыт кабинетом",
+    },
+    {
+        code: "bonus.detail:read",
+        group: "Премия",
+        title: "Чужая детализация",
+        description: "Детализация другого сотрудника на филиале, который открыт кабинетом",
     },
     {
         code: "settings:read",
@@ -91,10 +121,28 @@ export const PERMISSION_CATALOG = [
         description: "Очередь обращений, статус и ответ",
     },
     {
-        code: "branch:read",
+        code: "branch.tariffs:read",
         group: "Филиал",
-        title: "Просмотр филиала",
-        description: "Настройки филиала, премии сотрудников и детализация",
+        title: "Тарифы филиала",
+        description: "Тарифы продажи и корзин выбранного филиала",
+    },
+    {
+        code: "branch.roles:write",
+        group: "Филиал",
+        title: "Роли сотрудников",
+        description: "Назначение ролей и признака «В расчёте» на филиале",
+    },
+    {
+        code: "branch.brigades:write",
+        group: "Филиал",
+        title: "Бригады",
+        description: "Режим бригад и состав групп на филиале",
+    },
+    {
+        code: "branch.shared:write",
+        group: "Филиал",
+        title: "Общая премия филиала",
+        description: "Роли, между которыми делится общая премия филиала",
     },
     {
         code: "staffing:read",
@@ -138,11 +186,35 @@ export const PERMISSION_CATALOG = [
         title: "Изменение брендов СТМ",
         description: "Добавление и удаление бренда из списка СТМ",
     },
+    {
+        code: "monitoring:read",
+        group: "Мониторинг",
+        title: "Просмотр мониторинга",
+        description: "Загрузка, настройки, расчёты, журнал и периодичность",
+    },
+    {
+        code: "recalc:write",
+        group: "Мониторинг",
+        title: "Запуски пересчётов",
+        description: "Ручной пересчёт продажи, выдачи, кассы и общей премии",
+    },
+    {
+        code: "recalc-schedule:write",
+        group: "Мониторинг",
+        title: "Запись времени пересчётов",
+        description: "День и время тарифов и ежедневной автозагрузки",
+    },
 ] as const;
+
+export const PERMISSION_GROUP_ORDER = ["Доступ", "Приложение", "Премия", "Мотивация", "Мониторинг", "Филиал"] as const;
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]["code"];
 
 export const PERMISSION_CODES: PermissionCode[] = PERMISSION_CATALOG.map((item) => item.code);
+
+export const CABINET_PERMISSIONS = ["bonus.any:read", "bonus.branch:read", "bonus.granted:read", "bonus.territory:read"] as const satisfies readonly PermissionCode[];
+
+export const BRANCH_SETTINGS_PERMISSIONS = ["branch.roles:write", "branch.brigades:write", "branch.shared:write"] as const satisfies readonly PermissionCode[];
 
 export function isPermissionCode(value: string): value is PermissionCode {
     return (PERMISSION_CODES as string[]).includes(value);

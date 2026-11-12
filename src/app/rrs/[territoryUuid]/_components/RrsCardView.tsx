@@ -13,9 +13,9 @@ import { versionStatusTitle, type BasketVersionStatus } from "@/lib/baskets";
 import type { RrsBasketOffer, RrsCard, RrsVersionOffer } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
-import { RrsPeriodControls } from "../../_components/RrsPeriodControls";
+import { buildForms, type BasketForm } from "../../_components/model";
+import { RrsPeriodControls, settingsPeriodHint } from "../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../_components/RrsSectionNav";
-import { buildForms, describePeriodEffect, formatMonth, type BasketForm } from "../../_components/model";
 import { RrsHistoryPanel } from "./RrsHistoryPanel";
 
 export function RrsCardView() {
@@ -75,6 +75,7 @@ export function RrsCardView() {
         ));
     }
 
+    const selectedPeriod = requestedPeriod ?? card?.period ?? null;
     const columns = card
         ? forms
             .filter((form) => form.connected)
@@ -92,7 +93,8 @@ export function RrsCardView() {
                 territoryUuid={territoryUuid}
                 territoryName={card?.territory.name}
                 active="baskets"
-                period={card?.period ?? requestedPeriod}
+                period={selectedPeriod}
+                cardPeriod={card ? connectionCardPeriod(selectedPeriod ?? card.period, card.savedPeriods.map((item) => item.period)) : requestedPeriod}
                 subnav={card ? (
                     <TabsList>
                         <TabsTrigger value="set">Состав</TabsTrigger>
@@ -104,22 +106,20 @@ export function RrsCardView() {
                 ) : null}
                 controls={(
                     <>
-                        {card ? (
+                        {card && selectedPeriod ? (
                             <RrsPeriodControls
-                                period={card.period}
+                                period={selectedPeriod}
                                 appliedPeriod={card.appliedPeriod}
                                 savedPeriods={card.savedPeriods}
-                                hint={cardPeriodHint(card)}
+                                hint={settingsPeriodHint(selectedPeriod, card.editPolicy)}
                                 onPeriodChange={(period) => {
-                                    const saved = card.savedPeriods.map((item) => item.period);
-                                    const target = saved.includes(period) ? period : connectionCardPeriod(period, saved);
-                                    router.replace(`/rrs/${territoryUuid}/baskets?period=${target}`);
+                                    router.replace(`/rrs/${territoryUuid}/baskets?period=${period}`);
                                 }}
                             />
                         ) : null}
                         <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
                             {card ? (
-                                <Link href={`/rrs/${territoryUuid}/edit?period=${card.period}`} className={buttonVariants({ size: "sm", className: "shrink-0" })}>
+                                <Link href={`/rrs/${territoryUuid}/edit?period=${selectedPeriod ?? card.period}`} className={buttonVariants({ size: "sm", className: "shrink-0" })}>
                                     <WandSparkles />
                                     Запустить мастер настройки корзин
                                 </Link>
@@ -188,23 +188,12 @@ export function RrsCardView() {
                         </div>
                     </TabsContent>
                     <TabsContent value="history">
-                        <RrsHistoryPanel territoryUuid={territoryUuid} period={card.period} />
+                        <RrsHistoryPanel territoryUuid={territoryUuid} period={selectedPeriod ?? card.period} />
                     </TabsContent>
                 </>
             ) : null}
         </Tabs>
     );
-}
-
-function cardPeriodHint(card: RrsCard): { text: string; tone: "future" | "current" | "past" } {
-    const effect = describePeriodEffect(card);
-    if (effect.kind === "future") {
-        return { tone: "future", text: `Показан набор корзин с ${formatMonth(card.period)}. Более ранние месяцы останутся без изменений.` };
-    }
-    if (effect.kind === "past") {
-        return { tone: "past", text: "Показан сохранённый набор корзин за выбранный месяц." };
-    }
-    return { tone: "current", text: "Показан действующий набор корзин." };
 }
 
 function BasketHelp() {

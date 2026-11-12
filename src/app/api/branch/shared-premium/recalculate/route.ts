@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { airflowActor } from "@/lib/airflow-token";
-import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
 import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, PremiumRecalcBusyError, systemTrigger } from "@/services/basket-updates";
 import { calculateSharedPremium } from "@/services/shared-premium";
@@ -22,7 +22,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<S
             return createErrorResponse("UNAUTHORIZED", "Требуется авторизация", 401);
         }
         if (actor === null) {
-            const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+            const access = await requirePermission("recalc:write");
             actor = access.username;
         }
         const body = await request.json().catch(() => null) as { period?: unknown; trigger?: unknown; announce?: unknown } | null;

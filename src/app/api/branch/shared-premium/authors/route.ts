@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
+import { CABINET_PERMISSIONS } from "@/lib/permissions";
 import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
 import { readSharedPremiumAuthors, type SharedPremiumAuthorRow } from "@/services/shared-premium";
 import type { ApiResponse } from "@/types/api";
 
 export async function GET(request: Request): Promise<NextResponse<ApiResponse<SharedPremiumAuthorRow[]>>> {
     try {
-        const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+        const access = await requireAnyPermission([...CABINET_PERMISSIONS]);
         const params = new URL(request.url).searchParams;
         const authors = await readSharedPremiumAuthors(access, params.get("period") ?? "", params.get("branch") ?? "");
         if (!authors) {

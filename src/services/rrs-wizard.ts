@@ -1,11 +1,13 @@
 import { SALES_INDICATOR_NAME } from "@/lib/baskets";
+import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { parseTariffReference, parseTariffSaveRows, type TariffReference, type TariffSaveRow } from "@/lib/tariff-calculation";
 import { parseTariffWeightOverride } from "@/lib/tariff-exceptions";
 import { parseRrsSaveInput, type RrsCoefficientValue, type RrsConnectionInput, type RrsMotivationItem } from "@/lib/rrs";
 import type { AccessView } from "@/server/authz/resolve-access";
-import { applyRrsMonth, guardRrsMonth, RrsRuleError } from "@/services/basket-connections";
+import { applyRrsMonth, changedConnectionKinds, getRrsMonth, guardRrsMonth, RrsRuleError } from "@/services/basket-connections";
 import { prepareBranchMotivation, writeBranchMotivation } from "@/services/branch-motivation";
-import { replacePeriodCoefficients } from "@/services/basket-coefficients";
+import { coefficientBranchChanges, getBranchCoefficients, replacePeriodCoefficients } from "@/services/basket-coefficients";
+import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
 import { previewConnectionTariffs, writeWizardTariffs } from "@/services/tariff-exceptions";
 import type { TariffExceptionPage } from "@/lib/tariff-exceptions";
@@ -147,15 +149,65 @@ export async function previewWizardTariffs(
     return previewConnectionTariffs(access, territoryUuid, period, sales.versionId, sales.values);
 }
 
-export async function commitRrsWizard(access: AccessView, input: WizardCommitInput): Promise<void> {
+export async function commitRrsWizard(access: AccessView, input: WizardCommitInput): Promise<StartedPremiumRecalc | null> {
     await guardRrsMonth(access, input.territoryUuid, input.period);
-    const motivation = await prepareBranchMotivation(access, input.territoryUuid, input.period, input.motivation);
+    const [month, coefficients, motivation] = await Promise.all([
+        getRrsMonth(access, input.territoryUuid, input.period),
+        getBranchCoefficients(access, input.territoryUuid, input.period),
+        prepareBranchMotivation(access, input.territoryUuid, input.period, input.motivation),
+    ]);
+    const territoryKinds = changedConnectionKinds(month, input.items);
+    if (input.tariffs && !territoryKinds.includes("sale")) {
+        territoryKinds.push("sale");
+    }
+    const branchKinds = coefficientBranchChanges(coefficients, input.coefficients);
+    for (const kind of territoryKinds) {
+        branchKinds.delete(kind);
+    }
+    const connected = connectedKinds(month, input.items);
+    for (const branchId of motivation.changedBranchIds) {
+        for (const kind of connected) {
+            if (territoryKinds.includes(kind)) {
+                continue;
+            }
+            const current = branchKinds.get(kind) ?? [];
+            if (!current.includes(branchId)) {
+                branchKinds.set(kind, [...current, branchId]);
+            }
+        }
+    }
     await db.transaction(async (query) => {
         await applyRrsMonth(query, access, input.territoryUuid, input.period, input.items);
         await writeBranchMotivation(query, access.username, input.territoryUuid, motivation.period, motivation.items);
         await replacePeriodCoefficients(query, access.username, input.territoryUuid, input.period, input.coefficients);
         await writeWizardTariffs(query, access, input.territoryUuid, input.period, input.tariffs);
     });
+    return enqueuePremiumScopes({
+        period: input.period,
+        actor: access.username,
+        trigger: "rrs.wizard",
+        territoryId: input.territoryUuid.toLowerCase(),
+        territoryKinds,
+        branchKinds,
+    });
+}
+
+function connectedKinds(
+    month: { baskets: { id: number; indicatorName: string }[] },
+    items: RrsConnectionInput[],
+): PremiumRecalcKind[] {
+    const indicators = new Map(month.baskets.map((basket) => [basket.id, basket.indicatorName]));
+    const kinds = new Set<PremiumRecalcKind>();
+    for (const item of items) {
+        if (!item.connected || item.versionId === null) {
+            continue;
+        }
+        const kind = premiumKindOf(indicators.get(item.basketId) ?? "");
+        if (kind) {
+            kinds.add(kind);
+        }
+    }
+    return [...kinds];
 }
 
 async function salesVersion(items: RrsConnectionInput[]): Promise<{ versionId: number; values: Record<string, string> } | null> {

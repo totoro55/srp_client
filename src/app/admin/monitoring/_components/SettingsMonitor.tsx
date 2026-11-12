@@ -93,7 +93,7 @@ export function SettingsMonitor({ data }: { data: SettingsMonitorData }) {
                                 <Badge variant={ready ? "secondary" : "outline"}>{ready ? "Готово" : "Есть пробелы"}</Badge>
                             </div>
                             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                                <Fact label="Филиалы" value={branchText(row)} gap={row.branchesTotal > 0 && row.branchesEnabled === 0} href={rrsSettingHref(row.uuid, data.period, "motivation")} />
+                                <Fact label="Филиалы" value={branchText(row)} gap={row.branchesTotal > 0 && row.branchesParticipating === 0} href={rrsSettingHref(row.uuid, data.period, "motivation")} />
                                 <Fact label="Коэффициенты" value={coefficientText(row)} gap={coefficientMissing(row)} href={rrsSettingHref(row.uuid, data.period, "coefficients")} />
                                 <Fact label="Тарифы" value={tariffText(row.tariffs)} gap={row.tariffs === "missing" || row.tariffs === "no-axis"} href={rrsSettingHref(row.uuid, data.period, "tariffs")} />
                             </div>
@@ -119,7 +119,7 @@ function rrsSettingHref(territoryUuid: string, period: string, page: "motivation
 }
 
 function territoryReady(row: SettingsTerritory): boolean {
-    return row.branchesEnabled > 0 && !coefficientMissing(row) && row.tariffs !== "missing" && row.tariffs !== "no-axis";
+    return row.branchesParticipating > 0 && !coefficientMissing(row) && row.tariffs !== "missing" && row.tariffs !== "no-axis";
 }
 
 function coefficientMissing(row: SettingsTerritory): boolean {
@@ -128,12 +128,12 @@ function coefficientMissing(row: SettingsTerritory): boolean {
 
 function branchText(row: SettingsTerritory): string {
     if (row.branchesTotal === 0) {
-        return "Нет филиалов";
+        return "Нет филиалов с базовой премией";
     }
-    if (row.branchesEnabled === 0) {
+    if (row.branchesParticipating === 0) {
         return "Нет включённых";
     }
-    return `${row.branchesEnabled} из ${row.branchesTotal}`;
+    return `${row.branchesParticipating} из ${row.branchesTotal}`;
 }
 
 function coefficientText(row: SettingsTerritory): string {

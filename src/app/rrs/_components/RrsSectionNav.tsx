@@ -55,7 +55,7 @@ const BLOCKS: { id: string; label: string; pages: MenuPage[] }[] = [
                 path: "/baskets",
                 icon: ShoppingBasket,
                 timed: true,
-                savedCard: true,
+                savedCard: false,
             },
             {
                 id: "basket-wizard",

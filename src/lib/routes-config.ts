@@ -1,4 +1,4 @@
-import type { PermissionCode } from "@/lib/permissions";
+import { BRANCH_SETTINGS_PERMISSIONS, CABINET_PERMISSIONS, type PermissionCode } from "@/lib/permissions";
 import { Grid3X3, KeyRound, List, MapPinned, Settings, Settings2, ShieldAlert, ShieldX, Home, Users, UserRound, UserCog, ShoppingBasket, Building2, SlidersHorizontal, Newspaper, BookOpen, MessageSquareText, FileText, Store, Wallet, Tags, TrendingUp, IdCard, Activity } from "lucide-react";
 
 export interface RouteItem {
@@ -88,7 +88,7 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 icon: Activity,
                 title: "Мониторинг",
                 description: "Загрузка, настройки тарифов и пересчёт премии",
-                permission: "baskets:read",
+                permission: "monitoring:read",
             },
             {
                 kind: "subgroup",
@@ -156,7 +156,7 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 icon: Wallet,
                 title: "Кабинет филиала",
                 description: "Суммы сотрудников филиала за месяц",
-                permissionAny: ["branch:read", "baskets:connect"],
+                permissionAny: [...CABINET_PERMISSIONS],
             },
             {
                 name: "Тарифы",
@@ -164,15 +164,15 @@ export const APP_NAVIGATION_MAP: NavigationGroup[] = [
                 icon: Tags,
                 title: "Тарифы",
                 description: "Тарифы продажи товара и корзин филиала",
-                permissionAny: ["branch:read", "baskets:connect"],
+                permission: "branch.tariffs:read",
             },
             {
                 name: "Настройки филиала",
                 href: "/branch",
                 icon: Store,
                 title: "Настройки филиала",
-                description: "Роли сотрудников и бригады",
-                permissionAny: ["branch:read", "baskets:connect"],
+                description: "Роли сотрудников, бригады и общая премия",
+                permissionAny: [...BRANCH_SETTINGS_PERMISSIONS],
             },
         ],
     },

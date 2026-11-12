@@ -16,9 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { tariffAxisTitle, type TariffAxis } from "@/lib/baskets";
 import { applyPremiumView, DEFAULT_PREMIUM_VIEW, isPremiumGroupLevel, isPremiumMonthCount, PREMIUM_GROUP_LEVELS, PREMIUM_MONTH_CHOICES, PREMIUM_BAR_LIMIT, PREMIUM_PIE_LIMIT, premiumGroupTitle, premiumShareSlices, premiumSpanTitle, STAT_WINDOW_MONTHS, type PremiumGroupLevel, type PremiumMonthCount, type PremiumShareSlice, type PremiumView, type TariffPremiumPage, type TariffPremiumRow } from "@/lib/tariff-premium";
 import { ApiResponse } from "@/types/api";
-import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
+import { RrsPeriodControls, settingsPeriodHint } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
-import { formatMonth } from "../../../_components/model";
 
 type SortKey = "title" | "parent" | "avgPrice" | "monthlyQuantity" | "mode" | "rate" | "premium" | "share";
 type Sort = { key: SortKey; direction: "asc" | "desc" };
@@ -88,7 +87,7 @@ export function TariffPremium() {
         () => page ? applyPremiumView(page.rows, view) : null,
         [page, view],
     );
-    const hint = page ? periodHint(page, loading, view.months) : null;
+    const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
 
     return (
         <div className="flex flex-col gap-4">
@@ -797,25 +796,6 @@ function PremiumHelp() {
             </section>
         </div>
     );
-}
-
-function periodHint(page: TariffPremiumPage, loading: boolean, months: PremiumMonthCount): { text: string; tone: PeriodHintTone } {
-    if (loading) {
-        return { tone: "loading", text: "Загрузка периода…" };
-    }
-    if (!page.axis) {
-        return { tone: "past", text: "Нет вида расчёта у подключённой версии продаж." };
-    }
-    if (page.rows.length === 0) {
-        return { tone: "past", text: "За этот период статистики нет." };
-    }
-    if (page.pool === null) {
-        return { tone: "closed", text: "Тарифы этого месяца ещё не сохранены. Пул не посчитан." };
-    }
-    if (page.period.slice(0, 7) > page.editPolicy.currentMonth) {
-        return { tone: "future", text: `Показана премия по тарифам с ${formatMonth(page.period)}.` };
-    }
-    return { tone: "current", text: `Премия посчитана по сохранённым тарифам за ${premiumSpanTitle(months)}.` };
 }
 
 function modeTitle(row: Pick<TariffPremiumRow, "baseMode" | "mixedTariff">): string {

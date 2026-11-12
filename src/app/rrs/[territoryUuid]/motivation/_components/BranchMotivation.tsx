@@ -11,15 +11,15 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
-import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { notifySuccess } from "@/lib/notify";
 import { formatBaseBonus, type RrsMotivationPage } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
 import { PeriodChangeHistory } from "../../../_components/PeriodChangeHistory";
-import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
+import { RrsPeriodControls, settingsPeriodHint } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
-import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
+import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { formatMonth } from "../../../_components/model";
 
 export function BranchMotivation() {
@@ -80,17 +80,15 @@ export function BranchMotivation() {
         };
     }, [fetchKey, fetchMotivation]);
 
-    const hint = page ? periodHint(page, loading) : null;
+    const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
 
     const dirtyCount = page
         ? page.branches.filter((branch) => isEnabled(enabled, branch.uuid) !== isEnabled(saved, branch.uuid)).length
         : 0;
-    const enabledCount = page
-        ? page.branches.filter((branch) => isEnabled(enabled, branch.uuid)).length
-        : 0;
     const bonusBranches = page
         ? page.branches.filter((branch) => page.items.find((row) => row.branchUuid === branch.uuid)?.hasBaseBonus)
         : [];
+    const enabledCount = bonusBranches.filter((branch) => isEnabled(enabled, branch.uuid)).length;
     const allWithBonusOn = bonusBranches.length > 0 && bonusBranches.every((branch) => isEnabled(enabled, branch.uuid));
 
     function requestSave() {
@@ -119,11 +117,14 @@ export function BranchMotivation() {
                     })),
                 }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: true }>;
+            const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
             if (!json.success) {
                 setError(json.error.message);
                 setConfirmSave(false);
                 return;
+            }
+            if (json.data.recalc) {
+                showStartedRecalc(json.data.recalc);
             }
             notifySuccess("Участие филиалов сохранено");
             setConfirmSave(false);
@@ -224,9 +225,13 @@ export function BranchMotivation() {
             {page ? (
                 <>
                     <TabsContent value="participation" className="flex flex-col gap-4">
-                        <p className="text-sm text-muted-foreground">
-                            Включено {enabledCount} из {page.branches.length}
-                        </p>
+                        {page.branches.length > 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                                {bonusBranches.length === 0
+                                    ? "Нет филиалов с базовой премией"
+                                    : `Включено ${enabledCount} из ${bonusBranches.length}`}
+                            </p>
+                        ) : null}
                         {page.branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
                         {page.branches.length > 0 ? (
                 <Table containerClassName="max-h-[calc(100vh-16rem)] rounded-lg border">
@@ -234,7 +239,7 @@ export function BranchMotivation() {
                         <TableRow>
                             <TableHead>Филиал</TableHead>
                             <TableHead className="w-44 text-right">Базовая премия</TableHead>
-                            <TableHead className="w-48">
+                            <TableHead className="min-w-72">
                                 <span className="flex items-center gap-2">
                                     <Switch
                                         checked={allWithBonusOn}
@@ -262,6 +267,7 @@ export function BranchMotivation() {
                             const item = page.items.find((row) => row.branchUuid === branch.uuid);
                             const hasBaseBonus = item?.hasBaseBonus ?? false;
                             const bonus = formatBaseBonus(item?.baseBonus ?? null);
+                            const blocked = !hasBaseBonus && !on;
                             return (
                                 <TableRow key={branch.uuid} className={cn(on && "bg-emerald-50 dark:bg-emerald-950/30", dirty && "bg-amber-50 dark:bg-amber-950/30")}>
                                     <TableCell className="font-medium">{branch.name}</TableCell>
@@ -272,8 +278,8 @@ export function BranchMotivation() {
                                         <label className="flex items-center gap-2 text-sm">
                                             <Switch
                                                 checked={on}
-                                                disabled={!page.editable || saving || (!hasBaseBonus && !on)}
-                                                aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
+                                                disabled={!page.editable || saving || blocked}
+                                                aria-label={blocked ? `Нельзя включить ${branch.name}: нет базовой премии` : on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
                                                 onCheckedChange={(checked) => {
                                                     if (checked && !hasBaseBonus) {
                                                         return;
@@ -282,7 +288,7 @@ export function BranchMotivation() {
                                                 }}
                                             />
                                             <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
-                                                {on ? "Включена" : "Выключена"}
+                                                {on ? "Включена" : hasBaseBonus ? "Выключена" : "Нельзя включить: нет базовой премии"}
                                             </span>
                                         </label>
                                     </TableCell>
@@ -323,19 +329,6 @@ function participation(page: RrsMotivationPage): Record<string, boolean> {
         }
     }
     return next;
-}
-
-function periodHint(page: RrsMotivationPage, loading: boolean): { text: string; tone: PeriodHintTone } {
-    if (loading) {
-        return { tone: "loading", text: "Загрузка периода…" };
-    }
-    if (!page.editable) {
-        return { tone: "closed", text: `${closedPeriodMessage(page.editPolicy)} Показано действующее участие.` };
-    }
-    if (page.period.slice(0, 7) > page.editPolicy.currentMonth) {
-        return { tone: "future", text: `Участие будет действовать с ${formatMonth(page.period)}. Более ранние месяцы останутся без изменений.` };
-    }
-    return { tone: "current", text: "Этот месяц открыт для изменения." };
 }
 
 function MotivationHelp({ cutoffDay }: { cutoffDay: number | null }) {

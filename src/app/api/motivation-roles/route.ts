@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { readMotivationDocument } from "@/lib/motivation-roles";
+import { BRANCH_SETTINGS_PERMISSIONS } from "@/lib/permissions";
 import { adminAuthErrorResponse, requireAnyPermission, requirePermission } from "@/lib/require-admin";
 import { MotivationSettingsError, readMotivationSettings, replaceMotivationSettings } from "@/services/motivation-roles";
 import type { ApiResponse } from "@/types/api";
@@ -8,7 +9,7 @@ import type { MotivationSettings } from "@/lib/motivation-roles";
 
 export async function GET(): Promise<NextResponse<ApiResponse<MotivationSettings>>> {
     try {
-        await requireAnyPermission(["motivation-roles:read", "branch:read", "baskets:connect"]);
+        await requireAnyPermission(["motivation-roles:read", ...BRANCH_SETTINGS_PERMISSIONS]);
         const data = await readMotivationSettings();
         return NextResponse.json({ success: true, data });
     } catch (error) {

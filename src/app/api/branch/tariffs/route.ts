@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
-import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { isStaffPeriod } from "@/services/branch-staff";
 import { readBranchTariffs, type BranchTariffPage } from "@/services/branch-tariffs";
 import type { ApiResponse } from "@/types/api";
@@ -9,7 +9,7 @@ const BRANCH_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 export async function GET(request: Request): Promise<NextResponse<ApiResponse<BranchTariffPage>>> {
     try {
-        const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+        const access = await requirePermission("branch.tariffs:read");
         const params = new URL(request.url).searchParams;
         const period = params.get("period");
         const branchId = params.get("branch") ?? "";

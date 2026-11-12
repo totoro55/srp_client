@@ -1,12 +1,14 @@
 import { readVersionSettings, type BasketCoefficient } from "@/lib/baskets";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { buildChangeEvents, snapshotsFromRows, type StoredChangeRow } from "@/lib/field-changes";
+import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { RrsCoefficientPage, RrsCoefficientValue, RrsFieldChangeEvent } from "@/lib/rrs";
 import { getRrsCard, getRrsMonth, RrsRuleError } from "@/services/basket-connections";
 import { listEnabledBranchUuids } from "@/services/branch-motivation";
 import { db } from "@/services/db";
 import { branchListedInPeriod } from "@/services/directory-visibility";
+import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import type { AccessView } from "@/server/authz/resolve-access";
 import type { QueryResultRow } from "pg";
 
@@ -145,7 +147,7 @@ export async function saveBranchCoefficients(
     territoryUuid: string,
     period: string,
     items: RrsCoefficientValue[],
-): Promise<void> {
+): Promise<StartedPremiumRecalc | null> {
     const page = await getBranchCoefficients(access, territoryUuid, period);
     if (!page.editable) {
         throw new RrsRuleError(400, closedPeriodMessage(page.editPolicy));
@@ -176,6 +178,7 @@ export async function saveBranchCoefficients(
         const value = parseCoefficientValue(item.value, found.coefficient, found.basketName);
         prepared.push({ branchUuid, basketId: item.basketId, key: item.key, value });
     }
+    const branchKinds = coefficientBranchChanges(page, prepared);
 
     await db.transaction(async (query) => {
         await query(
@@ -218,6 +221,72 @@ export async function saveBranchCoefficients(
             );
         }
     });
+    return enqueuePremiumScopes({
+        period: page.period,
+        actor: access.username,
+        trigger: "coefficients",
+        territoryId: territoryUuid.toLowerCase(),
+        territoryKinds: [],
+        branchKinds,
+    });
+}
+
+export function coefficientBranchChanges(
+    page: RrsCoefficientPage,
+    nextItems: { branchUuid: string; basketId: number; key: string; value: string | number }[],
+): Map<PremiumRecalcKind, string[]> {
+    const next = new Map<string, number>();
+    for (const item of nextItems) {
+        const value = coefficientNumber(item.value);
+        if (value === null) {
+            continue;
+        }
+        next.set(coefficientCell(item.branchUuid, item.basketId, item.key), value);
+    }
+    const stored = new Map<string, number>();
+    for (const item of page.values) {
+        const value = coefficientNumber(item.value);
+        if (value === null) {
+            continue;
+        }
+        stored.set(coefficientCell(item.branchUuid, item.basketId, item.key), value);
+    }
+    const kindByBasket = new Map<number, PremiumRecalcKind>();
+    for (const basket of page.baskets) {
+        const kind = premiumKindOf(basket.indicatorName);
+        if (kind) {
+            kindByBasket.set(basket.id, kind);
+        }
+    }
+    const branches = new Map<PremiumRecalcKind, Set<string>>();
+    for (const key of new Set([...next.keys(), ...stored.keys()])) {
+        const before = stored.get(key) ?? 1;
+        const after = next.get(key) ?? 1;
+        if (Math.abs(before - after) < 1e-6) {
+            continue;
+        }
+        const separator = key.indexOf("\u0000");
+        const basketSeparator = key.indexOf("\u0000", separator + 1);
+        const branchId = key.slice(0, separator);
+        const basketId = Number(key.slice(separator + 1, basketSeparator));
+        const kind = kindByBasket.get(basketId);
+        if (!kind || !branchId) {
+            continue;
+        }
+        const set = branches.get(kind) ?? new Set<string>();
+        set.add(branchId);
+        branches.set(kind, set);
+    }
+    return new Map([...branches].map(([kind, ids]) => [kind, [...ids]]));
+}
+
+function coefficientCell(branchId: string, basketId: number, key: string): string {
+    return `${branchId.toLowerCase()}\u0000${basketId}\u0000${key}`;
+}
+
+function coefficientNumber(value: string | number): number | null {
+    const parsed = typeof value === "number" ? value : Number(value.trim().replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
 }
 
 const DEFAULT_COEFFICIENT = "1";

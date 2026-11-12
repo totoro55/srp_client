@@ -1,5 +1,6 @@
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
+import { CABINET_HOME_SQL, CABINET_SCOPE_SQL, branchListScopes } from "@/services/premium-access";
 import { priceGrowthAllowanceFor } from "@/services/price-growth";
 import { readBranchKassaPremiumDays } from "@/services/kassa-premium";
 import { readBranchReleasePremiumDays } from "@/services/release-premium";
@@ -24,21 +25,6 @@ export interface ConnectedBasketIndicator {
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type ScopeMode = "all" | "granted" | "home" | "none";
-
-function scopeMode(access: AccessView): ScopeMode {
-    if (access.fullAccess || access.role?.scopeKind === "division") {
-        return "all";
-    }
-    if (access.role?.scopeKind === "granted") {
-        return "granted";
-    }
-    if (access.role?.scopeKind === "home_branch") {
-        return "home";
-    }
-    return "none";
-}
-
 export function isStaffPeriod(value: string | null): value is string {
     return value !== null && PERIOD.test(value);
 }
@@ -55,23 +41,9 @@ export async function readBranchStaff(
                branch.code,
                branch.uuid IS NOT DISTINCT FROM home.branch_uuid AS own
         FROM branches branch
-        LEFT JOIN LATERAL (
-            SELECT employee.branch_uuid
-            FROM employees employee
-            WHERE lower(employee.login) = lower($2)
-              AND NOT employee.deleted
-            LIMIT 1
-        ) home ON true
+        ${CABINET_HOME_SQL}
         WHERE NOT branch.deleted
-          AND (
-              $1::text = 'all'
-              OR ($1::text = 'granted' AND branch.territory_uuid IN (
-                  SELECT grant_row.territory_uuid
-                  FROM scope_grants grant_row
-                  WHERE lower(grant_row.username) = lower($2)
-              ))
-              OR ($1::text = 'home' AND branch.uuid IS NOT DISTINCT FROM home.branch_uuid)
-          )
+          AND ${CABINET_SCOPE_SQL}
           AND (
               EXISTS (
                   SELECT 1
@@ -83,7 +55,7 @@ export async function readBranchStaff(
           )
         ORDER BY branch.name
         `,
-        [scopeMode(access), access.username, period],
+        [branchListScopes(access), access.username, period],
     );
 
     const selected = branchId && UUID.test(branchId)

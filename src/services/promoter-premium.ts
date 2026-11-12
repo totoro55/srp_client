@@ -114,7 +114,7 @@ ${selectSql}
         ) line
         GROUP BY lower(line.employee_uuid)
         `,
-        [period, null, branchId, null, null, null],
+        [period, null, branchId, null, null, null, null],
     );
     const amounts = new Map<string, number>();
     for (const row of rows) {

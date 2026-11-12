@@ -3,6 +3,7 @@
 -- $2 — сотрудник, пусто значит месяц целиком.
 -- $3 — филиал, $4 и $5 — отрезок дат. Для записи месяца они пустые.
 -- $6 — начисление с сохранённым kassa_coef. Пусто — текущий коэффициент филиала.
+-- $7 — список филиалов. Пусто — без ограничения списком.
 -- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
 -- Уже входит в формулу:
@@ -128,6 +129,7 @@ WHERE issuer.employee_uuid IS NOT NULL
   AND operation.minute <> 0
   AND assignment.branch_uuid IS NOT NULL
   AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
+  AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
   AND (
       $4::date IS NULL
       OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { requirePermission } from "@/lib/require-admin";
 import { parseTariffReference, parseTariffSaveRows } from "@/lib/tariff-calculation";
 import { parseConnectionPeriod, parseTerritoryUuid } from "@/lib/rrs";
@@ -39,7 +40,7 @@ export async function GET(
 export async function PUT(
     request: NextRequest,
     context: { params: Promise<{ territoryUuid: string }> },
-): Promise<NextResponse<ApiResponse<{ saved: true }>>> {
+): Promise<NextResponse<ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>>> {
     try {
         const access = await requirePermission("baskets:connect");
         const { territoryUuid: rawUuid } = await context.params;
@@ -73,8 +74,8 @@ export async function PUT(
                 error: { code: "BAD_REQUEST", message: reference.error },
             }, { status: 400 });
         }
-        await saveTariffExceptions(access, territoryUuid, period, rows, weights, reference);
-        return NextResponse.json({ success: true, data: { saved: true } });
+        const recalc = await saveTariffExceptions(access, territoryUuid, period, rows, weights, reference);
+        return NextResponse.json({ success: true, data: { saved: true, recalc } });
     } catch (error) {
         return rrsErrorResponse(error);
     }

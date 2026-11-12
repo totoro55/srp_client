@@ -1,4 +1,7 @@
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { stmBrandName, type StmBrand } from "@/lib/stm-brands";
+import { automaticBasketPeriod } from "@/services/recalc-schedule";
+import { enqueuePremiumScopes } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
 
 interface StmBrandRow {
@@ -37,7 +40,7 @@ export async function readStmBrands(): Promise<StmBrand[]> {
     return rows.map(toBrand);
 }
 
-export async function addStmBrand(rawName: unknown, actor: string): Promise<StmBrand[]> {
+export async function addStmBrand(rawName: unknown, actor: string): Promise<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }> {
     const name = stmBrandName(rawName);
     if (!name) {
         throw new StmBrandError("Укажите название бренда");
@@ -58,14 +61,29 @@ export async function addStmBrand(rawName: unknown, actor: string): Promise<StmB
     if (inserted.length === 0) {
         throw new StmBrandError("Такой бренд уже есть");
     }
-    return readStmBrands();
+    const brands = await readStmBrands();
+    const recalc = await enqueueStmPremium(actor);
+    return { brands, recalc };
 }
 
-export async function deleteStmBrand(rawName: unknown): Promise<StmBrand[]> {
+export async function deleteStmBrand(rawName: unknown, actor: string): Promise<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }> {
     const name = stmBrandName(rawName);
     if (!name) {
         throw new StmBrandError("Укажите бренд");
     }
-    await db.query(`DELETE FROM stm_brands WHERE name = $1`, [name]);
-    return readStmBrands();
+    const removed = await db.query<{ name: string }>(`DELETE FROM stm_brands WHERE name = $1 RETURNING name`, [name]);
+    const brands = await readStmBrands();
+    const recalc = removed.length > 0 ? await enqueueStmPremium(actor) : null;
+    return { brands, recalc };
+}
+
+function enqueueStmPremium(actor: string): Promise<StartedPremiumRecalc | null> {
+    return enqueuePremiumScopes({
+        period: automaticBasketPeriod(),
+        actor,
+        trigger: "stm-brands",
+        territoryId: null,
+        territoryKinds: ["sale"],
+        branchKinds: new Map(),
+    });
 }

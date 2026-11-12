@@ -34,12 +34,9 @@ interface MonthBasket {
 interface MonthGroup {
     period: string;
     open: boolean;
-    sourceRows: number;
-    issuedRows: number | null;
     rows: MonthBasket[];
 }
 
-const countFormat = new Intl.NumberFormat("ru-RU");
 const moneyFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" });
 const whenFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -47,7 +44,7 @@ const whenFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeSt
 export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) {
     const session = useSession();
     const access = useAccess();
-    const canRecalculate = access.has("baskets:connect") || access.has("branch:read");
+    const canRecalculate = access.has("recalc:write");
     const [error, setError] = useState<string | null>(null);
     const [form, setForm] = useState<MonthForm | null>(null);
 
@@ -145,33 +142,30 @@ function MonthBoard({
     return (
         <section className="flex flex-col gap-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
-                <div className="flex min-w-0 flex-col gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Select value={month.period} onValueChange={(next) => {
-                            if (typeof next === "string") {
-                                onPeriod(next);
-                            }
-                        }}>
-                            <SelectTrigger className="w-56" aria-label="Месяц расчёта">
-                                <SelectValue>{() => formatMonth(month.period)}</SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                                {months.map((item) => (
-                                    <SelectItem key={item.period} value={item.period}>
-                                        {formatMonth(item.period)}
-                                        {item.open ? " · открыт" : ""}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Badge variant={month.open ? "secondary" : "outline"}>{month.open ? "Открыт" : "Закрыт"}</Badge>
-                        {month.open ? (
-                            <Button type="button" size="sm" variant="outline" disabled={!canRecalculate} onClick={() => onOpenForm(month.period, "baskets")}>
-                                Все корзины
-                            </Button>
-                        ) : null}
-                    </div>
-                    <p className="text-sm text-muted-foreground">{sourceCaption(month)}</p>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Select value={month.period} onValueChange={(next) => {
+                        if (typeof next === "string") {
+                            onPeriod(next);
+                        }
+                    }}>
+                        <SelectTrigger className="w-56" aria-label="Месяц расчёта">
+                            <SelectValue>{() => formatMonth(month.period)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {months.map((item) => (
+                                <SelectItem key={item.period} value={item.period}>
+                                    {formatMonth(item.period)}
+                                    {item.open ? " · открыт" : ""}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Badge variant={month.open ? "secondary" : "outline"}>{month.open ? "Открыт" : "Закрыт"}</Badge>
+                    {month.open ? (
+                        <Button type="button" size="sm" variant="outline" disabled={!canRecalculate} onClick={() => onOpenForm(month.period, "baskets")}>
+                            Все корзины
+                        </Button>
+                    ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <Link href="/admin/monitoring?tab=journal" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
@@ -454,24 +448,12 @@ function groupMonths(baskets: BasketUpdate[]): MonthGroup[] {
         if (rows.length === 0) {
             return [];
         }
-        const sale = rows.find((row) => row.basket.kind === "sale");
-        const release = rows.find((row) => row.basket.kind === "release");
         return [{
             period,
             open: rows.some((row) => row.month.open),
-            sourceRows: sale?.month.sourceRows ?? rows[0].month.sourceRows,
-            issuedRows: release && sale && release.month.sourceRows !== sale.month.sourceRows ? release.month.sourceRows : null,
             rows,
         }];
     });
-}
-
-function sourceCaption(month: MonthGroup): string {
-    const total = `${countFormat.format(month.sourceRows)} строк в выгрузке. В премию попадает не каждая.`;
-    if (month.issuedRows === null) {
-        return total;
-    }
-    return `${total} С автором выдачи ${countFormat.format(month.issuedRows)}.`;
 }
 
 function runCaption(run: BasketRecalcRun): string {

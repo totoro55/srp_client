@@ -31,12 +31,14 @@ const OPEN_SHARE_DELETE = `
             AND share.active_until >= accrual.active_from
       )
       AND ($2::text IS NULL OR lower(share.branch_uuid::text) = lower($2))
+      AND ($3::uuid[] IS NULL OR share.branch_uuid = ANY($3::uuid[]))
 `;
 
 const WINDOW_SHARE_DELETE = `
     DELETE FROM main.shared_premiums share
     WHERE share.period = $1::date
       AND ($2::text IS NULL OR lower(share.branch_uuid::text) = lower($2))
+      AND ($5::uuid[] IS NULL OR share.branch_uuid = ANY($5::uuid[]))
       AND share.active_from <= $4::date
       AND share.active_until >= $3::date
       AND NOT EXISTS (
@@ -106,14 +108,21 @@ export async function writeSharedPremiums(
     run?: PremiumRun,
 ): Promise<number> {
     const onlyBranch = branchId?.toLowerCase() ?? null;
+    const listed = onlyBranch || !run?.branches ? null : run.branches.map((id) => id.toLowerCase());
+    const listedSet = listed ? new Set(listed) : null;
     const asOf = run?.asOf ?? moscowToday();
     const earliest = run?.earliest ?? monthBefore(asOf);
     const window = run?.from && run?.until ? { from: run.from, until: run.until } : null;
-    const { inserts, authors } = await prepareSharedPremium(query, period, onlyBranch, asOf, window, run?.protect, earliest);
-    await query(window ? WINDOW_SHARE_DELETE : OPEN_SHARE_DELETE, window ? [period, onlyBranch, window.from, window.until] : [period, onlyBranch]);
+    const prepared = await prepareSharedPremium(query, period, onlyBranch, asOf, window, run?.protect, earliest);
+    const inserts = listedSet ? prepared.inserts.filter((item) => listedSet.has(item.branch)) : prepared.inserts;
+    const authors = listedSet ? prepared.authors.filter((item) => listedSet.has(item.branch)) : prepared.authors;
+    await query(
+        window ? WINDOW_SHARE_DELETE : OPEN_SHARE_DELETE,
+        window ? [period, onlyBranch, window.from, window.until, listed] : [period, onlyBranch, listed],
+    );
     await insertShares(query, period, inserts);
     await query(ACCRUAL_LINK, [period]);
-    await replaceAuthors(query, period, authors, onlyBranch);
+    await replaceAuthors(query, period, authors, onlyBranch, listed);
     await lockStaffSegments(query, asOf, earliest, window ? run?.protect : undefined);
     return inserts.length;
 }
@@ -640,14 +649,16 @@ async function replaceAuthors(
     period: string,
     authors: AuthorInsert[],
     onlyBranch: string | null,
+    listed: string[] | null = null,
 ): Promise<void> {
     await query(
         `
         DELETE FROM main.shared_premium_authors author
         WHERE author.period = $1::date
           AND ($2::text IS NULL OR lower(author.branch_uuid::text) = lower($2))
+          AND ($3::uuid[] IS NULL OR author.branch_uuid = ANY($3::uuid[]))
         `,
-        [period, onlyBranch],
+        [period, onlyBranch, listed],
     );
     const size = 500;
     for (let index = 0; index < authors.length; index += size) {
@@ -740,7 +751,7 @@ ${selectSql}
               AND COALESCE(line.document_date::date, $1::date) <= $5::date
             GROUP BY lower(line.branch_uuid::text), lower(line.employee_uuid), line.author_kind
             `,
-            [period, null, branchId, null, asOf, null],
+            [period, null, branchId, null, asOf, null, null],
         );
         for (const row of rows) {
             const premium = amount(row.premium);
@@ -785,7 +796,7 @@ ${kassaSelect}
           AND COALESCE(line.document_date::date, $1::date) <= $5::date
         GROUP BY lower(line.branch_uuid::text), lower(line.employee_uuid), line.author_kind
         `,
-        [period, null, branchId, null, asOf, null],
+        [period, null, branchId, null, asOf, null, null],
     );
     for (const row of kassaRows) {
         const premium = amount(row.premium);

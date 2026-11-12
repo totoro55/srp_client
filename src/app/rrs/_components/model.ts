@@ -140,23 +140,23 @@ export function describePeriodEffect(card: {
     title: string;
     detail: string;
 } {
+    const month = card.period.slice(0, 7);
+    const today = currentMonth();
+    if (month > today) {
+        return { kind: "future", title: "Будущие", detail: `с ${formatCalendarDate(card.period)}` };
+    }
+    if (month < today) {
+        return { kind: "past", title: "Прошлые", detail: formatMonth(card.period) };
+    }
     const next = card.savedPeriods
         .map((item) => item.period)
         .filter((period) => period > card.period)
         .sort()[0];
-    if (!card.appliedPeriod || card.period > card.appliedPeriod) {
-        return { kind: "future", title: "Будущие", detail: `с ${formatCalendarDate(card.period)}` };
-    }
     const end = next ? previousDay(next) : null;
     const detail = end
         ? `с ${formatSpanStart(card.period, end)} по ${formatCalendarDate(end)}`
         : `с ${formatCalendarDate(card.period)} по настоящее время`;
-    const current = card.period === card.appliedPeriod;
-    return {
-        kind: current ? "current" : "past",
-        title: current ? "Текущие" : "Прошлые",
-        detail,
-    };
+    return { kind: "current", title: "Текущие", detail };
 }
 
 function formatSpanStart(fromIso: string, toIso: string): string {

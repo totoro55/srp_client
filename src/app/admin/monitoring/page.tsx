@@ -19,7 +19,7 @@ export default async function MonitoringPage({
     searchParams: Promise<{ tab?: string | string[]; period?: string | string[]; preview?: string | string[]; basket?: string | string[]; status?: string | string[]; q?: string | string[]; from?: string | string[]; to?: string | string[] }>;
 }) {
     const access = await getRequestAccess();
-    if (!access || !can(access, "baskets:read")) {
+    if (!access || !can(access, "monitoring:read")) {
         redirect("/forbidden");
     }
 
@@ -44,7 +44,7 @@ export default async function MonitoringPage({
                 {tab === "calculations" ? <BasketUpdates initial={await readBasketUpdates()} /> : null}
                 {tab === "journal" ? <RewriteJournal initial={await readRewriteJournal(null, basket, status, query, dates.from, dates.to)} basket={basket} status={status} query={query} from={dates.from} to={dates.to} preview={preview} /> : null}
                 {tab === "schedule" ? (
-                    <RecalcScheduleForm initial={await readAutoSchedules()} canWrite={can(access, "baskets:connect")} />
+                    <RecalcScheduleForm initial={await readAutoSchedules()} canWrite={can(access, "recalc-schedule:write")} />
                 ) : null}
             </div>
         </AdminPageShell>

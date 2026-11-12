@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { stmBrandName, type StmBrand } from "@/lib/stm-brands";
 import type { ApiResponse } from "@/types/api";
 
@@ -48,12 +50,15 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: brand }),
             });
-            const json = (await response.json()) as ApiResponse<StmBrand[]>;
+            const json = (await response.json()) as ApiResponse<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }>;
             if (!response.ok || !json.success) {
                 setError(json.success ? "Не удалось добавить бренд" : json.error.message);
                 return;
             }
-            setRows(json.data);
+            setRows(json.data.brands);
+            if (json.data.recalc) {
+                showStartedRecalc(json.data.recalc);
+            }
             setName("");
             notifySuccess("Бренд добавлен");
         } catch {
@@ -68,12 +73,15 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
         const response = await fetch(`/api/admin/stm-brands?name=${encodeURIComponent(brand)}`, {
             method: "DELETE",
         });
-        const json = (await response.json()) as ApiResponse<StmBrand[]>;
+        const json = (await response.json()) as ApiResponse<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }>;
         if (!response.ok || !json.success) {
             setError(json.success ? "Не удалось удалить бренд" : json.error.message);
             return;
         }
-        setRows(json.data);
+        setRows(json.data.brands);
+        if (json.data.recalc) {
+            showStartedRecalc(json.data.recalc);
+        }
         notifySuccess("Бренд удалён");
     }
 

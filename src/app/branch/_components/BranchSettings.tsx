@@ -17,7 +17,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HelpDrawer } from "@/components/help-drawer";
-import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
+import { ButtonSpinner, StackSkeleton } from "@/components/loading-state";
+import { useAccess } from "@/hooks/useAccess";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
@@ -44,23 +45,40 @@ const SHARED_ROLE_NOTICE = "Изменён перечень ролей, межд
 export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
     const directory = useBranchDirectory();
+    const access = useAccess();
+    const roles = access.has("branch.roles:write");
+    const brigades = access.has("branch.brigades:write");
+    const shared = access.has("branch.shared:write");
+    const first = roles ? "staff" : brigades ? "brigades" : "shared";
+    const [tab, setTab] = useState<string | null>(null);
+    const current = (tab === "staff" && roles) || (tab === "brigades" && brigades) || (tab === "shared" && shared) ? tab : first;
+
+    if (!access.roleName && !access.conflict) {
+        return <StackSkeleton rows={6} />;
+    }
 
     return (
-        <Tabs defaultValue="staff" className="min-w-0 gap-4">
+        <Tabs value={current} onValueChange={(value) => { if (typeof value === "string") setTab(value); }} className="min-w-0 gap-4">
             <TabsList>
-                <TabsTrigger value="staff">Сотрудники</TabsTrigger>
-                <TabsTrigger value="brigades">Бригады</TabsTrigger>
-                <TabsTrigger value="shared">Общая премия</TabsTrigger>
+                {roles ? <TabsTrigger value="staff">Сотрудники</TabsTrigger> : null}
+                {brigades ? <TabsTrigger value="brigades">Бригады</TabsTrigger> : null}
+                {shared ? <TabsTrigger value="shared">Общая премия</TabsTrigger> : null}
             </TabsList>
-            <TabsContent value="staff">
-                <Staff branchId={branchId} period={period} closed={!directory.rolesEditable} inMotivation />
-            </TabsContent>
-            <TabsContent value="brigades">
-                <Brigades branchId={branchId} period={period} closed={false} inMotivation />
-            </TabsContent>
-            <TabsContent value="shared">
-                <SharedPremiumTab branchId={branchId} period={period} />
-            </TabsContent>
+            {roles ? (
+                <TabsContent value="staff">
+                    <Staff branchId={branchId} period={period} closed={!directory.rolesEditable} inMotivation />
+                </TabsContent>
+            ) : null}
+            {brigades ? (
+                <TabsContent value="brigades">
+                    <Brigades branchId={branchId} period={period} closed={false} inMotivation />
+                </TabsContent>
+            ) : null}
+            {shared ? (
+                <TabsContent value="shared">
+                    <SharedPremiumTab branchId={branchId} period={period} />
+                </TabsContent>
+            ) : null}
         </Tabs>
     );
 }

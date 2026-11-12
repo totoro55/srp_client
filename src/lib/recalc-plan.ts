@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { recalcReasonLabel, type RecalcScopeLevel } from "@/lib/recalc-reasons";
 import type { BasketUpdateKind } from "@/services/basket-updates";
-import type { RecalcScopeLevel } from "@/lib/recalc-reasons";
 
 export const RECALC_PLAN_KEY = "srp-monitoring-recalc-queue";
 export const RECALC_CONSOLE_EVENT = "srp-recalc-console";
@@ -25,6 +26,18 @@ interface PlanEvent {
     createdAt: string;
     status: string;
     actor: string;
+}
+
+export function showStartedRecalc(notice: StartedPremiumRecalc): void {
+    openRecalcConsole({
+        period: notice.period,
+        kinds: notice.kinds,
+        reason: notice.trigger,
+        actor: notice.actor,
+        scopeLevel: notice.scopeLevel,
+        scopeLabel: notice.scopeLabel,
+        title: `${notice.scopeLabel}, ${recalcReasonLabel(notice.trigger, "manual")}`,
+    });
 }
 
 export function openRecalcConsole(input: Omit<RecalcPlan, "startedAt" | "detail"> & { detail?: string }): void {

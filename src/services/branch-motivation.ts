@@ -1,14 +1,16 @@
 import { buildChangeEvents, snapshotsFromRows, type StoredChangeRow } from "@/lib/field-changes";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen, type RrsEditPolicy } from "@/lib/rrs-edit-window";
 import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage, RrsTerritory } from "@/lib/rrs";
+import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { getAppSettings } from "@/services/app-settings";
-import { getRrsCard, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
+import { getRrsCard, getRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
+import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
+import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
+import type { AccessView } from "@/server/authz/resolve-access";
 import type { QueryResultRow } from "pg";
 
 type Sql = <R extends QueryResultRow>(text: string, params?: unknown[]) => Promise<R[]>;
-import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
-import type { AccessView } from "@/server/authz/resolve-access";
 
 const DEFAULT_ENABLED = false;
 
@@ -101,10 +103,33 @@ export async function saveBranchMotivation(
     territoryUuid: string,
     period: string,
     items: RrsMotivationItem[],
-): Promise<void> {
+): Promise<StartedPremiumRecalc | null> {
     const prepared = await prepareBranchMotivation(access, territoryUuid, period, items);
     await db.transaction(async (query) => {
         await writeBranchMotivation(query, access.username, territoryUuid, prepared.period, prepared.items);
+    });
+    if (prepared.changedBranchIds.length === 0) {
+        return null;
+    }
+    const month = await getRrsMonth(access, territoryUuid, prepared.period);
+    const branchKinds = new Map<PremiumRecalcKind, string[]>();
+    for (const connection of month.connections) {
+        if (connection.versionId === null) {
+            continue;
+        }
+        const basket = month.baskets.find((item) => item.id === connection.basketId);
+        const kind = basket ? premiumKindOf(basket.indicatorName) : null;
+        if (kind) {
+            branchKinds.set(kind, prepared.changedBranchIds);
+        }
+    }
+    return enqueuePremiumScopes({
+        period: prepared.period,
+        actor: access.username,
+        trigger: "rrs.motivation",
+        territoryId: territoryUuid.toLowerCase(),
+        territoryKinds: [],
+        branchKinds,
     });
 }
 
@@ -113,13 +138,14 @@ export async function prepareBranchMotivation(
     territoryUuid: string,
     period: string,
     items: RrsMotivationItem[],
-): Promise<{ period: string; items: RrsMotivationItem[] }> {
+): Promise<{ period: string; items: RrsMotivationItem[]; changedBranchIds: string[] }> {
     const page = await getBranchMotivation(access, territoryUuid, period);
     if (!page.editable) {
         throw new RrsRuleError(400, closedPeriodMessage(page.editPolicy));
     }
     const expected = new Set(page.branches.map((branch) => branch.uuid));
     const seen = new Set<string>();
+    const changedBranchIds: string[] = [];
     const prepared: RrsMotivationItem[] = [];
     for (const item of items) {
         const branchUuid = item.branchUuid.toLowerCase();
@@ -131,6 +157,9 @@ export async function prepareBranchMotivation(
         }
         seen.add(branchUuid);
         const current = page.items.find((row) => row.branchUuid === branchUuid);
+        if ((current?.enabled ?? false) !== item.enabled) {
+            changedBranchIds.push(branchUuid);
+        }
         prepared.push({
             branchUuid,
             enabled: item.enabled,
@@ -162,7 +191,7 @@ export async function prepareBranchMotivation(
             throw new RrsRuleError(400, `Филиал «${branch?.name ?? item.branchUuid}» нельзя подключить: за выбранный месяц нет базовой премии`);
         }
     }
-    return { period: page.period, items: prepared };
+    return { period: page.period, items: prepared, changedBranchIds };
 }
 
 export async function writeBranchMotivation(

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { staffParticipationChanged } from "@/lib/motivation-roles";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
-import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { getAppSettings } from "@/services/app-settings";
 import { PremiumRecalcBusyError } from "@/services/basket-updates";
 import { recalculateBranchPremiums } from "@/services/branch-premium-recalc";
@@ -26,7 +26,7 @@ interface BranchRolesPayload {
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<BranchRolesPayload>>> {
     try {
-        const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+        const access = await requirePermission("branch.roles:write");
         const body = await request.json() as { branchId?: unknown; period?: unknown; overrides?: unknown };
         const branchId = typeof body.branchId === "string" ? body.branchId : "";
         const period = typeof body.period === "string" ? body.period : null;

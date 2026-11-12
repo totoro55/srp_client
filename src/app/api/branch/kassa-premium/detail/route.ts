@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { DETAIL_TIMEOUT_MESSAGE, isQueryTimeout } from "@/lib/detail-timeout";
+import { CABINET_PERMISSIONS } from "@/lib/permissions";
 import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
+import { DetailForbiddenError } from "@/services/premium-access";
 import { readKassaPremiumDetail, type KassaPremiumDetail } from "@/services/kassa-premium";
 import type { ApiResponse } from "@/types/api";
 
 export async function GET(request: Request): Promise<NextResponse<ApiResponse<KassaPremiumDetail>>> {
     try {
-        const access = await requireAnyPermission(["branch:read", "baskets:connect"]);
+        const access = await requireAnyPermission([...CABINET_PERMISSIONS]);
         const params = new URL(request.url).searchParams;
         const detail = await readKassaPremiumDetail(
             access,
@@ -25,6 +27,9 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Ka
         const authResponse = adminAuthErrorResponse(error);
         if (authResponse) {
             return authResponse;
+        }
+        if (error instanceof DetailForbiddenError) {
+            return createErrorResponse("FORBIDDEN", error.message, 403);
         }
         if (isQueryTimeout(error)) {
             return createErrorResponse("TIMEOUT", DETAIL_TIMEOUT_MESSAGE, 503);

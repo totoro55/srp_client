@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { requirePermission } from "@/lib/require-admin";
 import { parseTariffReference } from "@/lib/tariff-calculation";
 import { parseConnectionPeriod, parseTerritoryUuid } from "@/lib/rrs";
@@ -37,7 +38,7 @@ export async function POST(
 export async function PUT(
     request: NextRequest,
     context: { params: Promise<{ territoryUuid: string }> },
-): Promise<NextResponse<ApiResponse<{ saved: number }>>> {
+): Promise<NextResponse<ApiResponse<{ saved: number; recalc: StartedPremiumRecalc | null }>>> {
     try {
         const access = await requirePermission("baskets:connect");
         const territoryUuid = await territoryOf(context.params);

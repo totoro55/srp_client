@@ -37,6 +37,23 @@ export function MatrixToolbar({
             onSearchChange={onSearchChange}
             searchPlaceholder="Код, название или описание"
         >
+            {filtersActive ? (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Сбросить фильтры"
+                    title="Сбросить фильтры"
+                    className="size-9 shrink-0"
+                    onClick={() => {
+                        onSearchChange("");
+                        onGroupChange("");
+                        onClearFilters();
+                    }}
+                >
+                    <X />
+                </Button>
+            ) : null}
             <select
                 value={group}
                 onChange={(event) => onGroupChange(event.target.value)}
@@ -48,22 +65,6 @@ export function MatrixToolbar({
                     <option key={item} value={item}>{item}</option>
                 ))}
             </select>
-            {filtersActive ? (
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                        onSearchChange("");
-                        onGroupChange("");
-                        onClearFilters();
-                    }}
-                    className="h-9 text-xs"
-                >
-                    <X className="h-4 w-4" />
-                    Сбросить
-                </Button>
-            ) : null}
             <div className="w-full min-w-[200px] sm:w-[220px]">
                 <RoleMultiSelect
                     roles={roles}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
 import { parseConnectionPeriod, parseRrsSaveInput, parseTerritoryUuid, type RrsMonthState } from "@/lib/rrs";
@@ -25,7 +26,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Rr
     }
 }
 
-export async function PUT(request: Request): Promise<NextResponse<ApiResponse<{ saved: true }>>> {
+export async function PUT(request: Request): Promise<NextResponse<ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>>> {
     try {
         const access = await requirePermission("baskets:connect");
         const input = parseRrsSaveInput(await request.json());
@@ -35,9 +36,9 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<{ 
                 error: { code: "BAD_REQUEST", message: "Проверьте РРС, месяц и набор корзин" },
             }, { status: 400 });
         }
-        await saveRrsMonth(access, input.territoryUuid, input.period, input.items);
+        const recalc = await saveRrsMonth(access, input.territoryUuid, input.period, input.items);
         await audit(access.username, "rrs.connections.save", `${input.territoryUuid}; ${input.period}`);
-        return NextResponse.json({ success: true, data: { saved: true } });
+        return NextResponse.json({ success: true, data: { saved: true, recalc } });
     } catch (error) {
         return rrsErrorResponse(error);
     }

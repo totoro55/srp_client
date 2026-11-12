@@ -6,9 +6,8 @@ import { FormAlert } from "@/components/form-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { RrsCard } from "@/lib/rrs";
 import { ApiResponse } from "@/types/api";
-import { RrsPeriodControls } from "../../_components/RrsPeriodControls";
+import { RrsPeriodControls, settingsPeriodHint } from "../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav, type RrsSection } from "../../_components/RrsSectionNav";
-import { describePeriodEffect, formatMonth } from "../../_components/model";
 
 const PATH: Partial<Record<RrsSection, string>> = {
     overview: "",
@@ -81,7 +80,7 @@ export function RrsReservedPage({ section, message }: { section: "overview" | "t
                         period={card.period}
                         appliedPeriod={card.appliedPeriod}
                         savedPeriods={card.savedPeriods}
-                        hint={reservedPeriodHint(card)}
+                        hint={settingsPeriodHint(card.period, card.editPolicy)}
                         onPeriodChange={(period) => {
                             const saved = card.savedPeriods.map((item) => item.period);
                             const target = saved.includes(period) ? period : connectionCardPeriod(period, saved);
@@ -99,13 +98,3 @@ export function RrsReservedPage({ section, message }: { section: "overview" | "t
     );
 }
 
-function reservedPeriodHint(card: RrsCard): { text: string; tone: "future" | "current" | "past" } {
-    const effect = describePeriodEffect(card);
-    if (effect.kind === "future") {
-        return { tone: "future", text: `Показан период с ${formatMonth(card.period)}. Более ранние месяцы останутся без изменений.` };
-    }
-    if (effect.kind === "past") {
-        return { tone: "past", text: "Показан выбранный месяц." };
-    }
-    return { tone: "current", text: "Показан действующий месяц." };
-}

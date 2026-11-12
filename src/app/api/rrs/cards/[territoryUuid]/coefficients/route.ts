@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { requirePermission } from "@/lib/require-admin";
 import { parseConnectionPeriod, parseTerritoryUuid, type RrsCoefficientPage, type RrsCoefficientValue } from "@/lib/rrs";
 import { getBranchCoefficients, saveBranchCoefficients } from "@/services/basket-coefficients";
@@ -37,7 +38,7 @@ export async function GET(
 export async function PUT(
     request: NextRequest,
     context: { params: Promise<{ territoryUuid: string }> },
-): Promise<NextResponse<ApiResponse<{ saved: true }>>> {
+): Promise<NextResponse<ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>>> {
     try {
         const access = await requirePermission("baskets:connect");
         const { territoryUuid: rawUuid } = await context.params;
@@ -51,8 +52,8 @@ export async function PUT(
                 error: { code: "BAD_REQUEST", message: "Проверьте период и коэффициенты филиалов" },
             }, { status: 400 });
         }
-        await saveBranchCoefficients(access, territoryUuid, period, items);
-        return NextResponse.json({ success: true, data: { saved: true } });
+        const recalc = await saveBranchCoefficients(access, territoryUuid, period, items);
+        return NextResponse.json({ success: true, data: { saved: true, recalc } });
     } catch (error) {
         return rrsErrorResponse(error);
     }

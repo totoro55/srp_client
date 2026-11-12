@@ -48,6 +48,7 @@ export interface SettingsTerritory {
     code: string;
     connectedBaskets: number;
     branchesEnabled: number;
+    branchesParticipating: number;
     branchesTotal: number;
     coefficientsDefined: number;
     coefficientsSaved: number;
@@ -440,6 +441,7 @@ async function readTerritorySettings(period: string): Promise<SettingsTerritory[
         code: string;
         connectedBaskets: number;
         branchesEnabled: number;
+        branchesParticipating: number;
         branchesTotal: number;
         coefficientsDefined: number;
         coefficientsSaved: number;
@@ -461,6 +463,12 @@ async function readTerritorySettings(period: string): Promise<SettingsTerritory[
                       AND listed_coefficient.branch_uuid = branch.uuid
                       AND listed_coefficient.period = $1::date
                )
+        ),
+        bonus AS (
+            SELECT bonus.branch_uuid
+            FROM raw.basic_bonuses bonus
+            WHERE bonus.period = $1::date
+              AND btrim(bonus.base_bonus) <> ''
         ),
         motivation_slice AS (
             SELECT DISTINCT ON (motivation.territory_uuid, motivation.branch_uuid)
@@ -516,6 +524,7 @@ async function readTerritorySettings(period: string): Promise<SettingsTerritory[
                territory.code,
                COALESCE(connected.connected, 0)::int AS "connectedBaskets",
                COALESCE(enabled_counts.enabled, 0)::int AS "branchesEnabled",
+               COALESCE(participating_counts.participating, 0)::int AS "branchesParticipating",
                COALESCE(branch_counts.total, 0)::int AS "branchesTotal",
                COALESCE(defined.defined, 0)::int AS "coefficientsDefined",
                COALESCE(saved.saved, 0)::int AS "coefficientsSaved",
@@ -546,15 +555,22 @@ async function readTerritorySettings(period: string): Promise<SettingsTerritory[
                END AS tariffs
         FROM territories territory
         LEFT JOIN (
-            SELECT territory_uuid, count(*)::int AS total
+            SELECT listed.territory_uuid, count(*)::int AS total
             FROM listed
-            GROUP BY territory_uuid
+            JOIN bonus ON bonus.branch_uuid = listed.uuid
+            GROUP BY listed.territory_uuid
         ) branch_counts ON branch_counts.territory_uuid = territory.uuid
         LEFT JOIN (
             SELECT territory_uuid, count(*)::int AS enabled
             FROM enabled
             GROUP BY territory_uuid
         ) enabled_counts ON enabled_counts.territory_uuid = territory.uuid
+        LEFT JOIN (
+            SELECT enabled.territory_uuid, count(*)::int AS participating
+            FROM enabled
+            JOIN bonus ON bonus.branch_uuid = enabled.branch_uuid
+            GROUP BY enabled.territory_uuid
+        ) participating_counts ON participating_counts.territory_uuid = territory.uuid
         LEFT JOIN (
             SELECT territory_uuid, count(*) FILTER (WHERE version_id IS NOT NULL)::int AS connected
             FROM connections

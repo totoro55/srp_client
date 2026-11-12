@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { closedPeriodMessage, monthIsOpen, type RrsEditPolicy } from "@/lib/rrs-edit-window";
 import { cn } from "@/lib/utils";
+import { formatCalendarDate, formatMonthFrom } from "./model";
 import { PeriodBadge } from "./PeriodBadge";
 
 export type PeriodHintTone = "loading" | "future" | "closed" | "current" | "past";
@@ -24,6 +26,29 @@ const HINT_POPUP: Record<PeriodHintTone, string> = {
     current: "border-emerald-600 bg-emerald-600 text-white ring-emerald-700",
     past: "border-border bg-popover text-popover-foreground ring-border",
 };
+
+export function settingsPeriodHint(
+    period: string,
+    policy: RrsEditPolicy,
+    loading = false,
+): { text: string; tone: PeriodHintTone } {
+    if (loading) {
+        return { tone: "loading", text: "Загрузка периода…" };
+    }
+    const month = period.slice(0, 7);
+    const scope = `Значения будут действовать с ${formatMonthFrom(period)}. Более ранние месяцы останутся без изменений.`;
+    if (!monthIsOpen(month, policy)) {
+        return { tone: "closed", text: `${closedPeriodMessage(policy)} Изменения в выбранный месяц не записываются.` };
+    }
+    const cutoffDate = formatCalendarDate(`${policy.currentMonth}-${String(policy.cutoffDay).padStart(2, "0")}`);
+    const open = month === policy.previousMonth
+        ? `Этот месяц открыт для изменения до ${cutoffDate} включительно.`
+        : "Этот месяц открыт для изменения.";
+    return {
+        tone: month > policy.currentMonth ? "future" : "current",
+        text: `${open} ${scope}`,
+    };
+}
 
 export function RrsPeriodControls({
     period,

@@ -4,12 +4,15 @@ import type { QueryResultRow } from "pg";
 import { DETAIL_STATEMENT_TIMEOUT_MS } from "@/lib/detail-timeout";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { AccessView } from "@/server/authz/resolve-access";
+import { canReadEmployeeDetail } from "@/services/premium-access";
 import { replaceAuthorDays } from "@/services/author-days";
 import { moscowToday, prepareClosedSegments } from "@/services/segment-locks";
 import type { StaffLockReason } from "@/lib/recalc-window";
 import { assignmentSql } from "@/services/promoter-premium";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
+
+export { branchVisible } from "@/services/premium-access";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const SALE_INDICATOR = "Продажа товара";
@@ -26,6 +29,7 @@ const OPEN_DAYS_DELETE = `
       )
       AND ($3::date IS NULL OR day.day BETWEEN $3::date AND COALESCE($4::date, $3::date))
       AND ($5::uuid IS NULL OR day.branch_uuid = $5::uuid)
+      AND ($6::uuid[] IS NULL OR day.branch_uuid = ANY($6::uuid[]))
       AND NOT EXISTS (
           SELECT 1
           FROM main.premium_accruals accrual
@@ -74,6 +78,7 @@ const DAY_COUNT = `
           LIMIT 1
       )
       AND ($3::uuid IS NULL OR day.branch_uuid = $3::uuid)
+      AND ($4::uuid[] IS NULL OR day.branch_uuid = ANY($4::uuid[]))
 `;
 
 export function premiumDayInsertSql(selectSql: string, indicatorName: string): string {
@@ -159,6 +164,8 @@ export interface PremiumRun {
     earliest?: string;
     /** Пусто — все филиалы. Иначе удаляются и записываются только дни этого филиала. */
     branch?: string;
+    /** Несколько филиалов одной территории. Пустой список не задевает чужие филиалы. */
+    branches?: string[];
     /** Пусто — закрыты увольнение, перевод и смена должности. Пустой список пересчитывает все три. */
     protect?: readonly StaffLockReason[];
 }
@@ -183,10 +190,11 @@ export async function writeOpenPremiumDays(
     const until = run?.until ?? null;
     const earliest = run?.earliest ?? period;
     const branch = run?.branch ?? null;
+    const branches = branch || !run?.branches ? null : run.branches;
     await prepareClosedSegments(query, asOf, earliest, run?.protect);
-    const lineParams = [period, null, branch, from, until, null];
+    const lineParams = [period, null, branch, from, until, null, branches];
     await query(PRICED_LINES);
-    await query(OPEN_DAYS_DELETE, [period, indicatorName, from, until, branch]);
+    await query(OPEN_DAYS_DELETE, [period, indicatorName, from, until, branch, branches]);
     for (const selectSql of selects) {
         await query("TRUNCATE priced_premium_lines");
         await query(
@@ -210,7 +218,7 @@ ${selectSql}
         await query(dayInsertFromTemp(indicatorName));
     }
     await query(ACCRUAL_LINK, [period, indicatorName]);
-    const rows = await query<{ lines: number }>(DAY_COUNT, [period, indicatorName, branch]);
+    const rows = await query<{ lines: number }>(DAY_COUNT, [period, indicatorName, branch, branches]);
     const lines = rows[0]?.lines ?? 0;
     return typeof lines === "number" ? lines : Number(lines);
 }
@@ -339,7 +347,7 @@ async function sumPremium(selectSql: string, period: string, branchId: string, e
 ${selectSql}
         ) line
         `,
-        [period, employeeId, branchId, null, null, null],
+        [period, employeeId, branchId, null, null, null, null],
     );
     const premium = rows[0]?.premium;
     const amount = typeof premium === "number" ? premium : Number(premium);
@@ -419,7 +427,7 @@ export async function readSalePremiumDetail(
     }
     const from = activeFrom && DAY.test(activeFrom) ? activeFrom : null;
     const until = activeUntil && DAY.test(activeUntil) ? activeUntil : from;
-    if (!await branchVisible(access, period, branchId)) {
+    if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
     const axisRows = await db.query<{ axis: string | null }>(
@@ -507,7 +515,7 @@ ${selectSql}
                    THEN matched.code::uuid
            END
         `,
-        [period, employeeId, branchId, from, until, accrualId],
+        [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
         // Тарифы месяца соединяются одним проходом. Вложенный цикл читает весь список на каждую строку.
         { hashJoins: true },
@@ -571,50 +579,3 @@ function finiteNumber(value: number | string | null): number | null {
     return Number.isFinite(number) ? number : null;
 }
 
-export async function branchVisible(access: AccessView, period: string, branchId: string): Promise<boolean> {
-    const mode = access.fullAccess || access.role?.scopeKind === "division"
-        ? "all"
-        : access.role?.scopeKind === "granted"
-            ? "granted"
-            : access.role?.scopeKind === "home_branch"
-                ? "home"
-                : "none";
-    if (mode === "none") {
-        return false;
-    }
-    const rows = await db.query<{ ok: number }>(
-        `
-        SELECT 1 AS ok
-        FROM branches branch
-        LEFT JOIN LATERAL (
-            SELECT employee.branch_uuid
-            FROM employees employee
-            WHERE lower(employee.login) = lower($2)
-              AND NOT employee.deleted
-            LIMIT 1
-        ) home ON TRUE
-        WHERE branch.uuid = $4::uuid
-          AND NOT branch.deleted
-          AND (
-              $1::text = 'all'
-              OR ($1::text = 'granted' AND branch.territory_uuid IN (
-                  SELECT grant_row.territory_uuid
-                  FROM scope_grants grant_row
-                  WHERE lower(grant_row.username) = lower($2)
-              ))
-              OR ($1::text = 'home' AND branch.uuid IS NOT DISTINCT FROM home.branch_uuid)
-          )
-          AND (
-              EXISTS (
-                  SELECT 1
-                  FROM raw.hr_ktu staff
-                  WHERE staff.period = $3::date
-                    AND lower(staff.branch_uuid) = lower(branch.uuid::text)
-              )
-              OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
-          )
-        `,
-        [mode, access.username, period, branchId],
-    );
-    return rows.length > 0;
-}

@@ -1,3 +1,4 @@
+import { moscowClock } from "@/lib/tariff-auto";
 import { db } from "@/services/db";
 
 export interface TariffSchedule {
@@ -32,6 +33,16 @@ export interface AutoSchedules {
 }
 
 const TIME_PATTERN = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+/** Время уже наступило сегодня по Москве. Пустое время автозагрузку не включает. */
+export function basketRunDue(time: string, now = new Date()): boolean {
+    if (!TIME_PATTERN.test(time)) {
+        return false;
+    }
+    const clock = moscowClock(now);
+    const [hour, minute] = time.split(":").map(Number);
+    return clock.hour * 60 + clock.minute >= hour * 60 + minute;
+}
 const EMPTY: AutoSchedules = {
     saleTariffs: { day: null, time: "" },
     baskets: { time: "" },

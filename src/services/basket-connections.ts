@@ -1,4 +1,5 @@
 import { readVersionSettings, SALES_INDICATOR_NAME, type BasketParameter } from "@/lib/baskets";
+import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import {
     buildRrsEditPolicy,
     closedPeriodMessage,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/rrs";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
+import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { territoryWithCard } from "@/services/directory-visibility";
 import type { QueryResultRow } from "pg";
 
@@ -183,9 +185,6 @@ export async function getRrsCard(access: AccessView, territoryUuid: string, requ
     }
     const today = calendarMonthStart();
     const appliedPeriod = [...savedPeriods].map((item) => item.period).filter((period) => period <= today).sort().at(-1) ?? null;
-    if (requestedPeriod && !savedPeriods.some((item) => item.period === requestedPeriod)) {
-        throw new RrsRuleError(400, "Такого сохранения нет");
-    }
     const period = requestedPeriod ?? appliedPeriod ?? [...savedPeriods].map((item) => item.period).sort()[0];
     const month = await getRrsMonth(access, territoryUuid, period);
     const territory = (await listRrsTerritories(access)).find((item) => item.uuid.toLowerCase() === territoryUuid.toLowerCase());
@@ -279,11 +278,64 @@ export async function saveRrsMonth(
     territoryUuid: string,
     period: string,
     items: RrsConnectionInput[],
-): Promise<void> {
+): Promise<StartedPremiumRecalc | null> {
     await guardRrsMonth(access, territoryUuid, period);
+    const before = await getRrsMonth(access, territoryUuid, period);
+    const territoryKinds = changedConnectionKinds(before, items);
     await db.transaction(async (query) => {
         await applyRrsMonth(query, access, territoryUuid, period, items);
     });
+    return enqueuePremiumScopes({
+        period,
+        actor: access.username,
+        trigger: "rrs.connections",
+        territoryId: territoryUuid.toLowerCase(),
+        territoryKinds,
+        branchKinds: new Map(),
+    });
+}
+
+export function changedConnectionKinds(month: RrsMonthState, items: RrsConnectionInput[]): PremiumRecalcKind[] {
+    const previous = new Map(month.connections.map((item) => [item.basketId, item]));
+    const indicators = new Map(month.baskets.map((basket) => [basket.id, basket.indicatorName]));
+    const kinds = new Set<PremiumRecalcKind>();
+    for (const item of items) {
+        const before = previous.get(item.basketId);
+        const beforeVersion = before?.versionId ?? null;
+        const afterVersion = item.connected && item.versionId !== null ? item.versionId : null;
+        const versionChanged = beforeVersion !== afterVersion;
+        const valuesChanged = afterVersion !== null && beforeVersion === afterVersion && !sameConnectionValues(before?.values ?? null, item.values);
+        if (!versionChanged && !valuesChanged) {
+            continue;
+        }
+        const kind = premiumKindOf(indicators.get(item.basketId) ?? "");
+        if (kind) {
+            kinds.add(kind);
+        }
+    }
+    return [...kinds];
+}
+
+function sameConnectionValues(stored: Record<string, string> | null, next: Record<string, string>): boolean {
+    const left = stored ?? {};
+    const keys = new Set([...Object.keys(left), ...Object.keys(next)]);
+    for (const key of keys) {
+        if (!sameConnectionSetting(left[key] ?? "", next[key] ?? "")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function sameConnectionSetting(left: string, right: string): boolean {
+    const current = left.trim();
+    const incoming = right.trim();
+    if (current === incoming) {
+        return true;
+    }
+    const currentNumber = Number(current.replace(",", "."));
+    const incomingNumber = Number(incoming.replace(",", "."));
+    return current !== "" && incoming !== "" && Number.isFinite(currentNumber) && Number.isFinite(incomingNumber) && Math.abs(currentNumber - incomingNumber) < 1e-6;
 }
 
 export async function guardRrsMonth(access: AccessView, territoryUuid: string, period: string): Promise<void> {

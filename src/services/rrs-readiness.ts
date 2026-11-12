@@ -20,14 +20,15 @@ export async function getRrsReadiness(access: AccessView, territoryUuid: string)
     ]);
     const defined = coefficients.baskets.reduce((sum, basket) => sum + basket.coefficients.length, 0);
     const enabledBranches = coefficients.branches.length;
+    const withBonus = motivation.items.filter((item) => item.hasBaseBonus);
     return {
         territory: card.territory,
         period: card.period,
         savedPeriods: card.savedPeriods.map((item) => item.period),
         connectedBaskets: card.connections.filter((item) => item.versionId !== null).length,
         branches: {
-            enabled: motivation.items.filter((item) => item.enabled).length,
-            total: motivation.branches.length,
+            enabled: withBonus.filter((item) => item.enabled).length,
+            total: withBonus.length,
         },
         coefficients: {
             defined,

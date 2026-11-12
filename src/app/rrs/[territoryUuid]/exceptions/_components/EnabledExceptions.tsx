@@ -18,12 +18,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { TariffAxis } from "@/lib/baskets";
 import { calculateAlgorithmTariffs, calculateServiceTariffs, parseTariffRate, rowBecomesException, tariffRowComplete } from "@/lib/tariff-calculation";
 import type { CalculatedTariffRow, TariffBaseMode, TariffExceptionInput, TariffExceptionReport } from "@/lib/tariff-exceptions";
-import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
+import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
-import { describePeriodEffect, formatMonth } from "../../../_components/model";
-import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
+import { formatMonth } from "../../../_components/model";
+import { RrsPeriodControls, settingsPeriodHint } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
 
 const ARCHIVE_FOLDER = "Архивные";
@@ -114,7 +115,7 @@ export function EnabledExceptions() {
         }
         return withoutListed(visibleCatalog, new Set(listed.map((item) => item.code)));
     }, [hideAdded, listed, visibleCatalog]);
-    const hint = page ? periodHint(page, loading) : null;
+    const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
     const dirty = page ? Object.keys(edits).length > 0 || removed.size > 0 || pendingAdds.size > 0 : false;
     const includedCodes = listed.map((item) => item.code);
     const saveBlocked = page ? exceptionItems(page, edits, includedCodes).some((item) => !item.automatic && (item.main === null || item.im === null || item.b2b === null)) : false;
@@ -318,11 +319,14 @@ export function EnabledExceptions() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ period: page.period }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: number }>;
+            const json = (await response.json()) as ApiResponse<{ saved: number; recalc: StartedPremiumRecalc | null }>;
             if (!json.success) {
                 setPreviewError(json.error.message);
                 setConfirmTariffs(false);
                 return;
+            }
+            if (json.data.recalc) {
+                showStartedRecalc(json.data.recalc);
             }
             notifySuccess("Тарифы сохранены");
             setConfirmTariffs(false);
@@ -1211,18 +1215,6 @@ function nameColumnTitle(axis: TariffAxis | null): string {
         return "Категория";
     }
     return "Название";
-}
-
-function periodHint(page: TariffExceptionReport, loading: boolean): { text: string; tone: PeriodHintTone } {
-    if (loading) {
-        return { tone: "loading", text: "Загрузка периода…" };
-    }
-    const effect = describePeriodEffect({
-        period: page.period,
-        appliedPeriod: page.appliedPeriod,
-        savedPeriods: page.savedPeriods.map((period) => ({ period })),
-    });
-    return { tone: effect.kind, text: "Показаны включённые исключения на выбранный месяц." };
 }
 
 function storedPercentToDraft(stored: string | null): string {

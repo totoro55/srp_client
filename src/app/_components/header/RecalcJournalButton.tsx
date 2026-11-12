@@ -22,7 +22,7 @@ const STATUS_LABEL: Record<Exclude<RecalcConsoleStatus, "idle">, string> = {
 export function RecalcJournalButton() {
     const plan = useRecalcPlan();
     const access = useAccess();
-    const canOpenJournal = access.has("baskets:read");
+    const canOpenJournal = access.has("monitoring:read");
     const [events, setEvents] = useState<BasketRecalcRun[]>([]);
     const [open, setOpen] = useState(false);
     const [landed, setLanded] = useState(false);

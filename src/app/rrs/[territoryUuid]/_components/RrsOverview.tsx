@@ -169,7 +169,7 @@ function checklist(territoryUuid: string, readiness: RrsReadiness): CheckItem[] 
 
 function branchDetail(readiness: RrsReadiness): string {
     if (readiness.branches.total === 0) {
-        return "У территории нет филиалов";
+        return "Нет филиалов с базовой премией";
     }
     if (readiness.branches.enabled === 0) {
         return "Нет включённых филиалов";

@@ -17,7 +17,7 @@ function describe(schedule: AutoSchedules): string {
 
 export async function GET(): Promise<NextResponse<ApiResponse<AutoSchedules>>> {
     try {
-        await requirePermission("baskets:read");
+        await requirePermission("monitoring:read");
         const schedule = await readAutoSchedules();
         return NextResponse.json({ success: true, data: schedule });
     } catch (error) {
@@ -31,7 +31,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<AutoSchedules>>> {
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<AutoSchedules>>> {
     try {
-        const access = await requirePermission("baskets:connect");
+        const access = await requirePermission("recalc-schedule:write");
         const schedule = normalizeAutoSchedules(await request.json());
         if (!schedule) {
             return createErrorResponse(

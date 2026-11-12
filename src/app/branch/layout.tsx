@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { StackSkeleton } from "@/components/loading-state";
 import { MotivationSettingsProvider } from "@/hooks/useMotivationRoles";
 import { can } from "@/lib/access";
+import { BRANCH_SETTINGS_PERMISSIONS, CABINET_PERMISSIONS } from "@/lib/permissions";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { readMotivationSettings } from "@/services/motivation-roles";
 import { BranchDirectoryProvider } from "./_components/branch-directory";
@@ -14,7 +15,7 @@ export default async function BranchLayout({ children }: { children: React.React
     if (!access) {
         redirect("/login");
     }
-    if (!can(access, "branch:read") && !can(access, "baskets:connect")) {
+    if (!can(access, "branch.tariffs:read") && !BRANCH_SETTINGS_PERMISSIONS.some((permission) => can(access, permission)) && !CABINET_PERMISSIONS.some((permission) => can(access, permission))) {
         redirect("/forbidden");
     }
 

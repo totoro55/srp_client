@@ -1,5 +1,6 @@
 import type { QueryResultRow } from "pg";
 import { SALES_INDICATOR_NAME, isTariffAxis, readVersionSettings, TARIFF_BOUND_KEYS, type TariffAxis } from "@/lib/baskets";
+import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { resolveConnectionValues } from "@/lib/rrs";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import { calculateAlgorithmTariffs, calculateServiceTariffs, DEFAULT_TARIFF_REFERENCE, EMPTY_TARIFF_SAVE_MESSAGE, isTariffReference, rowBecomesException, tariffRowComplete, territoryMean, territoryReference, type TariffReference, type TariffSaveRow, type TariffServiceContext } from "@/lib/tariff-calculation";
@@ -8,6 +9,24 @@ import type { AccessView } from "@/server/authz/resolve-access";
 import { getRrsCard, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
+import { enqueuePremiumScopes } from "@/services/premium-recalc-queue";
+
+function enqueueSaleTariffPremium(
+    actor: string,
+    territoryUuid: string,
+    period: string,
+    origin: "manual" | "system" = "manual",
+): Promise<StartedPremiumRecalc | null> {
+    return enqueuePremiumScopes({
+        period,
+        actor,
+        trigger: "tariffs",
+        origin,
+        territoryId: territoryUuid.toLowerCase(),
+        territoryKinds: ["sale"],
+        branchKinds: new Map(),
+    });
+}
 
 const AXIS_TABLE = {
     category: {
@@ -89,17 +108,12 @@ export async function getTariffExceptions(
     territoryUuid: string,
     requestedPeriod: string | null,
 ): Promise<TariffExceptionPage> {
-    let card;
-    try {
-        card = await getRrsCard(access, territoryUuid, requestedPeriod);
-    } catch (error) {
-        if (error instanceof RrsRuleError && error.message === "Такого сохранения нет" && requestedPeriod) {
-            const known = await getRrsCard(access, territoryUuid, null);
-            if (requestedPeriod.slice(0, 7) !== known.editPolicy.currentMonth) {
-                return emptyTariffPage(known, requestedPeriod);
-            }
+    const card = await getRrsCard(access, territoryUuid, requestedPeriod);
+    if (requestedPeriod && !card.savedPeriods.some((item) => item.period === requestedPeriod)) {
+        if (requestedPeriod.slice(0, 7) !== card.editPolicy.currentMonth) {
+            return emptyTariffPage(card, requestedPeriod);
         }
-        throw error;
+        throw new RrsRuleError(400, "Такого сохранения нет");
     }
     const connection = await loadSalesConnection(territoryUuid, card.period);
     const axis = connection?.axis ?? null;
@@ -201,11 +215,11 @@ export async function saveTariffExceptions(
     rows: TariffSaveRow[],
     weights: { salesShareWeight: number; priceShareWeight: number } | null = null,
     reference: TariffReference = DEFAULT_TARIFF_REFERENCE,
-): Promise<void> {
+): Promise<StartedPremiumRecalc | null> {
     const page = await getTariffExceptions(access, territoryUuid, period);
     if (!page.connection?.axis) {
         if (rows.length === 0 && page.stats.length === 0 && page.period.slice(0, 7) === page.editPolicy.currentMonth) {
-            return;
+            return null;
         }
         throw new RrsRuleError(400, "У подключённой версии продаж не выбран вид расчета тарифов");
     }
@@ -353,6 +367,7 @@ export async function saveTariffExceptions(
             );
         }
     });
+    return enqueueSaleTariffPremium(access.username, territoryUuid, period);
 }
 
 function emptyTariffBounds(parameters: { key: string; title: string }[] = []): TariffExceptionPage["bounds"] {
@@ -555,6 +570,7 @@ export async function getEnabledTariffExceptions(
         rows,
         directory,
         editable: monthIsOpen(period.slice(0, 7), card.editPolicy),
+        editPolicy: card.editPolicy,
         axis,
         quotes: stats.map((stat) => ({ code: stat.code, avgPrice: stat.avgPrice, quantity: stat.quantity })),
         service: weights
@@ -620,7 +636,7 @@ export async function saveRecalculatedTariffs(
     territoryUuid: string,
     period: string,
     reference?: TariffReference,
-): Promise<{ saved: number }> {
+): Promise<{ saved: number; recalc: StartedPremiumRecalc | null }> {
     const page = await openTariffPeriod(access, territoryUuid, period);
     const axis = page.connection?.axis;
     const versionId = page.connection?.versionId;
@@ -637,7 +653,8 @@ export async function saveRecalculatedTariffs(
         throw new RrsRuleError(400, EMPTY_TARIFF_SAVE_MESSAGE);
     }
     await writeCalculatedSaleTariffs(territoryUuid, period, versionId, axis, chosen, rows);
-    return { saved: rows.length };
+    const recalc = await enqueueSaleTariffPremium(access.username, territoryUuid, period);
+    return { saved: rows.length, recalc };
 }
 
 export interface SaleTariffAutoResult {
@@ -695,6 +712,11 @@ export async function calculateAndSaveSaleTariffs(territoryUuid: string, period:
         return { status: "failed", saved: 0, detail: EMPTY_TARIFF_SAVE_MESSAGE };
     }
     await writeCalculatedSaleTariffs(territoryUuid, period, connection.versionId, axis, reference, rows);
+    try {
+        await enqueueSaleTariffPremium("system", territoryUuid, period, "system");
+    } catch (error) {
+        console.error("Премия после авторасчёта тарифов не поставлена в очередь", error);
+    }
     return { status: "success", saved: rows.length, detail: "" };
 }
 

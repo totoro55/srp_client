@@ -17,7 +17,8 @@ import { SALES_INDICATOR_NAME } from "@/lib/baskets";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
 import { useAccess } from "@/hooks/useAccess";
 import { useSession } from "next-auth/react";
-import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
+import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { formatBaseBonus, withCalculatedValues, type RrsBasketOffer, type RrsBranch, type RrsCard, type RrsConnectionSlice, type RrsMotivationPage, type RrsCoefficientPage, type RrsSetup, type RrsTerritory } from "@/lib/rrs";
 import {
     closedPeriodMessage,
@@ -405,11 +406,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     } : null,
                 }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: true }>;
+            const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
             if (!json.success) {
                 setError(`${json.error.message} Черновик сохранён в этом браузере.`);
                 setConfirmSave(false);
                 return;
+            }
+            if (json.data.recalc) {
+                showStartedRecalc(json.data.recalc);
             }
             setConfirmSave(false);
             setWizardFinished(true);
@@ -959,15 +963,20 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     <p className="text-sm text-muted-foreground">
                         Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. Переключатель в шапке включает или выключает сразу все филиалы с премией. По умолчанию филиал выключен.
                     </p>
-                    <p className="text-sm text-muted-foreground">Включено {enabledBranches.length} из {branches.length}</p>
-                    {branches.length === 0 ? <p className="text-sm text-muted-foreground">У этой территории нет филиалов.</p> : null}
+                    <p className="text-sm text-muted-foreground">
+                        {branches.length === 0
+                            ? "У этой территории нет филиалов."
+                            : bonusBranches.length === 0
+                                ? "Нет филиалов с базовой премией"
+                                : `Включено ${bonusBranches.filter((branch) => enabled[branch.uuid]).length} из ${bonusBranches.length}`}
+                    </p>
                     {branches.length > 0 ? (
                         <Table containerClassName="rounded-lg border">
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Филиал</TableHead>
                                     <TableHead className="w-44 text-right">Базовая премия</TableHead>
-                                    <TableHead className="w-48">
+                                    <TableHead className="min-w-72">
                                         <span className="flex items-center gap-2">
                                             <Switch
                                                 checked={allWithBonusOn}
@@ -993,6 +1002,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                     const on = enabled[branch.uuid] ?? false;
                                     const hasBaseBonus = baseBonus[branch.uuid] ?? false;
                                     const bonus = formatBaseBonus(bonusAmount[branch.uuid] ?? null);
+                                    const blocked = !hasBaseBonus && !on;
                                     return (
                                         <TableRow key={branch.uuid} className={cn(on && "bg-emerald-50 dark:bg-emerald-950/30")}>
                                             <TableCell className="font-medium">{branch.name}</TableCell>
@@ -1003,8 +1013,8 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                                 <label className="flex items-center gap-2 text-sm">
                                                     <Switch
                                                         checked={on}
-                                                        disabled={saving || (!hasBaseBonus && !on)}
-                                                        aria-label={on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
+                                                        disabled={saving || blocked}
+                                                        aria-label={blocked ? `Нельзя включить ${branch.name}: нет базовой премии` : on ? `Выключить ${branch.name}` : `Включить ${branch.name}`}
                                                         onCheckedChange={(checked) => {
                                                             if (checked && !hasBaseBonus) {
                                                                 return;
@@ -1013,7 +1023,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                                         }}
                                                     />
                                                     <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
-                                                        {on ? "Включена" : "Выключена"}
+                                                        {on ? "Включена" : hasBaseBonus ? "Выключена" : "Нельзя включить: нет базовой премии"}
                                                     </span>
                                                 </label>
                                             </TableCell>

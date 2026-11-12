@@ -6,7 +6,8 @@ import type { AccessView } from "@/server/authz/resolve-access";
 import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
-import { branchVisible, premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
+import { canReadEmployeeDetail } from "@/services/premium-access";
+import { premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,7 +92,7 @@ export async function readKassaPremiumDetail(
     }
     const from = activeFrom && DAY.test(activeFrom) ? activeFrom : null;
     const until = activeUntil && DAY.test(activeUntil) ? activeUntil : from;
-    if (!await branchVisible(access, period, branchId)) {
+    if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, KASSA_INDICATOR);
@@ -107,7 +108,7 @@ ${selectSql}
         ) line
         ORDER BY line.document_date DESC, line.minute DESC
         `,
-        [period, employeeId, branchId, from, until, accrualId],
+        [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
     return {

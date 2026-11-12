@@ -51,6 +51,7 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const fillViewport = bonusList || onLines;
     const query = searchParams.toString();
     const appliedHref = useRef("");
+    const placedPeriod = useRef("");
     const narrowScrollRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -60,14 +61,30 @@ export function BranchFrame({ children }: { children: ReactNode }) {
         const params = new URLSearchParams(query);
         const requestedBranch = params.get("branch");
         const requestedPeriod = params.get("period");
-        const sameBranch = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
         const listed = isBranchId(requestedBranch)
             ? directory.branches.find((item) => sameBranch(item.id, requestedBranch))
             : undefined;
         const stored = readStoredBranchLocation();
         const storedKnown = stored ? directory.branches.find((item) => sameBranch(item.id, stored.branchId)) : undefined;
-        const nextBranch = listed?.id ?? storedKnown?.id ?? directory.branches.find((item) => item.own)?.id ?? directory.branches[0]?.id ?? "";
         const nextPeriod = isBranchPeriod(requestedPeriod) ? requestedPeriod : stored?.period ?? currentBranchPeriod();
+        let nextBranch = listed?.id ?? storedKnown?.id ?? directory.branches.find((item) => item.own)?.id ?? directory.branches[0]?.id ?? "";
+        if (directory.branchChoice === "assignment" && directory.loadedPeriod === nextPeriod && directory.loadedPeriod !== "") {
+            const periodChanged = placedPeriod.current !== "" && placedPeriod.current !== nextPeriod;
+            const chosen = resolveAssignmentBranch(
+                directory.branches,
+                directory.workedBranchIds,
+                directory.preferredBranchId,
+                listed?.id,
+                periodChanged,
+            );
+            if (chosen) {
+                nextBranch = chosen;
+                const requestedId = isBranchId(requestedBranch) ? requestedBranch : "";
+                if (!periodChanged || sameBranch(chosen, requestedId)) {
+                    placedPeriod.current = nextPeriod;
+                }
+            }
+        }
         if (!nextBranch) {
             return;
         }
@@ -94,7 +111,7 @@ export function BranchFrame({ children }: { children: ReactNode }) {
         appliedHref.current = href;
         writeStoredBranchLocation(nextBranch, nextPeriod);
         router.replace(href);
-    }, [directory.branches, directory.loading, pathname, query, router]);
+    }, [directory.branchChoice, directory.branches, directory.loadedPeriod, directory.loading, directory.preferredBranchId, directory.workedBranchIds, onLines, pathname, query, router]);
 
     useEffect(() => {
         if (!employeeId || directory.loading || !branchId) {
@@ -121,12 +138,22 @@ export function BranchFrame({ children }: { children: ReactNode }) {
         }
     });
 
+    const placementReady = directory.branchChoice !== "assignment" || directory.loadedPeriod === period;
+    const workedBranchIds = new Set(directory.workedBranchIds.map((id) => id.toLowerCase()));
+    const choiceBranches = !placementReady
+        ? []
+        : directory.branchChoice === "assignment"
+            ? directory.branches.filter((item) => workedBranchIds.has(item.id.toLowerCase()))
+            : directory.branches;
     const branchCrumb: PageHeadingCrumb = {
         label: branch?.name ?? (directory.loading ? "Филиал" : "Филиал не выбран"),
         menuKey: "branch",
         menuValue: branchId,
-        menu: directory.branches.length > 1
-            ? directory.branches.map((item) => ({ id: item.id, label: item.own ? `${item.name} · свой` : item.name }))
+        menu: choiceBranches.length > 1
+            ? choiceBranches.map((item) => ({
+                id: item.id,
+                label: directory.branchChoice === "assignment" ? item.name : item.own ? `${item.name} · свой` : item.name,
+            }))
             : undefined,
     };
     const trail: PageHeadingCrumb[] = person
@@ -297,6 +324,30 @@ export function BranchPeriodField({ backHref }: { backHref?: string }) {
             />
         </div>
     );
+}
+
+function sameBranch(left: string, right: string): boolean {
+    return left.toLowerCase() === right.toLowerCase();
+}
+
+function resolveAssignmentBranch(
+    branches: { id: string }[],
+    workedBranchIds: string[],
+    preferredBranchId: string | null,
+    requestedBranchId: string | undefined,
+    periodChanged: boolean,
+): string | null {
+    const worked = new Set(workedBranchIds.map((id) => id.toLowerCase()));
+    const preferred = preferredBranchId
+        ? branches.find((item) => sameBranch(item.id, preferredBranchId))
+        : undefined;
+    const requested = requestedBranchId && worked.has(requestedBranchId.toLowerCase())
+        ? branches.find((item) => sameBranch(item.id, requestedBranchId))
+        : undefined;
+    if (periodChanged) {
+        return preferred?.id ?? requested?.id ?? null;
+    }
+    return requested?.id ?? preferred?.id ?? null;
 }
 
 export function useBranchLocation(): { branchId: string; period: string } {

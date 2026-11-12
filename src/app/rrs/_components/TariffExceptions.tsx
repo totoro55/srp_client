@@ -14,9 +14,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HelpDrawer } from "@/components/help-drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { tariffAxisTitle, type TariffAxis } from "@/lib/baskets";
-import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { PinnedTable } from "@/components/pinned-table";
-import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
+import { RrsPeriodControls, settingsPeriodHint } from "./RrsPeriodControls";
+import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { notifySuccess } from "@/lib/notify";
 import {
     calculateAlgorithmTariffs,
@@ -40,7 +41,6 @@ import {
 } from "@/lib/tariff-calculation";
 import { type TariffBaseMode, type TariffExceptionPage, type TariffExceptionWeights, type TariffSaleStat } from "@/lib/tariff-exceptions";
 import { ApiResponse } from "@/types/api";
-import { RrsPeriodControls, type PeriodHintTone } from "./RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "./RrsSectionNav";
 import { formatMonth } from "./model";
 import { cn } from "@/lib/utils";
@@ -255,7 +255,7 @@ export function TariffExceptions({ embedded }: {
     const dirty = rowFingerprint(lines) !== rowFingerprint(saved);
     const weightsDirty = weightKey(weights) !== weightKey(weightBaseline);
     const incomplete = lines.some((row) => !tariffRowComplete(row));
-    const hint = page ? periodHint(page, loading) : null;
+    const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
 
     const currentWithoutData = Boolean(page && page.stats.length === 0 && page.period.slice(0, 7) === page.editPolicy.currentMonth);
     const blankPeriod = Boolean(page && page.stats.length === 0 && !currentWithoutData);
@@ -313,12 +313,15 @@ export function TariffExceptions({ embedded }: {
                 reference,
             }),
         });
-        const json = (await response.json()) as ApiResponse<{ saved: true }>;
+        const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
         setSaving(false);
         if (!json.success) {
             setError(json.error.message);
             setConfirmSave(false);
             return;
+        }
+        if (json.data.recalc) {
+            showStartedRecalc(json.data.recalc);
         }
         notifySuccess("Тарифы сохранены");
         setConfirmSave(false);
@@ -1428,23 +1431,4 @@ function TariffModeToggle({
             </button>
         </div>
     );
-}
-
-function periodHint(page: TariffExceptionPage, loading: boolean): { text: string; tone: PeriodHintTone } {
-    if (loading) {
-        return { tone: "loading", text: "Загрузка периода…" };
-    }
-    if (page.stats.length === 0 && page.period.slice(0, 7) !== page.editPolicy.currentMonth) {
-        return { tone: "past", text: "За этот период данных нет." };
-    }
-    if (!page.connection?.axis) {
-        return { tone: "past", text: "Нет вида расчета у подключённой версии продаж." };
-    }
-    if (!page.editable) {
-        return { tone: "closed", text: `${closedPeriodMessage(page.editPolicy)} Показаны действующие исключения.` };
-    }
-    if (page.period.slice(0, 7) > page.editPolicy.currentMonth) {
-        return { tone: "future", text: `Тарифы будут действовать с ${formatMonth(page.period)}.` };
-    }
-    return { tone: "current", text: "Этот месяц открыт для редактирования тарифов." };
 }

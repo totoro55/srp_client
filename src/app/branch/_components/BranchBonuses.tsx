@@ -522,6 +522,7 @@ export function BranchBonuses() {
                         branchId={branchId}
                         period={period}
                         href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
+                        lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
                         poolHref={poolHref}
                         baskets={columns.baskets}
                         currentHeat={row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay))}
@@ -581,6 +582,7 @@ export function BranchBonuses() {
                         </TableRow>
                     ) : visible.map((row) => {
                         const href = segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom);
+                        const lines = canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail);
                         const currentHeat = row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay));
                         const forecastHeat = row.pay.forecastPay === null ? undefined : payHeat(payRatio(forecastPays, row.pay.forecastPay));
                         const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
@@ -610,7 +612,7 @@ export function BranchBonuses() {
                                         row={rowId}
                                         column={columnIndex(indicator.id, brigadeOn, columns, showForecast)}
                                         className={valued(indicator.id, row.premiums[indicator.id])}
-                                        onOpen={() => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom))}
+                                        onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
                                         onHover={setHover}
                                     >
                                         {formatAmount(row.premiums[indicator.id])}
@@ -623,7 +625,7 @@ export function BranchBonuses() {
                                         row={rowId}
                                         column={columnIndex(indicator.id, brigadeOn, columns, showForecast)}
                                         className={valued(indicator.id, row.services[indicator.id])}
-                                        onOpen={() => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom))}
+                                        onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
                                         onHover={setHover}
                                     >
                                         {formatAmount(row.services[indicator.id])}
@@ -638,6 +640,10 @@ export function BranchBonuses() {
             </>}
         </div>
     );
+}
+
+function canOpenPersonalDetail(employeeId: string, viewerId: string | null, foreignDetail: boolean): boolean {
+    return foreignDetail || (viewerId !== null && viewerId === employeeId.toLowerCase());
 }
 
 function formatAmount(value: number | null): string {
@@ -687,6 +693,7 @@ function BonusListItem({
     currentHeat,
     forecastHeat,
     showForecast,
+    lines,
 }: {
     row: BonusRow;
     brigadeOn: boolean;
@@ -698,6 +705,7 @@ function BonusListItem({
     currentHeat?: { backgroundColor: string };
     forecastHeat?: { backgroundColor: string };
     showForecast: boolean;
+    lines: boolean;
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -713,12 +721,12 @@ function BonusListItem({
         ...baskets.map((indicator) => ({
             label: indicator.title,
             amount: row.premiums[indicator.id],
-            open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom),
+            ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
         })),
         ...SERVICE_INDICATORS.map((indicator) => ({
             label: indicator.title,
             amount: row.services[indicator.id],
-            open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom),
+            ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
         })),
     ];
     return (

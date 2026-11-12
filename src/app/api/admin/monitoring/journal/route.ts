@@ -12,7 +12,7 @@ export interface JournalPagePayload {
 
 export async function GET(request: Request): Promise<NextResponse<ApiResponse<JournalPagePayload>>> {
     try {
-        await requirePermission("baskets:read");
+        await requirePermission("monitoring:read");
         const url = new URL(request.url);
         const beforeRaw = url.searchParams.get("before");
         const before = beforeRaw !== null && /^\d+$/.test(beforeRaw) ? Number(beforeRaw) : null;

@@ -7,7 +7,8 @@ import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 import { assignmentSql } from "@/services/promoter-premium";
-import { branchVisible, premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
+import { canReadEmployeeDetail } from "@/services/premium-access";
+import { premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,7 +46,7 @@ export async function sumDocumentBranchReleasePremium(period: string, branchId: 
 ${selectSql}
         ) line
         `,
-        [period, employeeId, branchId, null, null, null],
+        [period, employeeId, branchId, null, null, null, null],
     );
     const premium = rows[0]?.premium;
     const amount = typeof premium === "number" ? premium : Number(premium);
@@ -118,7 +119,7 @@ export async function readReleasePremiumDetail(
     }
     const from = activeFrom && DAY.test(activeFrom) ? activeFrom : null;
     const until = activeUntil && DAY.test(activeUntil) ? activeUntil : from;
-    if (!await branchVisible(access, period, branchId)) {
+    if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, RELEASE_INDICATOR);
@@ -159,7 +160,7 @@ ${selectSql}
                     THEN matched.category_code::uuid
             END
         `,
-        [period, employeeId, branchId, from, until, accrualId],
+        [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
     const lines = rows.map((row, index) => {

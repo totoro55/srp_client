@@ -31,6 +31,12 @@ interface BranchDirectoryValue {
     rosterPeriod: string | null;
     rolesEditable: boolean;
     closedMessage: string | null;
+    viewerEmployeeId: string | null;
+    foreignDetail: boolean;
+    branchChoice: "open" | "assignment";
+    workedBranchIds: string[];
+    preferredBranchId: string | null;
+    loadedPeriod: string;
     replaceSharedPremiums: (shares: Record<string, number>) => void;
     replaceSharedPremiumRoleIds: (roleIds: string[]) => void;
     replacePremiums: (premiums: {
@@ -78,6 +84,13 @@ interface StaffResponse {
         rosterPeriod?: string | null;
         rolesEditable?: boolean;
         closedMessage?: string | null;
+        viewer?: {
+            employeeId?: string | null;
+            foreignDetail?: boolean;
+            branchChoice?: "open" | "assignment";
+            workedBranchIds?: string[];
+            preferredBranchId?: string | null;
+        };
     };
     error?: { message?: string };
 }
@@ -107,6 +120,12 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         rosterPeriod: null,
         rolesEditable: false,
         closedMessage: null,
+        viewerEmployeeId: null,
+        foreignDetail: false,
+        branchChoice: "open",
+        workedBranchIds: [],
+        preferredBranchId: null,
+        loadedPeriod: "",
     });
     const replaceSharedPremiums = useCallback((shares: Record<string, number>) => {
         setValue((current) => ({ ...current, sharedPremiums: shares }));
@@ -125,9 +144,17 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const controller = new AbortController();
-        setValue((current) => current.employees.length > 0 && current.loadedBranchId !== ""
-            ? current
-            : { ...current, loading: true, error: null });
+        setValue((current) => {
+            const periodSwitched = current.branchChoice === "assignment"
+                && current.loadedPeriod !== ""
+                && current.loadedPeriod !== period;
+            if (periodSwitched) {
+                return { ...current, loading: true, employees: [], loadedBranchId: "", error: null };
+            }
+            return current.employees.length > 0 && current.loadedBranchId !== ""
+                ? current
+                : { ...current, loading: true, error: null };
+        });
         const params = new URLSearchParams({ period });
         if (branchId) {
             params.set("branch", branchId);
@@ -142,15 +169,20 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     throw new Error(body.error?.message || "Не удалось прочитать штатное расписание");
                 }
                 const roleOverrides = readOverrides(body.data.roleOverrides);
-                const matched = branchId !== "" && body.data.branches.some((item) => item.id.toLowerCase() === branchId.toLowerCase());
-                if (matched) {
+                const placement = readPlacement(body.data.viewer);
+                const matched = branchId !== "" && body.data.branches.some((item) => sameBranch(item.id, branchId));
+                const onAssignment = placement.branchChoice === "assignment" && branchId !== "";
+                const branchIsWorked = placement.workedBranchIds.some((id) => sameBranch(id, branchId));
+                const branchIsPreferred = placement.preferredBranchId !== null && sameBranch(placement.preferredBranchId, branchId);
+                const holdForPlacement = onAssignment && !branchIsWorked && !branchIsPreferred;
+                if (matched && !holdForPlacement) {
                     store.hydrateRoles(branchId, period, roleOverrides);
                 }
                 setValue({
-                    loading: !matched && body.data.branches.length > 0,
+                    loading: holdForPlacement || (!matched && body.data.branches.length > 0),
                     error: null,
                     branches: body.data.branches,
-                    loadedBranchId: matched ? branchId : "",
+                    loadedBranchId: matched && !holdForPlacement ? branchId : "",
                     roleOverrides,
                     indicators: readIndicators(body.data.indicators),
                     salePremiums: readPremiums(body.data.salePremiums),
@@ -163,7 +195,13 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     rosterPeriod: typeof body.data.rosterPeriod === "string" ? body.data.rosterPeriod : null,
                     rolesEditable: body.data.rolesEditable === true,
                     closedMessage: typeof body.data.closedMessage === "string" ? body.data.closedMessage : null,
-                    employees: body.data.employees.map((employee) => {
+                    viewerEmployeeId: typeof body.data.viewer?.employeeId === "string" ? body.data.viewer.employeeId.toLowerCase() : null,
+                    foreignDetail: body.data.viewer?.foreignDetail === true,
+                    branchChoice: placement.branchChoice,
+                    workedBranchIds: placement.workedBranchIds,
+                    preferredBranchId: placement.preferredBranchId,
+                    loadedPeriod: period,
+                    employees: holdForPlacement ? [] : body.data.employees.map((employee) => {
                         const mark = cabinetMovement(employee);
                         return {
                             id: employee.id,
@@ -211,6 +249,12 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     rosterPeriod: current.rosterPeriod,
                     rolesEditable: current.rolesEditable,
                     closedMessage: current.closedMessage,
+                    viewerEmployeeId: current.viewerEmployeeId,
+                    foreignDetail: current.foreignDetail,
+                    branchChoice: current.branchChoice,
+                    workedBranchIds: current.workedBranchIds,
+                    preferredBranchId: current.preferredBranchId,
+                    loadedPeriod: current.loadedPeriod,
                 }));
             });
         return () => controller.abort();
@@ -231,6 +275,23 @@ export function useBranchDirectory(): BranchDirectoryValue {
         throw new Error("Штатное расписание читается внутри кабинета филиала");
     }
     return value;
+}
+
+function sameBranch(left: string, right: string): boolean {
+    return left.toLowerCase() === right.toLowerCase();
+}
+
+function readPlacement(viewer: NonNullable<StaffResponse["data"]>["viewer"]): {
+    branchChoice: "open" | "assignment";
+    workedBranchIds: string[];
+    preferredBranchId: string | null;
+} {
+    const preferredBranchId = viewer?.preferredBranchId;
+    return {
+        branchChoice: viewer?.branchChoice === "assignment" ? "assignment" : "open",
+        workedBranchIds: (viewer?.workedBranchIds ?? []).filter((id) => isBranchId(id)),
+        preferredBranchId: isBranchId(preferredBranchId) ? preferredBranchId : null,
+    };
 }
 
 function readRoleIds(value: string[] | undefined): string[] {

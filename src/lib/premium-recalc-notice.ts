@@ -1,4 +1,17 @@
+import type { RecalcScopeLevel } from "@/lib/recalc-reasons";
+
 const MONTH_KEY = /^(\d{4})-(\d{2})/;
+
+export type PremiumRecalcKind = "sale" | "release" | "kassa" | "shared";
+
+export interface StartedPremiumRecalc {
+    period: string;
+    kinds: PremiumRecalcKind[];
+    scopeLevel: RecalcScopeLevel;
+    scopeLabel: string;
+    trigger: string;
+    actor: string;
+}
 
 export function premiumMonthHasStarted(period: string, now = new Date()): boolean {
     const match = MONTH_KEY.exec(period);

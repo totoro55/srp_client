@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PERMISSION_GROUP_ORDER } from "@/lib/permissions";
 import { MatrixToolbar } from './MatrixToolbar';
 import { ButtonSpinner, TableSkeleton } from "@/components/loading-state";
 
@@ -26,10 +27,7 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
     const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
     const [group, setGroup] = useState("");
     const [loadingKeys, setLoadingKeys] = useState<string[]>([]);
-    const groups = useMemo(
-        () => [...new Set(permissions.map((permission) => permission.group))],
-        [permissions]
-    );
+    const groups = useMemo(() => orderedGroups(permissions.map((permission) => permission.group)), [permissions]);
 
     const filteredPermissions = useMemo(() => {
         const needle = searchQuery.trim().toLowerCase();
@@ -42,6 +40,8 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                 || (permission.description?.toLowerCase().includes(needle) ?? false);
         });
     }, [permissions, searchQuery, group]);
+
+    const sections = useMemo(() => groupPermissions(filteredPermissions), [filteredPermissions]);
 
     // 2. Фильтрация столбцов-ролей по выбранным id
     const filteredRoles = useMemo(() => {
@@ -112,12 +112,17 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            filteredPermissions.map(perm => (
+                            sections.flatMap((section) => [
+                                <TableRow key={`group-${section.group}`} className="bg-muted/40 hover:bg-muted/40">
+                                    <TableCell colSpan={filteredRoles.length + 1} className="py-2 text-xs font-medium">
+                                        {section.group}
+                                    </TableCell>
+                                </TableRow>,
+                                ...section.items.map((perm) => (
                                     <TableRow key={perm.code} className="hover:bg-muted/30">
                                         <TableCell className="align-middle py-3">
                                             <div className="flex flex-col gap-1 min-w-0">
                                                 <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="text-[11px] text-muted-foreground">{perm.group}</span>
                                                     <span className="truncate font-mono text-[11px] text-muted-foreground">{perm.code}</span>
                                                     <span className="truncate text-xs font-medium">{perm.title}</span>
                                                 </div>
@@ -147,11 +152,31 @@ export function MatrixGrid({ roles, permissions, relations, isLoading = false, c
                                             );
                                         })}
                                     </TableRow>
-                                ))
-                            )}
+                                )),
+                            ])
+                        )}
                         </TableBody>
                     </Table>
             </CardContent>
         </Card>
     );
+}
+
+function orderedGroups(names: string[]): string[] {
+    const order: string[] = [...PERMISSION_GROUP_ORDER];
+    for (const name of names) {
+        if (!order.includes(name)) {
+            order.push(name);
+        }
+    }
+    const present = new Set(names);
+    return order.filter((name) => present.has(name));
+}
+
+function groupPermissions(permissions: Permission[]): { group: string; items: Permission[] }[] {
+    const order = orderedGroups(permissions.map((permission) => permission.group));
+    return order.flatMap((group) => {
+        const items = permissions.filter((permission) => permission.group === group);
+        return items.length === 0 ? [] : [{ group, items }];
+    });
 }

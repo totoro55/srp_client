@@ -2,6 +2,7 @@
 -- $1 — первое число месяца.
 -- Колонки совпадают с sale-premium-kind.sql.
 -- $6 — начисление с сохранёнными коэффициентами. Пусто — текущие коэффициенты филиала.
+-- $7 — список филиалов. Пусто — без ограничения списком.
 -- tariff в результате — готовый тариф, коэффициенты в колонки не выводятся.
 -- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
@@ -155,6 +156,7 @@ sale_lines AS (
           AND sale.count IS NOT NULL
           AND seller.employee_uuid IS NOT NULL
           AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
+          AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
           AND (
               $4::date IS NULL
               OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)

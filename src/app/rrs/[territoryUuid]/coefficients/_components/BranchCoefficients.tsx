@@ -11,16 +11,16 @@ import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { coefficientValueIssue } from "@/lib/coefficient-value";
-import { closedPeriodMessage } from "@/lib/rrs-edit-window";
 import { notifySuccess } from "@/lib/notify";
 import type { RrsCoefficientPage } from "@/lib/rrs";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
 import { CoefficientTable, coefficientCellDirty, coefficientFieldKey } from "../../../_components/CoefficientTable";
 import { PeriodChangeHistory } from "../../../_components/PeriodChangeHistory";
-import { RrsPeriodControls, type PeriodHintTone } from "../../../_components/RrsPeriodControls";
+import { RrsPeriodControls, settingsPeriodHint } from "../../../_components/RrsPeriodControls";
 import { connectionCardPeriod, RrsSectionNav } from "../../../_components/RrsSectionNav";
-import { premiumSaveDescription } from "@/lib/premium-recalc-notice";
+import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { showStartedRecalc } from "@/lib/recalc-plan";
 import { formatMonth } from "../../../_components/model";
 
 export function BranchCoefficients() {
@@ -82,7 +82,7 @@ export function BranchCoefficients() {
     }, [fetchKey, fetchCoefficients]);
 
     const showSave = Boolean(page && page.baskets.length > 0);
-    const hint = page ? periodHint(page, loading) : null;
+    const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
 
     function collectItems(): { items: { branchUuid: string; basketId: number; key: string; value: string }[] } | { error: string } {
         if (!page) {
@@ -133,11 +133,14 @@ export function BranchCoefficients() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ period: page.period, items: collected.items }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: true }>;
+            const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
             if (!json.success) {
                 setError(json.error.message);
                 setConfirmSave(false);
                 return;
+            }
+            if (json.data.recalc) {
+                showStartedRecalc(json.data.recalc);
             }
             notifySuccess("Коэффициенты филиалов сохранены");
             setConfirmSave(false);
@@ -273,19 +276,6 @@ export function BranchCoefficients() {
             </Tabs>
         </form>
     );
-}
-
-function periodHint(page: RrsCoefficientPage, loading: boolean): { text: string; tone: PeriodHintTone } {
-    if (loading) {
-        return { tone: "loading", text: "Загрузка периода…" };
-    }
-    if (!page.editable) {
-        return { tone: "closed", text: `${closedPeriodMessage(page.editPolicy)} Показаны действующие значения.` };
-    }
-    if (page.period.slice(0, 7) > page.editPolicy.currentMonth) {
-        return { tone: "future", text: `Значения будут действовать с ${formatMonth(page.period)}. Более ранние месяцы останутся без изменений.` };
-    }
-    return { tone: "current", text: "Этот месяц открыт для изменения." };
 }
 
 function CoefficientHelp({ cutoffDay }: { cutoffDay: number | null }) {

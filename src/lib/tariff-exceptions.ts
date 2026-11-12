@@ -108,6 +108,7 @@ export interface TariffExceptionReport {
     appliedPeriod: string | null;
     savedPeriods: string[];
     editable: boolean;
+    editPolicy: RrsEditPolicy;
     axis: TariffAxis | null;
     rows: TariffExceptionReportRow[];
     directory: TariffCategoryFolder[];
