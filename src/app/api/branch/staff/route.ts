@@ -5,6 +5,7 @@ import { BRANCH_SETTINGS_PERMISSIONS, CABINET_PERMISSIONS } from "@/lib/permissi
 import { adminAuthErrorResponse, requireAnyPermission } from "@/lib/require-admin";
 import { getAppSettings } from "@/services/app-settings";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
+import { managerBranchSettings } from "@/services/manager-branch-grants";
 import { cabinetViewer, readBranchPlacement, type BranchChoice } from "@/services/premium-access";
 import { readBranchRoleOverrides } from "@/services/motivation-roles";
 import { readBranchSharedPremiumRoleIds } from "@/services/shared-premium";
@@ -24,6 +25,11 @@ export interface BranchStaffPayload {
     baseBonus: number | null;
     priceGrowth: number;
     rosterPeriod: string | null;
+    branchSettings: {
+        roles: boolean;
+        brigades: boolean;
+        shared: boolean;
+    };
     rolesEditable: boolean;
     closedMessage: string | null;
     viewer: {
@@ -48,9 +54,10 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Br
         const visible = Boolean(branch && data.branches.some((item) => item.id.toLowerCase() === branch.toLowerCase()));
         const roleOverrides = visible && branch ? await readBranchRoleOverrides(branch, period) : {};
         const sharedPremiumRoleIds = visible && branch ? await readBranchSharedPremiumRoleIds(branch) : [];
-        const [viewer, placement] = await Promise.all([
+        const [viewer, placement, branchSettings] = await Promise.all([
             cabinetViewer(access),
             readBranchPlacement(access, period),
+            visible && branch ? managerBranchSettings(access, branch) : Promise.resolve({ roles: false, brigades: false, shared: false }),
         ]);
         const settings = await getAppSettings();
         const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
@@ -61,6 +68,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Br
                 ...data,
                 roleOverrides,
                 sharedPremiumRoleIds,
+                branchSettings,
                 rolesEditable,
                 closedMessage: rolesEditable ? null : closedPeriodMessage(policy),
                 viewer: { ...viewer, ...placement },

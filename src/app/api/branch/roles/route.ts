@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { staffParticipationChanged } from "@/lib/motivation-roles";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
-import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
+import { AdminAuthError, adminAuthErrorResponse } from "@/lib/require-admin";
+import { getRequestAccess } from "@/server/authz/resolve-access";
 import { getAppSettings } from "@/services/app-settings";
 import { PremiumRecalcBusyError } from "@/services/basket-updates";
 import { recalculateBranchPremiums } from "@/services/branch-premium-recalc";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
+import { holdsBranchSetting, managerMayChangeBranch } from "@/services/manager-branch-grants";
 import { MotivationSettingsError, readBranchRoleOverrides, readMotivationSettings, saveBranchRoleOverrides } from "@/services/motivation-roles";
 import { SalePremiumError } from "@/services/sale-premium";
 import type { ApiResponse } from "@/types/api";
@@ -26,7 +28,10 @@ interface BranchRolesPayload {
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<BranchRolesPayload>>> {
     try {
-        const access = await requirePermission("branch.roles:write");
+        const access = await getRequestAccess();
+        if (!access || !holdsBranchSetting(access, "branch.roles:write")) {
+            throw new AdminAuthError(access ? 403 : 401);
+        }
         const body = await request.json() as { branchId?: unknown; period?: unknown; overrides?: unknown };
         const branchId = typeof body.branchId === "string" ? body.branchId : "";
         const period = typeof body.period === "string" ? body.period : null;
@@ -41,6 +46,9 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         const allowed = visible.branches.some((branch) => branch.id.toLowerCase() === branchId.toLowerCase());
         if (!allowed) {
             return createErrorResponse("FORBIDDEN", "Филиал недоступен", 403);
+        }
+        if (!await managerMayChangeBranch(access, branchId, "branch.roles:write")) {
+            return createErrorResponse("FORBIDDEN", "Для этого филиала настройка не выдана", 403);
         }
         const settings = await getAppSettings();
         const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);

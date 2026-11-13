@@ -43,6 +43,10 @@ const NOTES: Record<string, string> = {
     "role_rules.expires_at": "Когда правило перестаёт действовать. Пусто — бессрочно",
 
     "scope_grants.username": "Логин сотрудника, которому выдана территория",
+    "manager_branch_grants.employee_uuid": "Управляющий, зам управляющего или старший продавец. Запись действует, пока его территория в справочнике совпадает с territory_uuid",
+    "manager_branch_grants.permission_code": "branch.access открывает кабинет чужого филиала. Остальные коды — настройки филиала",
+    "manager_branch_grants.allowed": "Для своего филиала ложь снимает настройку роли. Для чужого филиала истина выдаёт доступ или настройку",
+    "manager_branch_grants.granted_by": "Кто последним записал строку",
     "audit_events.actor_username": "Кто выполнил действие",
     "audit_events.action": "Код действия",
     "audit_events.details": "Подробности. Можно не заполнять",
@@ -274,6 +278,7 @@ const INTRO: Record<string, string> = {
     role_permission_codes: "Права роли. Код совпадает с каталогом прав приложения.",
     role_rules: "Правило трансляции: логин или должность получают роль.",
     scope_grants: "Территория, выданная сотруднику сверх его области.",
+    manager_branch_grants: "Выдача филиала и настроек управляющему внутри РРС. Чужой филиал без строки закрыт. На своём филиале нет строки — действует роль, строка с ложью снимает настройку. После перевода в другую РРС строки прежней РРС не читаются.",
     audit_events: "Журнал действий в администрировании доступа.",
     app_settings: "Одна строка настроек приложения.",
     premium_auto_schedules: "Расписания автоматических пересчётов. Тарифы корзины продаж — раз в месяц, автозагрузка премии — каждый день.",
@@ -305,7 +310,7 @@ export const APP_TABLE_GROUPS: { title: string; tables: string[] }[] = [
     {
         title: "Доступ",
         tables: [
-            "roles", "role_permission_codes", "role_rules", "scope_grants", "users", "login_events", "audit_events",
+            "roles", "role_permission_codes", "role_rules", "scope_grants", "manager_branch_grants", "users", "login_events", "audit_events",
             "permissions", "role_permissions", "ldap_position_mappings", "user_role_exceptions",
         ],
     },

@@ -1,5 +1,5 @@
-import { RrsReservedPage } from "../_components/RrsReservedPage";
+import { ManagerAccess } from "./_components/ManagerAccess";
 
 export default function RrsAccessPage() {
-    return <RrsReservedPage section="access" message="Выдача доступа сотрудникам появится здесь." />;
+    return <ManagerAccess />;
 }

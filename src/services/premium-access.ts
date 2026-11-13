@@ -1,9 +1,10 @@
+import { receivesManagerGrants } from "@/lib/manager-grants";
 import { BRANCH_SETTINGS_PERMISSIONS } from "@/lib/permissions";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
 import { moscowToday } from "@/services/segment-locks";
 
-export type CabinetScope = "all" | "home" | "granted" | "territory";
+export type CabinetScope = "all" | "home" | "granted" | "territory" | "manager";
 export type BranchChoice = "open" | "assignment";
 
 const BRANCH_UUID = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
@@ -97,6 +98,21 @@ export const CABINET_SCOPE_SQL = `
         'territory' = ANY($1::text[])
         AND branch.territory_uuid IS NOT DISTINCT FROM home.territory_uuid
     )
+    OR (
+        'manager' = ANY($1::text[])
+        AND home.territory_uuid IS NOT NULL
+        AND home.employee_id IS NOT NULL
+        AND branch.territory_uuid IS NOT DISTINCT FROM home.territory_uuid
+        AND EXISTS (
+            SELECT 1
+            FROM manager_branch_grants grant_row
+            WHERE grant_row.territory_uuid = home.territory_uuid
+              AND grant_row.employee_uuid = home.employee_id
+              AND grant_row.branch_uuid = branch.uuid
+              AND grant_row.permission_code = 'branch.access'
+              AND grant_row.allowed
+        )
+    )
 )
 `;
 
@@ -113,6 +129,9 @@ export function cabinetScopes(access: AccessView): CabinetScope[] {
     }
     if (access.permissions.includes("bonus.territory:read")) {
         scopes.push("territory");
+    }
+    if (receivesManagerGrants(access.role?.code, access.title) && scopes.length > 0) {
+        scopes.push("manager");
     }
     return scopes;
 }
@@ -134,7 +153,7 @@ export function branchListScopes(access: AccessView): CabinetScope[] {
         return ["granted"];
     }
     if (access.role?.scopeKind === "home_branch") {
-        return ["home"];
+        return receivesManagerGrants(access.role.code, access.title) ? ["home", "manager"] : ["home"];
     }
     return [];
 }

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
-import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
+import { AdminAuthError, adminAuthErrorResponse } from "@/lib/require-admin";
+import { getRequestAccess } from "@/server/authz/resolve-access";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
+import { holdsBranchSetting, managerMayChangeBranch } from "@/services/manager-branch-grants";
 import { MotivationSettingsError } from "@/services/motivation-roles";
 import { saveBranchSharedPremiumRoles } from "@/services/shared-premium";
 import type { ApiResponse } from "@/types/api";
@@ -19,7 +21,10 @@ interface SharedPremiumRolesPayload {
 
 export async function PUT(request: Request): Promise<NextResponse<ApiResponse<SharedPremiumRolesPayload>>> {
     try {
-        const access = await requirePermission("branch.shared:write");
+        const access = await getRequestAccess();
+        if (!access || !holdsBranchSetting(access, "branch.shared:write")) {
+            throw new AdminAuthError(access ? 403 : 401);
+        }
         const body = await request.json() as { branchId?: unknown; period?: unknown; roleIds?: unknown };
         const branchId = typeof body.branchId === "string" ? body.branchId : "";
         const period = typeof body.period === "string" ? body.period : "";
@@ -34,6 +39,9 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Sh
         const allowed = visible.branches.some((branch) => branch.id.toLowerCase() === branchId.toLowerCase());
         if (!allowed) {
             return createErrorResponse("FORBIDDEN", "Филиал недоступен", 403);
+        }
+        if (!await managerMayChangeBranch(access, branchId, "branch.shared:write")) {
+            return createErrorResponse("FORBIDDEN", "Для этого филиала настройка не выдана", 403);
         }
         const saved = await saveBranchSharedPremiumRoles(branchId, period, roleIds, access.username);
         return NextResponse.json({

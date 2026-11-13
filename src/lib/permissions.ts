@@ -145,6 +145,12 @@ export const PERMISSION_CATALOG = [
         description: "Роли, между которыми делится общая премия филиала",
     },
     {
+        code: "branch.grants:write",
+        group: "Филиал",
+        title: "Выдача доступа управляющим",
+        description: "Филиалы и настройки управляющих своей РРС",
+    },
+    {
         code: "staffing:read",
         group: "Мотивация",
         title: "Просмотр штатного расписания",

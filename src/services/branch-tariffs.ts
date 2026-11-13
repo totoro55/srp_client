@@ -1,4 +1,5 @@
 import { readVersionSettings, SALES_INDICATOR_NAME, tariffAxisTitle, type TariffAxis } from "@/lib/baskets";
+import { receivesManagerGrants } from "@/lib/manager-grants";
 import { isTariffBaseMode, type TariffBaseMode } from "@/lib/tariff-exceptions";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
@@ -123,6 +124,23 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                   WHERE lower(grant_row.username) = lower($2)
               ))
               OR ($1::text = 'home' AND branch.uuid IS NOT DISTINCT FROM home.branch_uuid)
+              OR (
+                  $5::boolean
+                  AND EXISTS (
+                      SELECT 1
+                      FROM employees employee
+                      JOIN manager_branch_grants grant_row
+                        ON grant_row.employee_uuid = employee.uuid
+                       AND grant_row.branch_uuid = branch.uuid
+                       AND grant_row.permission_code = 'branch.access'
+                       AND grant_row.allowed
+                       AND grant_row.territory_uuid = employee.territory_uuid
+                      WHERE lower(employee.login) = lower($2)
+                        AND NOT employee.deleted
+                        AND employee.territory_uuid IS NOT NULL
+                        AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid
+                  )
+              )
           )
           AND (
               EXISTS (
@@ -132,9 +150,26 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                     AND staff.branch_uuid = branch.uuid
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
+              OR (
+                  $5::boolean
+                  AND EXISTS (
+                      SELECT 1
+                      FROM employees employee
+                      JOIN manager_branch_grants grant_row
+                        ON grant_row.employee_uuid = employee.uuid
+                       AND grant_row.branch_uuid = branch.uuid
+                       AND grant_row.permission_code = 'branch.access'
+                       AND grant_row.allowed
+                       AND grant_row.territory_uuid = employee.territory_uuid
+                      WHERE lower(employee.login) = lower($2)
+                        AND NOT employee.deleted
+                        AND employee.territory_uuid IS NOT NULL
+                        AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid
+                  )
+              )
           )
         `,
-        [scopeMode(access), access.username, period, branchId],
+        [scopeMode(access), access.username, period, branchId, receivesManagerGrants(access.role?.code, access.title) && !access.fullAccess],
     );
     const row = rows[0];
     if (!row || !UUID.test(row.id) || !UUID.test(row.territoryId)) {

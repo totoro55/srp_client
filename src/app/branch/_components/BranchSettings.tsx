@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { HelpDrawer } from "@/components/help-drawer";
 import { ButtonSpinner, StackSkeleton, TableSkeleton } from "@/components/loading-state";
 import { useAccess } from "@/hooks/useAccess";
+import { receivesManagerGrants } from "@/lib/manager-grants";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
@@ -46,15 +47,32 @@ export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
     const directory = useBranchDirectory();
     const access = useAccess();
-    const roles = access.has("branch.roles:write");
-    const brigades = access.has("branch.brigades:write");
-    const shared = access.has("branch.shared:write");
+    const session = useSession();
+    const grantSubject = !access.fullAccess && receivesManagerGrants(access.roleCode, session.data?.user?.title ?? "");
+    const branchReady = directory.loadedBranchId !== "" && directory.loadedBranchId.toLowerCase() === branchId.toLowerCase();
+    const granted = directory.branchSettings;
+    const roles = grantSubject ? granted.roles : access.has("branch.roles:write");
+    const brigades = grantSubject ? granted.brigades : access.has("branch.brigades:write");
+    const shared = grantSubject ? granted.shared : access.has("branch.shared:write");
     const first = roles ? "staff" : brigades ? "brigades" : "shared";
     const [tab, setTab] = useState<string | null>(null);
     const current = (tab === "staff" && roles) || (tab === "brigades" && brigades) || (tab === "shared" && shared) ? tab : first;
 
     if (!access.roleName && !access.conflict) {
         return <StackSkeleton rows={6} />;
+    }
+    if (access.roleCode === "linear" && session.status === "loading") {
+        return <StackSkeleton rows={6} />;
+    }
+    if (grantSubject && !branchReady) {
+        if (!directory.loading && directory.error) {
+            return <p className="text-sm text-destructive">{directory.error}</p>;
+        }
+        return <StackSkeleton rows={6} />;
+    }
+
+    if (!roles && !brigades && !shared) {
+        return <p className="text-sm text-muted-foreground">Для этого филиала настройки не выданы.</p>;
     }
 
     return (

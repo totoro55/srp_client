@@ -29,6 +29,7 @@ interface BranchDirectoryValue {
     baseBonus: number | null;
     priceGrowth: number;
     rosterPeriod: string | null;
+    branchSettings: { roles: boolean; brigades: boolean; shared: boolean };
     rolesEditable: boolean;
     closedMessage: string | null;
     viewerEmployeeId: string | null;
@@ -82,6 +83,7 @@ interface StaffResponse {
         baseBonus: number | null;
         priceGrowth: number;
         rosterPeriod?: string | null;
+        branchSettings?: { roles?: boolean; brigades?: boolean; shared?: boolean };
         rolesEditable?: boolean;
         closedMessage?: string | null;
         viewer?: {
@@ -118,6 +120,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         baseBonus: null,
         priceGrowth: 0,
         rosterPeriod: null,
+        branchSettings: { roles: false, brigades: false, shared: false },
         rolesEditable: false,
         closedMessage: null,
         viewerEmployeeId: null,
@@ -193,6 +196,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     baseBonus: body.data.baseBonus,
                     priceGrowth: body.data.priceGrowth,
                     rosterPeriod: typeof body.data.rosterPeriod === "string" ? body.data.rosterPeriod : null,
+                    branchSettings: readBranchSettings(body.data.branchSettings),
                     rolesEditable: body.data.rolesEditable === true,
                     closedMessage: typeof body.data.closedMessage === "string" ? body.data.closedMessage : null,
                     viewerEmployeeId: typeof body.data.viewer?.employeeId === "string" ? body.data.viewer.employeeId.toLowerCase() : null,
@@ -247,6 +251,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     baseBonus: current.baseBonus,
                     priceGrowth: current.priceGrowth,
                     rosterPeriod: current.rosterPeriod,
+                    branchSettings: current.branchSettings,
                     rolesEditable: current.rolesEditable,
                     closedMessage: current.closedMessage,
                     viewerEmployeeId: current.viewerEmployeeId,
@@ -291,6 +296,18 @@ function readPlacement(viewer: NonNullable<StaffResponse["data"]>["viewer"]): {
         branchChoice: viewer?.branchChoice === "assignment" ? "assignment" : "open",
         workedBranchIds: (viewer?.workedBranchIds ?? []).filter((id) => isBranchId(id)),
         preferredBranchId: isBranchId(preferredBranchId) ? preferredBranchId : null,
+    };
+}
+
+function readBranchSettings(value: { roles?: boolean; brigades?: boolean; shared?: boolean } | undefined): {
+    roles: boolean;
+    brigades: boolean;
+    shared: boolean;
+} {
+    return {
+        roles: value?.roles === true,
+        brigades: value?.brigades === true,
+        shared: value?.shared === true,
     };
 }
 

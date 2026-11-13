@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChartColumn, ChevronDown, Key, LayoutDashboard, ListChecks, Percent, Receipt, Share2, ShoppingBasket, UserCheck, WandSparkles, type LucideIcon } from "lucide-react";
 import {
@@ -137,7 +137,6 @@ const BLOCKS: { id: string; label: string; pages: MenuPage[] }[] = [
                 icon: Key,
                 timed: false,
                 savedCard: false,
-                planned: true,
             },
             {
                 id: "delegation",
@@ -167,6 +166,7 @@ export function RrsSectionNav({
     cardPeriod,
     subnav,
     controls,
+    onlyAccess = false,
 }: {
     territoryUuid: string;
     territoryName?: string | null;
@@ -175,7 +175,17 @@ export function RrsSectionNav({
     cardPeriod?: string | null;
     subnav?: ReactNode;
     controls?: ReactNode;
+    onlyAccess?: boolean;
 }) {
+    const blocks = useMemo(() => {
+        if (!onlyAccess) {
+            return BLOCKS;
+        }
+        return BLOCKS.flatMap((block) => {
+            const pages = block.pages.filter((page) => page.id === "access");
+            return pages.length > 0 ? [{ ...block, pages }] : [];
+        });
+    }, [onlyAccess]);
     function href(page: MenuPage) {
         if (!page.timed) {
             return `/rrs/${territoryUuid}${page.path}`;
@@ -199,7 +209,7 @@ export function RrsSectionNav({
         }
         function measure() {
             const available = container?.clientWidth ?? 0;
-            const widths = BLOCKS.map((_, index) => itemRefs.current[index]?.offsetWidth ?? 0);
+            const widths = blocks.map((_, index) => itemRefs.current[index]?.offsetWidth ?? 0);
             const moreWidth = moreRef.current?.offsetWidth ?? 0;
             const gap = 4;
             let used = 0;
@@ -207,7 +217,7 @@ export function RrsSectionNav({
             for (let index = 0; index < widths.length; index++) {
                 const width = widths[index];
                 const next = used + (count > 0 ? gap : 0) + width;
-                const hiddenAfter = widths.length - index - 1;
+                const hiddenAfter = blocks.length - index - 1;
                 const needed = hiddenAfter > 0 ? next + gap + moreWidth : next;
                 if (needed > available) {
                     break;
@@ -225,10 +235,10 @@ export function RrsSectionNav({
         }
         void document.fonts?.ready.then(measure);
         return () => observer.disconnect();
-    }, []);
+    }, [blocks]);
 
-    const visibleBlocks = BLOCKS.slice(0, visibleCount);
-    const overflowBlocks = BLOCKS.slice(visibleCount);
+    const visibleBlocks = blocks.slice(0, visibleCount);
+    const overflowBlocks = blocks.slice(visibleCount);
     const overflowCurrent = overflowBlocks.some((block) => block.pages.some((page) => page.id === active));
 
     return (
@@ -243,7 +253,7 @@ export function RrsSectionNav({
                 <div ref={containerRef} className="relative w-full min-w-0">
                     <div className="pointer-events-none absolute top-0 left-0 h-0 overflow-hidden" aria-hidden>
                         <div ref={measureRef} className="flex w-max gap-1">
-                            {BLOCKS.map((block, index) => (
+                            {blocks.map((block, index) => (
                                 <span
                                     key={block.id}
                                     ref={(node) => {
