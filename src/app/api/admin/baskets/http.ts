@@ -10,7 +10,8 @@ export function basketErrorResponse(error: unknown): NextResponse<ApiErrorRespon
         return authResponse;
     }
     if (error instanceof BasketRuleError) {
-        return createErrorResponse(error.status === 404 ? "NOT_FOUND" : "BAD_REQUEST", error.message, error.status);
+        const code = error.status === 404 ? "NOT_FOUND" : error.status === 403 ? "FORBIDDEN" : "BAD_REQUEST";
+        return createErrorResponse(code, error.message, error.status);
     }
     return createErrorResponse("DATABASE_ERROR", "Не удалось выполнить операцию с корзиной", 500);
 }

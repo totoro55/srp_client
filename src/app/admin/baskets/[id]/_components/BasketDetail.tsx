@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ButtonSpinner, PageSkeleton } from "@/components/loading-state";
@@ -28,6 +28,7 @@ import {
     TARIFF_AXES,
     compareVersions,
     isTariffAxis,
+    parseBasketCode,
     tariffAxisTitle,
     tariffBoundIssue,
     versionMatchesView,
@@ -57,6 +58,7 @@ import { ApiResponse } from "@/types/api";
 
 export function BasketDetail() {
     const params = useParams<{ id: string }>();
+    const router = useRouter();
     const searchParams = useSearchParams();
     const access = useAccess();
     const validateProfile = useRequiredFields();
@@ -68,6 +70,7 @@ export function BasketDetail() {
     const [basket, setBasket] = useState<BasketDetails | null>(null);
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [name, setName] = useState("");
+    const [code, setCode] = useState("");
     const [description, setDescription] = useState("");
     const [mandatory, setMandatory] = useState(true);
     const [versionName, setVersionName] = useState("");
@@ -88,6 +91,7 @@ export function BasketDetail() {
     const [profileOpen, setProfileOpen] = useState(false);
     const [parameterToRemove, setParameterToRemove] = useState<{ index: number; title: string } | null>(null);
     const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false);
+    const [confirmDeleteBasket, setConfirmDeleteBasket] = useState(false);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [overIndex, setOverIndex] = useState<number | null>(null);
     const [coefficientDragIndex, setCoefficientDragIndex] = useState<number | null>(null);
@@ -95,7 +99,9 @@ export function BasketDetail() {
 
     const selected = basket?.versions.find((version) => version.id === selectedId) ?? null;
     const draft = selected?.status === "draft" ? selected : null;
+    const adminCorrection = canWrite && access.fullAccess;
     const parametersLocked = selected !== null && selected.status !== "draft";
+    const structureLocked = parametersLocked && !adminCorrection;
     const versionDirty = selected !== null && canWrite && (
         versionName.trim() !== selected.name
         || versionDescription.trim() !== selected.description.trim()
@@ -110,7 +116,7 @@ export function BasketDetail() {
     const boundsIssue = salesBasket && selected?.status === "draft" && selected.settings.tariffAxis
         ? tariffBoundIssue(selected.settings)
         : null;
-    const draftBoundsIssue = salesBasket && selected?.status === "draft"
+    const draftBoundsIssue = salesBasket && selected !== null && !structureLocked
         ? tariffBoundIssue({ parameters, coefficients, tariffAxis })
         : null;
 
@@ -194,6 +200,7 @@ export function BasketDetail() {
     function applyBasket(next: BasketDetails, preferId: number | null, view: VersionView = versionView) {
         setBasket(next);
         setName(next.name);
+        setCode(next.code);
         setDescription(next.description);
         setMandatory(next.mandatory);
         const preferred = preferId === null ? null : next.versions.find((item) => item.id === preferId) ?? null;
@@ -230,10 +237,14 @@ export function BasketDetail() {
         }
         setError(null);
         setParameters((current) => {
-            if (index === null) {
-                return [...current, parameter];
+            const next = index === null
+                ? [...current, parameter]
+                : current.map((item, itemIndex) => itemIndex === index ? parameter : item);
+            const previous = index === null ? null : current[index];
+            if (!previous || previous.key === parameter.key) {
+                return next;
             }
-            return current.map((item, itemIndex) => itemIndex === index ? parameter : item);
+            return renameParameterReferences(next, previous.key, parameter.key);
         });
         setParameterEditor(null);
         return null;
@@ -334,7 +345,19 @@ export function BasketDetail() {
             setError(validationMessage);
             return;
         }
-        await mutate(`/api/admin/baskets/${basketId}`, "PATCH", { name, description, mandatory }, undefined, undefined, "Изменения корзины сохранены");
+        const parsedCode = adminCorrection ? parseBasketCode(code) : null;
+        if (adminCorrection && !parsedCode) {
+            setError("Код корзины: латинские буквы, цифры и подчёркивание, с буквы, от 2 до 50 символов");
+            return;
+        }
+        await mutate(
+            `/api/admin/baskets/${basketId}`,
+            "PATCH",
+            adminCorrection ? { name, description, mandatory, code: parsedCode } : { name, description, mandatory },
+            undefined,
+            undefined,
+            "Изменения корзины сохранены",
+        );
     }
 
     async function onSaveVersion(event: FormEvent<HTMLFormElement>) {
@@ -345,7 +368,7 @@ export function BasketDetail() {
             setError(validationMessage);
             return;
         }
-        if (selected.status === "draft") {
+        if (!structureLocked) {
             const boundsMessage = tariffBoundIssue({ parameters, coefficients, tariffAxis });
             if (boundsMessage) {
                 setError(boundsMessage);
@@ -473,6 +496,38 @@ export function BasketDetail() {
                 }}
             />
             <ConfirmDialog
+                open={confirmDeleteBasket}
+                title="Удалить корзину"
+                description={`Корзина «${basket.name}» (код ${basket.code}) удалится вместе с версиями, подключениями к РРС, коэффициентами филиалов и таблицами подключений. Уже посчитанная премия других корзин останется и обновится при следующем пересчёте.`}
+                confirmLabel="Удалить"
+                confirmVariant="destructive"
+                confirmDelaySeconds={3}
+                isPending={saving}
+                onConfirm={async () => {
+                    setSaving(true);
+                    setError(null);
+                    try {
+                        const response = await fetch(`/api/admin/baskets/${basketId}`, { method: "DELETE" });
+                        const json = (await response.json()) as ApiResponse<{ id: number }>;
+                        if (!json.success) {
+                            setError(json.error.message);
+                            setConfirmDeleteBasket(false);
+                            return;
+                        }
+                        notifySuccess("Корзина удалена");
+                        router.push("/admin/baskets");
+                    } catch {
+                        setError("Не удалось удалить корзину");
+                        setConfirmDeleteBasket(false);
+                    } finally {
+                        setSaving(false);
+                    }
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setConfirmDeleteBasket(false);
+                }}
+            />
+            <ConfirmDialog
                 open={confirmDeleteDraft && draft !== null}
                 title="Удалить черновик"
                 description={draft
@@ -511,6 +566,18 @@ export function BasketDetail() {
                             )}
                         </CardDescription>
                         <CardAction className="flex items-center gap-2">
+                            {adminCorrection ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={saving}
+                                    onClick={() => setConfirmDeleteBasket(true)}
+                                >
+                                    <Trash2 />
+                                    Удалить
+                                </Button>
+                            ) : null}
                             {profileOpen && canWrite ? (
                                 <Button type="submit" size="sm" disabled={saving}>
                                     {saving ? <ButtonSpinner /> : <Save />}
@@ -531,6 +598,22 @@ export function BasketDetail() {
                     </CardHeader>
                     {profileOpen ? (
                         <CardContent className="flex flex-col gap-4">
+                            {adminCorrection ? (
+                                <div className="flex flex-col gap-1.5">
+                                    <Label htmlFor="profile-code">Код</Label>
+                                    <Input
+                                        id="profile-code"
+                                        value={code}
+                                        disabled={saving}
+                                        required
+                                        pattern="[a-z][a-z0-9_]{1,49}"
+                                        onChange={(event) => setCode(event.target.value.toLowerCase())}
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                        Латинские буквы, цифры и подчёркивание, с буквы. Таблицы подключений переименуются вместе с кодом.
+                                    </p>
+                                </div>
+                            ) : null}
                             <div className="flex flex-col gap-1.5">
                                 <Label htmlFor="profile-name">Название</Label>
                                 <Input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} disabled={!canWrite || saving} required />
@@ -685,7 +768,7 @@ export function BasketDetail() {
                                     </span>
                                 ) : null}
                             </CardTitle>
-                            <CardDescription>{versionStateHint(selected.status)}</CardDescription>
+                            <CardDescription>{versionStateHint(selected.status, adminCorrection && parametersLocked)}</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="grid items-start gap-6 lg:grid-cols-2">
@@ -697,7 +780,7 @@ export function BasketDetail() {
                                                 Параметры
                                             </h3>
                                         </div>
-                                        {canWrite && !parametersLocked ? (
+                                        {canWrite && !structureLocked ? (
                                             <Button
                                                 type="button"
                                                 variant="outline"
@@ -716,7 +799,7 @@ export function BasketDetail() {
                                 <>
                                 <ul className="flex flex-col gap-2">
                                     {parameters.map((parameter, index) => {
-                                        const sortable = canWrite && !parametersLocked && !saving;
+                                        const sortable = canWrite && !structureLocked && !saving;
                                         return (
                                             <li
                                                 key={parameter.key}
@@ -801,7 +884,7 @@ export function BasketDetail() {
                                         );
                                     })}
                                 </ul>
-                                {canWrite && !parametersLocked && parameters.length > 1 ? (
+                                {canWrite && !structureLocked && parameters.length > 1 ? (
                                     <p className="text-xs text-muted-foreground">
                                         Директор заполняет параметры в этом порядке. Перетащите строку за значок слева, чтобы изменить его.
                                     </p>
@@ -814,7 +897,7 @@ export function BasketDetail() {
                                         <Percent className="size-4" />
                                         Коэффициенты
                                     </h3>
-                                    {canWrite && !parametersLocked ? (
+                                    {canWrite && !structureLocked ? (
                                         <Button
                                             type="button"
                                             variant="outline"
@@ -829,6 +912,9 @@ export function BasketDetail() {
                                 </div>
                                 <p className="text-xs text-muted-foreground">
                                     Название и диапазон задаются здесь. Значение указывает РРС для филиала территории.
+                                    {adminCorrection && parametersLocked
+                                        ? " Смена кода переносит уже записанные значения филиалов на новый код."
+                                        : ""}
                                 </p>
                                 {coefficients.length === 0 ? (
                                     <p className="text-sm text-muted-foreground">Коэффициентов нет. Филиалы можно будет оставить без значения.</p>
@@ -836,7 +922,7 @@ export function BasketDetail() {
                                     <>
                                     <ul className="flex flex-col gap-2">
                                         {coefficients.map((coefficient, index) => {
-                                            const sortable = canWrite && !parametersLocked && !saving;
+                                            const sortable = canWrite && !structureLocked && !saving;
                                             return (
                                                 <li
                                                     key={coefficient.key}
@@ -908,7 +994,7 @@ export function BasketDetail() {
                                             );
                                         })}
                                     </ul>
-                                    {canWrite && !parametersLocked && coefficients.length > 1 ? (
+                                    {canWrite && !structureLocked && coefficients.length > 1 ? (
                                         <p className="text-xs text-muted-foreground">
                                             РРС заполняет коэффициенты филиалов в этом порядке. Перетащите строку за значок слева, чтобы изменить его.
                                         </p>
@@ -936,7 +1022,7 @@ export function BasketDetail() {
                                     <Label htmlFor="tariff-axis">Вид расчета тарифов</Label>
                                     <Select
                                         value={tariffAxis}
-                                        disabled={!canWrite || saving || parametersLocked}
+                                        disabled={!canWrite || saving || structureLocked}
                                         onValueChange={(value) => setTariffAxis(isTariffAxis(value) ? value : null)}
                                     >
                                                 <SelectTrigger id="tariff-axis" className="w-full">
@@ -951,9 +1037,11 @@ export function BasketDetail() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
-                                        {parametersLocked
+                                        {structureLocked
                                             ? "Вид расчета зафиксирован. Другой можно выбрать только в новом черновике."
-                                            : "Категория или вид изделия. После публикации вид расчета меняется только новой версией."}
+                                            : parametersLocked
+                                                ? "Администратор может сменить вид расчета у этой версии. Для него нужны числовые параметры min, base и max."
+                                                : "Категория или вид изделия. После публикации вид расчета меняет администратор или новая версия."}
                                     </p>
                                     {draftBoundsIssue ? <p className="text-xs text-destructive">{draftBoundsIssue}</p> : null}
                                 </div>
@@ -1178,15 +1266,40 @@ function availabilityDescription(
     return `Версия ${versionNo} «${name}» будет доступна к подключению как ${role}.`;
 }
 
-function versionStateHint(status: BasketVersionStatus): string {
+function versionStateHint(status: BasketVersionStatus, correcting: boolean): string {
+    if (status === "draft") {
+        return "Черновик нельзя подключить, пока его не опубликуют. При публикации параметры станут колонками таблицы подключений.";
+    }
+    if (correcting) {
+        if (status === "off") {
+            return "Архивная. Новое подключение недоступно, уже подключённые территории продолжают считать по ней. Администратор может исправить параметры и коэффициенты.";
+        }
+        return "Администратор может исправить параметры, коэффициенты и вид расчета. Новый код коэффициента забирает уже записанные значения филиалов.";
+    }
     if (status === "test") {
         return "Можно подключить как тестовую. Параметры зафиксированы: дальше их меняет только новый черновик.";
     }
     if (status === "working") {
         return "Можно подключить как рабочую. Параметры зафиксированы: дальше их меняет только новый черновик.";
     }
-    if (status === "off") {
-        return "Архивная. Новое подключение недоступно, уже подключённые территории продолжают считать по ней. Параметры этой версии не меняются.";
+    return "Архивная. Новое подключение недоступно, уже подключённые территории продолжают считать по ней. Параметры этой версии не меняются.";
+}
+
+function renameParameterReferences(parameters: BasketParameter[], from: string, to: string): BasketParameter[] {
+    if (from === to || !/^[a-z][a-z0-9_]+$/.test(from) || !/^[a-z][a-z0-9_]+$/.test(to)) {
+        return parameters;
     }
-    return "Черновик нельзя подключить, пока его не опубликуют. При публикации параметры станут колонками таблицы подключений.";
+    const pattern = new RegExp(`\\b${from}\\b`, "g");
+    return parameters.map((parameter) => {
+        if (parameter.kind !== "number") {
+            return parameter;
+        }
+        return {
+            ...parameter,
+            formula: parameter.formula.replace(pattern, to),
+            conditions: parameter.conditions.map((condition) => (
+                condition.sourceKey === from ? { ...condition, sourceKey: to } : condition
+            )),
+        };
+    });
 }

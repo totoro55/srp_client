@@ -223,6 +223,7 @@ export interface BasketProfileInput {
     name: string;
     description: string;
     mandatory: boolean;
+    code?: string;
 }
 
 export function parseBasketMandatory(value: unknown): boolean | null {

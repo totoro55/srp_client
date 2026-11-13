@@ -98,7 +98,9 @@ export async function PATCH(
             return createErrorResponse("BAD_REQUEST", input.error, 400);
         }
 
-        const basket = await updateBasketVersion(basketId, versionId, input, access.username);
+        const basket = await updateBasketVersion(basketId, versionId, input, access.username, {
+            allowLockedSettings: access.fullAccess,
+        });
         await audit(access.username, "baskets.version.update", `${basket.code}; version ${versionId}`);
         return NextResponse.json({ success: true, data: basket });
     } catch (error) {

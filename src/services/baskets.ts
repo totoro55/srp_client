@@ -20,14 +20,21 @@ import {
     type BasketVersionDraftInput,
     type VersionAvailability,
 } from "@/lib/baskets";
+import {
+    dropBasketConnectionTables,
+    PublishedSettingsError,
+    renameBasketConnectionTables,
+    renameStoredCoefficientKeys,
+    syncPublishedParameterColumns,
+} from "@/services/basket-correction";
 import { buildVersionConnectionDdl } from "@/services/basket-data-tables";
 import { db } from "@/services/db";
 import type { QueryResultRow } from "pg";
 
 export class BasketRuleError extends Error {
-    readonly status: 400 | 404;
+    readonly status: 400 | 403 | 404;
 
-    constructor(status: 400 | 404, message: string) {
+    constructor(status: 400 | 403 | 404, message: string) {
         super(message);
         this.name = "BasketRuleError";
         this.status = status;
@@ -267,21 +274,47 @@ export async function createBasket(input: BasketDraftInput, author: string): Pro
     return requireBasket(id);
 }
 
-export async function updateBasket(id: number, input: BasketProfileInput): Promise<BasketDetails> {
-    const rows = await db.query<{ id: number }>(
-        `
-        UPDATE baskets
-        SET name = $2,
-            description = $3,
-            mandatory = $4,
-            updated_at = NOW()
-        WHERE id = $1
-        RETURNING id
-        `,
-        [id, input.name, input.description, input.mandatory]
-    );
-    if (!rows[0]) {
-        throw new BasketRuleError(404, "Корзина не найдена");
+export async function updateBasket(
+    id: number,
+    input: BasketProfileInput,
+    options?: { allowCode?: boolean },
+): Promise<BasketDetails> {
+    try {
+        await db.transaction(async (query) => {
+            const currentRows = await query<{ code: string }>(
+                "SELECT code FROM baskets WHERE id = $1 FOR UPDATE",
+                [id],
+            );
+            const current = currentRows[0];
+            if (!current) {
+                throw new BasketRuleError(404, "Корзина не найдена");
+            }
+            const nextCode = input.code ?? current.code;
+            if (nextCode !== current.code) {
+                if (!options?.allowCode) {
+                    throw new BasketRuleError(403, "Код корзины меняет администратор");
+                }
+                await renameBasketConnectionTables(query, id, nextCode);
+            }
+            const rows = await query<{ id: number }>(
+                `
+                UPDATE baskets
+                SET name = $2,
+                    description = $3,
+                    mandatory = $4,
+                    code = $5,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                `,
+                [id, input.name, input.description, input.mandatory, nextCode],
+            );
+            if (!rows[0]) {
+                throw new BasketRuleError(404, "Корзина не найдена");
+            }
+        });
+    } catch (error) {
+        correctionFailure(error);
     }
     return requireBasket(id);
 }
@@ -439,9 +472,11 @@ export async function updateBasketVersion(
     basketId: number,
     versionId: number,
     input: BasketVersionDraftInput,
-    author: string
+    author: string,
+    options?: { allowLockedSettings?: boolean },
 ): Promise<BasketDetails> {
-    await db.transaction(async (query) => {
+    try {
+        await db.transaction(async (query) => {
         const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown; tariffAxis: string | null; indicatorName: string }>(
             `
             SELECT v.id,
@@ -477,23 +512,36 @@ export async function updateBasketVersion(
             throw new BasketRuleError(400, "Вид расчета тарифов задаётся только у корзины продаж");
         }
         const settingsLocked = version.status !== "draft" || version.dataTable !== null;
-        if (settingsLocked && !parametersEqual(currentSettings.parameters, input.settings.parameters)) {
+        const correctLocked = settingsLocked && options?.allowLockedSettings === true;
+        if (settingsLocked && !correctLocked && !parametersEqual(currentSettings.parameters, input.settings.parameters)) {
             throw new BasketRuleError(400, "Параметры этой версии уже зафиксированы. Измените их в новом черновике.");
         }
-        if (settingsLocked && !coefficientsEqual(currentSettings.coefficients, input.settings.coefficients)) {
+        if (settingsLocked && !correctLocked && !coefficientsEqual(currentSettings.coefficients, input.settings.coefficients)) {
             throw new BasketRuleError(400, "Коэффициенты этой версии уже зафиксированы. Измените их в новом черновике.");
         }
-        if (settingsLocked && currentSettings.tariffAxis !== input.settings.tariffAxis) {
+        if (settingsLocked && !correctLocked && currentSettings.tariffAxis !== input.settings.tariffAxis) {
             throw new BasketRuleError(400, "Вид расчета этой версии уже зафиксирован. Измените его в новом черновике.");
         }
-        const settings = settingsLocked
+        const settings = settingsLocked && !correctLocked
             ? currentSettings
             : { ...input.settings, tariffAxis: sales ? input.settings.tariffAxis : null };
-        if (!settingsLocked) {
+        if (!settingsLocked || correctLocked) {
             const boundsIssue = tariffBoundIssue(settings);
             if (boundsIssue) {
                 throw new BasketRuleError(400, boundsIssue);
             }
+        }
+        if (correctLocked && version.dataTable && !parametersEqual(currentSettings.parameters, settings.parameters)) {
+            await syncPublishedParameterColumns(
+                query,
+                versionId,
+                version.dataTable,
+                currentSettings.parameters,
+                settings.parameters,
+            );
+        }
+        if (correctLocked && !coefficientsEqual(currentSettings.coefficients, settings.coefficients)) {
+            await renameStoredCoefficientKeys(query, basketId, currentSettings.coefficients, settings.coefficients);
         }
         if (input.wikiArticleId !== null) {
             const articles = await query<{ id: number }>(
@@ -529,7 +577,10 @@ export async function updateBasketVersion(
             settings,
         });
         await query("UPDATE baskets SET updated_at = NOW() WHERE id = $1", [basketId]);
-    });
+        });
+    } catch (error) {
+        correctionFailure(error);
+    }
     return requireBasket(basketId);
 }
 
@@ -739,6 +790,44 @@ export async function deleteBasketDraft(basketId: number, versionId: number): Pr
     return requireBasket(basketId);
 }
 
+export async function deleteBasket(id: number): Promise<void> {
+    try {
+        await db.transaction(async (query) => {
+            const baskets = await query<{ id: number }>(
+                "SELECT id FROM baskets WHERE id = $1 FOR UPDATE",
+                [id],
+            );
+            if (!baskets[0]) {
+                throw new BasketRuleError(404, "Корзина не найдена");
+            }
+            const versions = await query<{ id: number; dataTable: string | null }>(
+                `
+                SELECT id, data_table AS "dataTable"
+                FROM basket_versions
+                WHERE basket_id = $1
+                FOR UPDATE
+                `,
+                [id],
+            );
+            const versionIds = versions.map((version) => version.id);
+            if (versionIds.length > 0) {
+                await query("DELETE FROM basket_category_tariffs WHERE version_id = ANY($1::int[])", [versionIds]);
+                await query("DELETE FROM basket_kind_tariffs WHERE version_id = ANY($1::int[])", [versionIds]);
+            }
+            await query("DELETE FROM basket_connections WHERE basket_id = $1", [id]);
+            await query("DELETE FROM basket_connections_log WHERE basket_id = $1", [id]);
+            await query("DELETE FROM basket_branch_coefficients_log WHERE basket_id = $1", [id]);
+            await dropBasketConnectionTables(
+                query,
+                versions.flatMap((version) => version.dataTable ? [version.dataTable] : []),
+            );
+            await query("DELETE FROM baskets WHERE id = $1", [id]);
+        });
+    } catch (error) {
+        correctionFailure(error);
+    }
+}
+
 async function requireBasket(id: number): Promise<BasketDetails> {
     const basket = await getBasket(id);
     if (!basket) {
@@ -841,4 +930,38 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
     }
     const pg = error as { code?: string; constraint?: string };
     return pg.code === "23505" && pg.constraint === constraint;
+}
+
+function pgCode(error: unknown): string | null {
+    if (!error || typeof error !== "object" || !("code" in error)) {
+        return null;
+    }
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : null;
+}
+
+function correctionFailure(error: unknown): never {
+    if (error instanceof BasketRuleError) {
+        throw error;
+    }
+    if (error instanceof PublishedSettingsError) {
+        throw new BasketRuleError(400, error.message);
+    }
+    if (isUniqueViolation(error, "baskets_code_unique")) {
+        throw new BasketRuleError(400, "Корзина с таким кодом уже есть");
+    }
+    const code = pgCode(error);
+    if (code === "23505") {
+        throw new BasketRuleError(400, "Такой код уже записан и не освобождён");
+    }
+    if (code === "23514") {
+        throw new BasketRuleError(400, "Уже записанные значения не проходят новые границы параметра");
+    }
+    if (code === "42703" || code === "42P01") {
+        throw new BasketRuleError(400, "Колонка или таблица подключения не найдена");
+    }
+    if (code === "42P07") {
+        throw new BasketRuleError(400, "Таблица подключений с таким кодом уже есть");
+    }
+    throw error;
 }

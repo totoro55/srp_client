@@ -130,6 +130,10 @@ function parameterChecks(prefix: string, parameters: BasketParameter[]): string[
     return checks;
 }
 
+export function parameterCheckClauses(prefix: string, parameters: BasketParameter[]): string[] {
+    return parameterChecks(prefix, parameters);
+}
+
 function quoteIdent(name: string): string {
     if (!/^[a-z][a-z0-9_]*$/.test(name)) {
         throw new Error(`Недопустимое имя колонки: ${name}`);
