@@ -20,7 +20,7 @@ export async function readBranchPromoterPremiums(period: string, branchId: strin
     const people = await db.query<{ id: string; name: string; title: string }>(
         `
         SELECT DISTINCT ON (staff.employees_uuid)
-               lower(staff.employees_uuid::text) AS id,
+               staff.employees_uuid AS id,
                btrim(staff.name_employees) AS name,
                COALESCE(NULLIF(btrim(staff.title), ''), 'Промоутер') AS title
         FROM raw.hr_ktu_promouter staff
@@ -31,9 +31,9 @@ export async function readBranchPromoterPremiums(period: string, branchId: strin
           AND NOT EXISTS (
               SELECT 1
               FROM raw.hr_ktu regular
-              WHERE lower(regular.employees_uuid::text) = lower(staff.employees_uuid::text)
+              WHERE regular.employees_uuid = staff.employees_uuid
                 AND regular.date_modified < ($1::date + INTERVAL '1 month')
-                AND btrim(regular.branch_uuid::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                AND regular.branch_uuid IS NOT NULL
           )
         ORDER BY staff.employees_uuid, staff.date_modified DESC
         `,
@@ -68,9 +68,9 @@ export function limitPremiumAuthors(sql: string, ids: string[]): string {
     if (!sql.includes("sale.period = $1::timestamp")) {
         throw new Error("Не найден период продажи в запросе премии");
     }
-    const list = ids.filter((id) => AUTHOR_UUID.test(id)).map((id) => `'${id}'`).join(", ");
+    const list = ids.filter((id) => AUTHOR_UUID.test(id)).map((id) => `'${id}'::uuid`).join(", ");
     const authors = list.length > 0
-        ? `(lower(btrim(sale.author::text)) IN (${list}) OR lower(btrim(sale.author2::text)) IN (${list}))`
+        ? `(sale.author IN (${list}) OR sale.author2 IN (${list}))`
         : "FALSE";
     return sql.replaceAll(
         "sale.period = $1::timestamp",
@@ -107,12 +107,12 @@ async function saleAxis(period: string, branchId: string): Promise<"category" | 
 async function sumsByEmployee(selectSql: string, period: string, branchId: string): Promise<Map<string, number>> {
     const rows = await db.query<{ id: string; premium: number | string }>(
         `
-        SELECT lower(line.employee_uuid) AS id,
+        SELECT line.employee_uuid AS id,
                COALESCE(SUM(line.premium), 0)::float8 AS premium
         FROM (
 ${selectSql}
         ) line
-        GROUP BY lower(line.employee_uuid)
+        GROUP BY line.employee_uuid
         `,
         [period, null, branchId, null, null, null, null],
     );

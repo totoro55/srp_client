@@ -62,18 +62,15 @@ rates AS (
 issue_hits AS (
     SELECT sale.*
     FROM raw.sale sale
-    WHERE $2::text IS NOT NULL
+    WHERE $2::uuid IS NOT NULL
       AND sale.period = $1::timestamp
-      AND sale.author2 IS NOT NULL
-      AND btrim(sale.author2::text) <> ''
-      AND lower(btrim(sale.author2::text)) = lower(btrim($2))
+      AND sale.author2 = $2::uuid
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
-    WHERE $2::text IS NULL
+    WHERE $2::uuid IS NULL
       AND sale.period = $1::timestamp
       AND sale.author2 IS NOT NULL
-      AND btrim(sale.author2::text) <> ''
       AND (
           $4::date IS NULL
           OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
@@ -85,7 +82,7 @@ SELECT $1::date AS period,
        assignment.author_kind,
        issuer.employee_uuid,
        rates.version_id,
-       COALESCE(NULLIF(lower(btrim(sale.category::text)), ''), '') AS category_code,
+       sale.category AS category_code,
        (rates.quantity * COALESCE(coef.value, 1))::numeric AS quantity_tariff,
        (rates.volume * COALESCE(coef.value, 1))::numeric AS volume_tariff,
        sale.count AS item_count,
@@ -95,13 +92,13 @@ SELECT $1::date AS period,
            * COALESCE(coef.value, 1),
            2
        ) AS premium,
-       NULLIF(btrim(sale.link_doc::text), '') AS link_doc,
-       NULLIF(btrim(sale.document_number::text), '') AS document_number,
+       NULLIF(btrim(sale.link_doc), '') AS link_doc,
+       NULLIF(btrim(sale.document_number), '') AS document_number,
        sale.date AS document_date,
-       NULLIF(btrim(sale.name_product::text), '') AS product_name
+       NULLIF(btrim(sale.name_product), '') AS product_name
 FROM issue_hits sale
 CROSS JOIN LATERAL (
-    SELECT NULLIF(lower(btrim(sale.author2::text)), '') AS employee_uuid
+    SELECT sale.author2 AS employee_uuid
 ) issuer
 JOIN main.author_days author_day
     ON author_day.period = $1::date

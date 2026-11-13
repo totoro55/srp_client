@@ -114,7 +114,7 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
             LIMIT 1
         ) home ON true
         WHERE NOT branch.deleted
-          AND lower(branch.uuid::text) = lower($4)
+          AND branch.uuid = $4::uuid
           AND (
               $1::text = 'all'
               OR ($1::text = 'granted' AND branch.territory_uuid IN (
@@ -129,7 +129,7 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period = $3::date
-                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
+                    AND staff.branch_uuid = branch.uuid
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
           )

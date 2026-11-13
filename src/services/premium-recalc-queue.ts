@@ -269,16 +269,16 @@ async function resolveBranches(job: Job, scope: KindScope): Promise<string[] | n
 async function territoryBranches(territoryId: string, period: string): Promise<string[]> {
     const rows = await db.query<{ uuid: string }>(
         `
-        SELECT lower(branch.uuid::text) AS uuid
+        SELECT branch.uuid
         FROM branches branch
         WHERE branch.territory_uuid = $1::uuid
         UNION
-        SELECT lower(day.branch_uuid::text)
+        SELECT day.branch_uuid
         FROM main.basket_premium_days day
         WHERE day.period = $2::date
           AND day.territory_uuid = $1::uuid
         UNION
-        SELECT lower(share.branch_uuid::text)
+        SELECT share.branch_uuid
         FROM main.shared_premiums share
         WHERE share.period = $2::date
           AND share.territory_uuid = $1::uuid

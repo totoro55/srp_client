@@ -151,7 +151,6 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
             FROM raw.sale
             WHERE period IS NOT NULL
               AND author2 IS NOT NULL
-              AND btrim(author2::text) <> ''
             GROUP BY period
         `),
         db.query<CountRow>(`

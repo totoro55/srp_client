@@ -122,7 +122,7 @@ export async function readStaffingBranches(access: AccessView, period: string): 
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period = $3::date
-                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
+                    AND staff.branch_uuid = branch.uuid
               )
             ORDER BY territory.name, branch.name
             `,
@@ -153,7 +153,7 @@ export async function readStaffing(
         SELECT staff.employees_uuid AS "employeeId",
                COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                COALESCE(territory.name, 'РРС не найдена') AS "territoryName",
-               lower(staff.branch_uuid::text) AS "branchId",
+               staff.branch_uuid AS "branchId",
                COALESCE(branch.name, 'Филиал не найден') AS "branchName",
                to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
                COALESCE(staff.title, '') AS title,
@@ -167,19 +167,19 @@ export async function readStaffing(
                COALESCE(NOT assignment.automatic, false) AS manual
         FROM raw.hr_ktu staff
         LEFT JOIN employees employee
-            ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
+            ON employee.uuid = staff.employees_uuid
         LEFT JOIN branches branch
-            ON lower(branch.uuid::text) = lower(staff.branch_uuid::text)
+            ON branch.uuid = staff.branch_uuid
         LEFT JOIN territories territory
             ON territory.uuid = branch.territory_uuid
         LEFT JOIN raw.basic_bonuses bonus
             ON bonus.period = staff.period
-           AND lower(bonus.branch_uuid::text) = lower(staff.branch_uuid::text)
+           AND bonus.branch_uuid = staff.branch_uuid
         LEFT JOIN LATERAL (
             SELECT role.role_id, role.automatic
             FROM branch_motivation_roles role
-            WHERE lower(role.branch_uuid) = lower(staff.branch_uuid::text)
-              AND lower(role.employee_uuid) = lower(staff.employees_uuid::text)
+            WHERE role.branch_uuid = staff.branch_uuid
+              AND role.employee_uuid = staff.employees_uuid
               AND role.period <= staff.period
             ORDER BY role.period DESC
             LIMIT 1
@@ -188,8 +188,16 @@ export async function readStaffing(
           AND ${SCOPE}
           AND (
               ($4::text = '' AND $6::text = '')
-              OR lower(staff.branch_uuid::text) = ANY (string_to_array($4, ','))
-              OR lower(territory.uuid::text) = ANY (string_to_array($6, ','))
+              OR EXISTS (
+                  SELECT 1
+                  FROM unnest(string_to_array(NULLIF($4, ''), ',')) AS item(value)
+                  WHERE staff.branch_uuid = item.value::uuid
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM unnest(string_to_array(NULLIF($6, ''), ',')) AS item(value)
+                  WHERE territory.uuid = item.value::uuid
+              )
           )
           AND (
               $5::text = ''

@@ -38,7 +38,7 @@ WITH sale_basket AS (
     LIMIT 1
 ),
 site_authors AS (
-    SELECT author
+    SELECT author::uuid AS author
     FROM (
         VALUES
             ('0c87a096-c966-11e5-98c0-001e674202ec'), -- Сайт ДНС
@@ -67,21 +67,21 @@ connected AS (
 sale_hits AS (
     SELECT sale.*
     FROM raw.sale sale
-    WHERE $2::text IS NOT NULL
+    WHERE $2::uuid IS NOT NULL
       AND sale.period = $1::timestamp
-      AND lower(btrim(sale.author::text)) = lower(btrim($2))
-      AND lower(btrim(sale.author::text)) NOT IN (SELECT author FROM site_authors)
+      AND sale.author = $2::uuid
+      AND sale.author NOT IN (SELECT author FROM site_authors)
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
-    WHERE $2::text IS NOT NULL
+    WHERE $2::uuid IS NOT NULL
       AND sale.period = $1::timestamp
-      AND lower(btrim(sale.author2::text)) = lower(btrim($2))
-      AND lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors)
+      AND sale.author2 = $2::uuid
+      AND sale.author IN (SELECT author FROM site_authors)
     UNION ALL
     SELECT sale.*
     FROM raw.sale sale
-    WHERE $2::text IS NULL
+    WHERE $2::uuid IS NULL
       AND sale.period = $1::timestamp
       AND (
           $4::date IS NULL
@@ -110,33 +110,29 @@ sale_lines AS (
                assignment.author_kind,
                seller.employee_uuid,
                connected.version_id,
-               lower(btrim(sale.kinde::text)) AS code,
-               CASE
-                   WHEN btrim(sale.kinde::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                       THEN lower(btrim(sale.kinde::text))::uuid
-               END AS code_uuid,
+               sale.kinde AS code,
+               sale.kinde AS code_uuid,
                CASE
                    -- Безнал перекрывает автора интернет-магазина.
                    WHEN COALESCE(sale.b2b, FALSE) THEN 'b2b'
-                   WHEN lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors) THEN 'im'
+                   WHEN sale.author IN (SELECT author FROM site_authors) THEN 'im'
                    ELSE 'main'
                END AS channel,
-               lower(btrim(sale.brend::text)) IN (
+               lower(btrim(sale.brend)) IN (
                    SELECT lower(btrim(brand.name))
                    FROM stm_brands brand
                ) AS is_stm,
                sale.price,
                sale.count AS item_count,
-               NULLIF(btrim(sale.name_product::text), '') AS product_name,
-               NULLIF(btrim(sale.link_doc::text), '') AS link_doc,
-               NULLIF(btrim(sale.document_number::text), '') AS document_number,
+               NULLIF(btrim(sale.name_product), '') AS product_name,
+               NULLIF(btrim(sale.link_doc), '') AS link_doc,
+               NULLIF(btrim(sale.document_number), '') AS document_number,
                sale.date AS document_date
         FROM sale_hits sale
         CROSS JOIN LATERAL (
             SELECT CASE
-                       WHEN lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors)
-                           THEN NULLIF(lower(btrim(sale.author2::text)), '')
-                       ELSE NULLIF(lower(btrim(sale.author::text)), '')
+                       WHEN sale.author IN (SELECT author FROM site_authors) THEN sale.author2
+                       ELSE sale.author
                    END AS employee_uuid
         ) seller
         JOIN main.author_days author_day

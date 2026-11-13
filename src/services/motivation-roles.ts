@@ -200,9 +200,9 @@ export async function saveBranchRoleOverrides(
         const inherited = await readRoleSlice(query, branch, period, false);
         const stored = await query<{ employee: string }>(
             `
-            SELECT lower(employee_uuid) AS employee
+            SELECT employee_uuid AS employee
             FROM branch_motivation_roles
-            WHERE lower(branch_uuid) = lower($1)
+            WHERE branch_uuid = $1::uuid
               AND period = $2::date
             `,
             [branch, period],
@@ -229,9 +229,9 @@ export async function saveBranchRoleOverrides(
             await query(
                 `
                 DELETE FROM branch_motivation_roles
-                WHERE lower(branch_uuid) = lower($1)
+                WHERE branch_uuid = $1::uuid
                   AND period = $2::date
-                  AND lower(employee_uuid) = ANY($3::text[])
+                  AND employee_uuid = ANY($3::uuid[])
                 `,
                 [branch, period, remove],
             );
@@ -242,7 +242,7 @@ export async function saveBranchRoleOverrides(
         await query(
             `
             INSERT INTO branch_motivation_roles (branch_uuid, employee_uuid, period, role_id, automatic)
-            SELECT $1, employee_id, $2::date, role_id, automatic
+            SELECT $1::uuid, employee_id::uuid, $2::date, role_id, automatic
             FROM unnest($3::text[], $4::text[], $5::boolean[]) AS assignment(employee_id, role_id, automatic)
             ON CONFLICT (branch_uuid, employee_uuid, period)
             DO UPDATE SET role_id = EXCLUDED.role_id,
@@ -263,14 +263,14 @@ async function readRoleSlice(
         `
         SELECT employee_uuid, role_id
         FROM (
-            SELECT DISTINCT ON (lower(employee_uuid))
-                   lower(employee_uuid) AS employee_uuid,
+            SELECT DISTINCT ON (employee_uuid)
+                   employee_uuid,
                    role_id,
                    automatic
             FROM branch_motivation_roles
-            WHERE lower(branch_uuid) = lower($1)
+            WHERE branch_uuid = $1::uuid
               AND period ${includePeriod ? "<=" : "<"} $2::date
-            ORDER BY lower(employee_uuid), period DESC
+            ORDER BY employee_uuid, period DESC
         ) latest
         WHERE NOT automatic
         `,

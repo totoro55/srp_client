@@ -49,7 +49,7 @@ export async function readBranchStaff(
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period <= $3::date
-                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
+                    AND staff.branch_uuid = branch.uuid
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
           )
@@ -68,7 +68,7 @@ export async function readBranchStaff(
         `
         SELECT to_char(MAX(staff.period), 'YYYY-MM-DD') AS period
         FROM raw.hr_ktu staff
-        WHERE lower(staff.branch_uuid::text) = lower($1)
+        WHERE staff.branch_uuid = $1::uuid
           AND staff.period <= $2::date
         `,
         [selected.id, period],
@@ -84,10 +84,10 @@ export async function readBranchStaff(
             `
             -- Состав последнего загруженного месяца, не позже выбранного.
             -- Отрезок действует с date_modified до следующей даты, в том числе через границу месяца.
-            SELECT lower(staff.employees_uuid::text) AS id,
+            SELECT staff.employees_uuid AS id,
                    COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                    to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
-                   lower(btrim(staff.branch_uuid::text)) AS "branchId",
+                   staff.branch_uuid AS "branchId",
                    COALESCE(staff.title, '') AS title,
                    staff.ktu,
                    staff.probation,
@@ -95,22 +95,22 @@ export async function readBranchStaff(
                    staff.salary_amount AS "salaryAmount",
                    COALESCE(staff.status, '') AS status
             FROM raw.hr_ktu staff
-            LEFT JOIN employees employee ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
-            WHERE lower(staff.employees_uuid::text) IN (
-                SELECT lower(person.employees_uuid::text)
+            LEFT JOIN employees employee ON employee.uuid = staff.employees_uuid
+            WHERE staff.employees_uuid IN (
+                SELECT person.employees_uuid
                 FROM raw.hr_ktu person
                 WHERE person.period = $1::date
-                  AND lower(person.branch_uuid::text) = lower($2::text)
+                  AND person.branch_uuid = $2::uuid
             )
               AND staff.date_modified >= ($1::date - INTERVAL '1 month')
               AND staff.date_modified < ($1::date + INTERVAL '1 month')
-            ORDER BY lower(staff.employees_uuid::text), staff.date_modified
+            ORDER BY staff.employees_uuid, staff.date_modified
             `,
             [rosterPeriod, selected.id],
         ),
         db.query<HourDay>(
             `
-            SELECT lower(day.employees_uuid::text) AS id,
+            SELECT day.employees_uuid AS id,
                    to_char(day.date, 'YYYY-MM-DD') AS day,
                    day.norma_hour AS schedule,
                    day.fact_hour AS timesheet

@@ -25,19 +25,19 @@ const OPEN_SHARE_DELETE = `
           SELECT 1
           FROM main.premium_accruals accrual
           WHERE accrual.period = share.period
-            AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+            AND accrual.employee_uuid = share.employee_uuid
             AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
             AND share.active_from <= accrual.active_until
             AND share.active_until >= accrual.active_from
       )
-      AND ($2::text IS NULL OR lower(share.branch_uuid::text) = lower($2))
+      AND ($2::uuid IS NULL OR share.branch_uuid = $2::uuid)
       AND ($3::uuid[] IS NULL OR share.branch_uuid = ANY($3::uuid[]))
 `;
 
 const WINDOW_SHARE_DELETE = `
     DELETE FROM main.shared_premiums share
     WHERE share.period = $1::date
-      AND ($2::text IS NULL OR lower(share.branch_uuid::text) = lower($2))
+      AND ($2::uuid IS NULL OR share.branch_uuid = $2::uuid)
       AND ($5::uuid[] IS NULL OR share.branch_uuid = ANY($5::uuid[]))
       AND share.active_from <= $4::date
       AND share.active_until >= $3::date
@@ -45,7 +45,7 @@ const WINDOW_SHARE_DELETE = `
           SELECT 1
           FROM main.premium_accruals accrual
           WHERE accrual.period = share.period
-            AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+            AND accrual.employee_uuid = share.employee_uuid
             AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
             AND share.active_from <= accrual.active_until
             AND share.active_until >= accrual.active_from
@@ -53,7 +53,7 @@ const WINDOW_SHARE_DELETE = `
       AND NOT EXISTS (
           SELECT 1
           FROM closed_staff_segments closed
-          WHERE closed.employee_uuid = lower(share.employee_uuid)
+          WHERE closed.employee_uuid = share.employee_uuid
             AND closed.branch_uuid = share.branch_uuid
             AND share.active_from <= closed.active_until
             AND share.active_until >= closed.active_from
@@ -67,7 +67,7 @@ const ACCRUAL_LINK = `
     WHERE share.period = $1::date
       AND share.accrual_id IS NULL
       AND accrual.period = share.period
-      AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+      AND accrual.employee_uuid = share.employee_uuid
       AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
       AND share.active_from <= accrual.active_until
       AND share.active_until >= accrual.active_from
@@ -201,7 +201,7 @@ async function readPremiumSql(file: string): Promise<string> {
 export async function readBranchSharedPremiums(period: string, branchId: string): Promise<Record<string, number>> {
     const rows = await db.query<{ id: string; activeFrom: string; premium: number | string }>(
         `
-        SELECT lower(share.employee_uuid) AS id,
+        SELECT share.employee_uuid AS id,
                to_char(share.active_from, 'YYYY-MM-DD') AS "activeFrom",
                share.premium::float8 AS premium
         FROM main.shared_premiums share
@@ -261,7 +261,7 @@ export async function readSharedPremiumAuthors(
         title: string;
     }>(
         `
-        SELECT lower(author.employee_uuid) AS id,
+        SELECT author.employee_uuid AS id,
                author.author_kind AS kind,
                to_char(author.active_from, 'YYYY-MM-DD') AS "activeFrom",
                author.sale::float8 AS sale,
@@ -278,12 +278,12 @@ export async function readSharedPremiumAuthors(
                    ELSE COALESCE(NULLIF(btrim(staff.title), ''), 'Должность не указана')
                END AS title
         FROM main.shared_premium_authors author
-        LEFT JOIN employees person ON lower(person.uuid::text) = lower(author.employee_uuid)
+        LEFT JOIN employees person ON person.uuid = author.employee_uuid
         LEFT JOIN LATERAL (
             SELECT promoter_row.name_employees, promoter_row.title
             FROM raw.hr_ktu_promouter promoter_row
             WHERE author.author_kind = 'promoter'
-              AND lower(promoter_row.employees_uuid::text) = lower(author.employee_uuid)
+              AND promoter_row.employees_uuid = author.employee_uuid
               AND promoter_row.branch_uuid = author.branch_uuid
             ORDER BY promoter_row.date_modified DESC
             LIMIT 1
@@ -292,7 +292,7 @@ export async function readSharedPremiumAuthors(
             SELECT hr.title
             FROM raw.hr_ktu hr
             WHERE author.author_kind = 'staff'
-              AND lower(hr.employees_uuid::text) = lower(author.employee_uuid)
+              AND hr.employees_uuid = author.employee_uuid
               AND hr.date_modified <= author.active_from
             ORDER BY hr.date_modified DESC
             LIMIT 1
@@ -332,7 +332,7 @@ export async function readBranchSharedPremiumRoleIds(branchId: string): Promise<
         `
         SELECT role_id AS "roleId"
         FROM branch_shared_premium_roles
-        WHERE lower(branch_uuid) = lower($1)
+        WHERE branch_uuid = $1::uuid
         ORDER BY role_id
         `,
         [branchId],
@@ -406,7 +406,7 @@ export async function saveBranchSharedPremiumRoles(
 async function replaceSharedPremiumRoles(query: PremiumQuery, branchId: string, roleIds: string[]): Promise<void> {
     const branch = branchId.toLowerCase();
     await query(
-        `DELETE FROM branch_shared_premium_roles WHERE lower(branch_uuid) = lower($1)`,
+        `DELETE FROM branch_shared_premium_roles WHERE branch_uuid = $1::uuid`,
         [branch],
     );
     if (roleIds.length === 0) {
@@ -415,7 +415,7 @@ async function replaceSharedPremiumRoles(query: PremiumQuery, branchId: string, 
     await query(
         `
         INSERT INTO branch_shared_premium_roles (branch_uuid, role_id)
-        SELECT $1, role_id
+        SELECT $1::uuid, role_id
         FROM unnest($2::text[]) AS role_id
         `,
         [branch, roleIds],
@@ -424,7 +424,7 @@ async function replaceSharedPremiumRoles(query: PremiumQuery, branchId: string, 
 
 async function readRoleSets(query: PremiumQuery): Promise<Map<string, Set<string>>> {
     const rows = await query<{ branch: string; roleId: string }>(`
-        SELECT lower(branch_uuid) AS branch,
+        SELECT branch_uuid AS branch,
                role_id AS "roleId"
         FROM branch_shared_premium_roles
     `);
@@ -635,7 +635,7 @@ async function insertShares(query: PremiumQuery, period: string, inserts: ShareI
             SELECT $1::date,
                    item.territory::uuid,
                    item.branch::uuid,
-                   item.employee,
+                   item.employee::uuid,
                    item.active_from::date,
                    item.active_until::date,
                    item.premium::numeric
@@ -666,7 +666,7 @@ async function replaceAuthors(
         `
         DELETE FROM main.shared_premium_authors author
         WHERE author.period = $1::date
-          AND ($2::text IS NULL OR lower(author.branch_uuid::text) = lower($2))
+          AND ($2::uuid IS NULL OR author.branch_uuid = $2::uuid)
           AND ($3::uuid[] IS NULL OR author.branch_uuid = ANY($3::uuid[]))
         `,
         [period, onlyBranch, listed],
@@ -681,7 +681,7 @@ async function replaceAuthors(
             )
             SELECT $1::date,
                    item.branch::uuid,
-                   item.employee,
+                   item.employee::uuid,
                    item.kind,
                    item.active_from::date,
                    item.sale::numeric,
@@ -727,10 +727,10 @@ async function readOutsideContributions(
     if (ids.length === 0) {
         return { pools: new Map(), authors: [] };
     }
-    await query(`CREATE TEMP TABLE IF NOT EXISTS outside_authors (id text PRIMARY KEY) ON COMMIT DROP`);
-    await query(`TRUNCATE outside_authors`);
+    await query(`DROP TABLE IF EXISTS outside_authors`);
+    await query(`CREATE TEMP TABLE outside_authors (id uuid PRIMARY KEY) ON COMMIT DROP`);
     await query(
-        `INSERT INTO outside_authors (id) SELECT DISTINCT item.id FROM unnest($1::text[]) AS item(id)`,
+        `INSERT INTO outside_authors (id) SELECT DISTINCT item.id::uuid FROM unnest($1::text[]) AS item(id)`,
         [ids.map((author) => author.id)],
     );
     await query(`ANALYZE outside_authors`);
@@ -744,15 +744,15 @@ async function readOutsideContributions(
         const selectSql = sourceSql.replaceAll(
             "sale.period = $1::timestamp",
             `sale.period = $1::timestamp AND (
-                lower(btrim(sale.author::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)
-                OR lower(btrim(sale.author2::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)
+                sale.author IN (SELECT outside_author.id FROM outside_authors outside_author)
+                OR sale.author2 IN (SELECT outside_author.id FROM outside_authors outside_author)
             )`,
         );
         const saleFile = file !== "release-premium-v1.sql";
         const rows = await query<{ branch: string; employee: string; kind: string; premium: number | string }>(
             `
-            SELECT lower(line.branch_uuid::text) AS branch,
-                   lower(line.employee_uuid) AS employee,
+            SELECT line.branch_uuid AS branch,
+                   line.employee_uuid AS employee,
                    line.author_kind AS kind,
                    COALESCE(SUM(line.premium), 0)::float8 AS premium
             FROM (
@@ -760,7 +760,7 @@ ${selectSql}
             ) line
             WHERE line.author_kind IN ('promoter', 'system')
               AND COALESCE(line.document_date::date, $1::date) <= $5::date
-            GROUP BY lower(line.branch_uuid::text), lower(line.employee_uuid), line.author_kind
+            GROUP BY line.branch_uuid, line.employee_uuid, line.author_kind
             `,
             [period, null, branchId, null, asOf, null, null],
         );
@@ -792,12 +792,12 @@ ${selectSql}
     }
     const kassaSelect = kassaSql.replaceAll(
         "operation.period = $1::timestamp",
-        `operation.period = $1::timestamp AND lower(btrim(operation.author::text)) IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        `operation.period = $1::timestamp AND operation.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
     );
     const kassaRows = await query<{ branch: string; employee: string; kind: string; premium: number | string }>(
         `
-        SELECT lower(line.branch_uuid::text) AS branch,
-               lower(line.employee_uuid) AS employee,
+        SELECT line.branch_uuid AS branch,
+               line.employee_uuid AS employee,
                line.author_kind AS kind,
                COALESCE(SUM(line.premium), 0)::float8 AS premium
         FROM (
@@ -805,7 +805,7 @@ ${kassaSelect}
         ) line
         WHERE line.author_kind IN ('promoter', 'system')
           AND COALESCE(line.document_date::date, $1::date) <= $5::date
-        GROUP BY lower(line.branch_uuid::text), lower(line.employee_uuid), line.author_kind
+        GROUP BY line.branch_uuid, line.employee_uuid, line.author_kind
         `,
         [period, null, branchId, null, asOf, null, null],
     );
@@ -870,14 +870,14 @@ async function readOverrides(query: PremiumQuery, period: string): Promise<Map<s
         -- Ближайшая ручная роль не позже месяца расчёта. automatic снова отдаёт роль правилу.
         SELECT branch, employee, role_id AS "roleId"
         FROM (
-            SELECT DISTINCT ON (lower(branch_uuid), lower(employee_uuid))
-                   lower(branch_uuid) AS branch,
-                   lower(employee_uuid) AS employee,
+            SELECT DISTINCT ON (branch_uuid, employee_uuid)
+                   branch_uuid AS branch,
+                   employee_uuid AS employee,
                    role_id,
                    automatic
             FROM branch_motivation_roles
             WHERE period <= $1::date
-            ORDER BY lower(branch_uuid), lower(employee_uuid), period DESC
+            ORDER BY branch_uuid, employee_uuid, period DESC
         ) latest
         WHERE NOT automatic
     `, [period]);
@@ -892,8 +892,8 @@ async function readOverrides(query: PremiumQuery, period: string): Promise<Map<s
 
 async function readTerritories(query: PremiumQuery): Promise<Map<string, string>> {
     const rows = await query<{ id: string; territory: string }>(`
-        SELECT lower(branch.uuid::text) AS id,
-               branch.territory_uuid::text AS territory
+        SELECT branch.uuid AS id,
+               branch.territory_uuid AS territory
         FROM branches branch
         WHERE NOT branch.deleted
           AND branch.territory_uuid IS NOT NULL
@@ -908,10 +908,10 @@ interface VersionRow extends StaffVersion {
 async function readVersions(query: PremiumQuery, period: string, asOf: string): Promise<VersionRow[]> {
     return query<VersionRow>(
         `
-        SELECT lower(staff.employees_uuid::text) AS id,
+        SELECT staff.employees_uuid AS id,
                COALESCE(NULLIF(btrim(employee.name), ''), 'Сотрудник без имени') AS name,
                to_char(staff.date_modified, 'YYYY-MM-DD') AS "changedOn",
-               lower(btrim(staff.branch_uuid::text)) AS "branchId",
+               staff.branch_uuid AS "branchId",
                COALESCE(staff.title, '') AS title,
                staff.ktu,
                staff.probation,
@@ -920,12 +920,12 @@ async function readVersions(query: PremiumQuery, period: string, asOf: string): 
                COALESCE(staff.status, '') AS status,
                staff.period = $1::date AS "inMonth"
         FROM raw.hr_ktu staff
-        LEFT JOIN employees employee ON lower(employee.uuid::text) = lower(staff.employees_uuid::text)
+        LEFT JOIN employees employee ON employee.uuid = staff.employees_uuid
         WHERE staff.date_modified >= ($1::date - INTERVAL '1 month')
           AND staff.date_modified < ($1::date + INTERVAL '1 month')
           AND staff.date_modified <= $2::date
-          AND lower(staff.employees_uuid::text) IN (
-              SELECT lower(person.employees_uuid::text)
+          AND staff.employees_uuid IN (
+              SELECT person.employees_uuid
               FROM raw.hr_ktu person
               WHERE person.period = $1::date
           )
@@ -941,8 +941,8 @@ interface TimesheetRow extends HourDay {
 async function readTimesheet(query: PremiumQuery, period: string, asOf: string): Promise<TimesheetRow[]> {
     const rows = await query<{ id: string; branchId: string; day: string; schedule: number | string | null; timesheet: number | string | null }>(
         `
-        SELECT lower(day.employees_uuid::text) AS id,
-               lower(day.branch_uuid::text) AS "branchId",
+        SELECT day.employees_uuid AS id,
+               day.branch_uuid AS "branchId",
                to_char(day.date, 'YYYY-MM-DD') AS day,
                day.norma_hour AS schedule,
                day.fact_hour AS timesheet
@@ -985,8 +985,8 @@ async function readPremiumDays(query: PremiumQuery, period: string, asOf: string
 async function dbRows(query: PremiumQuery, period: string, asOf: string): Promise<PremiumDayRow[]> {
     const rows = await query<{ branchId: string; id: string; day: string; indicator: string; amount: number | string }>(
         `
-        SELECT lower(day.branch_uuid::text) AS "branchId",
-               lower(day.employee_uuid) AS id,
+        SELECT day.branch_uuid AS "branchId",
+               day.employee_uuid AS id,
                to_char(day.day, 'YYYY-MM-DD') AS day,
                indicator.name AS indicator,
                day.premium::float8 AS amount
@@ -1025,8 +1025,8 @@ interface LockedSpan {
 async function readFrozenShares(query: PremiumQuery, period: string): Promise<FrozenShare[]> {
     const rows = await query<{ branchId: string; employeeId: string; activeFrom: string; premium: number | string }>(
         `
-        SELECT lower(share.branch_uuid::text) AS "branchId",
-               lower(share.employee_uuid) AS "employeeId",
+        SELECT share.branch_uuid AS "branchId",
+               share.employee_uuid AS "employeeId",
                to_char(share.active_from, 'YYYY-MM-DD') AS "activeFrom",
                share.premium::float8 AS premium
         FROM main.shared_premiums share
@@ -1035,7 +1035,7 @@ async function readFrozenShares(query: PremiumQuery, period: string): Promise<Fr
               SELECT 1
               FROM main.premium_accruals accrual
               WHERE accrual.period = share.period
-                AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+                AND accrual.employee_uuid = share.employee_uuid
                 AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
                 AND share.active_from <= accrual.active_until
                 AND share.active_until >= accrual.active_from
@@ -1055,8 +1055,8 @@ async function readFrozenShares(query: PremiumQuery, period: string): Promise<Fr
 async function readRetainedShares(query: PremiumQuery, period: string, from: string, until: string): Promise<FrozenShare[]> {
     const rows = await query<{ branchId: string; employeeId: string; activeFrom: string; premium: number | string }>(
         `
-        SELECT lower(share.branch_uuid::text) AS "branchId",
-               lower(share.employee_uuid) AS "employeeId",
+        SELECT share.branch_uuid AS "branchId",
+               share.employee_uuid AS "employeeId",
                to_char(share.active_from, 'YYYY-MM-DD') AS "activeFrom",
                share.premium::float8 AS premium
         FROM main.shared_premiums share
@@ -1068,7 +1068,7 @@ async function readRetainedShares(query: PremiumQuery, period: string, from: str
                   SELECT 1
                   FROM main.premium_accruals accrual
                   WHERE accrual.period = share.period
-                    AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+                    AND accrual.employee_uuid = share.employee_uuid
                     AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
                     AND share.active_from <= accrual.active_until
                     AND share.active_until >= accrual.active_from
@@ -1076,7 +1076,7 @@ async function readRetainedShares(query: PremiumQuery, period: string, from: str
               OR EXISTS (
                   SELECT 1
                   FROM closed_staff_segments closed
-                  WHERE closed.employee_uuid = lower(share.employee_uuid)
+                  WHERE closed.employee_uuid = share.employee_uuid
                     AND closed.branch_uuid = share.branch_uuid
                     AND share.active_from <= closed.active_until
                     AND share.active_until >= closed.active_from
@@ -1097,8 +1097,8 @@ async function readRetainedShares(query: PremiumQuery, period: string, from: str
 async function readClosedSpans(query: PremiumQuery): Promise<LockedSpan[]> {
     return query<LockedSpan>(
         `
-        SELECT lower(employee_uuid) AS "employeeId",
-               lower(branch_uuid::text) AS "branchId",
+        SELECT employee_uuid AS "employeeId",
+               branch_uuid AS "branchId",
                to_char(active_from, 'YYYY-MM-DD') AS "from",
                to_char(active_until, 'YYYY-MM-DD') AS "until"
         FROM closed_staff_segments

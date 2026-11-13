@@ -56,7 +56,7 @@ ${selectSql}
 export async function readBranchReleasePremiumDays(period: string, branchId: string): Promise<{ id: string; day: string; amount: number }[]> {
     const rows = await db.query<{ id: string; day: string; amount: number | string }>(
         `
-        SELECT lower(day.employee_uuid) AS id,
+        SELECT day.employee_uuid AS id,
                to_char(day.day, 'YYYY-MM-DD') AS day,
                day.premium::float8 AS amount
         FROM main.basket_premium_days day
@@ -93,7 +93,7 @@ export interface ReleasePremiumDetail {
 }
 
 interface ReleaseDetailRow {
-    categoryCode: string;
+    categoryCode: string | null;
     categoryTitle: string;
     quantityTariff: number | string;
     volumeTariff: number | string;
@@ -142,8 +142,8 @@ export async function readReleasePremiumDetail(
 ${selectSql}
             ) line
         )
-        SELECT matched.category_code AS "categoryCode",
-               COALESCE(category.name, NULLIF(matched.category_code, ''), 'Без категории') AS "categoryTitle",
+        SELECT matched.category_code::text AS "categoryCode",
+               COALESCE(category.name, 'Без категории') AS "categoryTitle",
                matched.quantity_tariff AS "quantityTariff",
                matched.volume_tariff AS "volumeTariff",
                matched.item_count AS "itemCount",
@@ -155,10 +155,7 @@ ${selectSql}
                matched.product_name AS "productName"
         FROM matched
         LEFT JOIN product_categories category
-            ON category.uuid = CASE
-                WHEN matched.category_code ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                    THEN matched.category_code::uuid
-            END
+            ON category.uuid = matched.category_code
         `,
         [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
@@ -168,7 +165,7 @@ ${selectSql}
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
         return {
-            id: `${row.categoryCode}:${documentId}:${index}`,
+            id: `${row.categoryCode ?? ""}:${documentId}:${index}`,
             categoryTitle: row.categoryTitle.trim() || "Без категории",
             calculation: calculationLabel(row),
             amount: finiteNumber(row.premium) ?? 0,

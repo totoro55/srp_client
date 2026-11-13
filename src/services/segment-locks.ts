@@ -21,7 +21,7 @@ export async function prepareClosedSegments(
     await query(`DROP TABLE IF EXISTS closed_staff_segments`);
     await query(`
         CREATE TEMP TABLE closed_staff_segments (
-            employee_uuid TEXT NOT NULL,
+            employee_uuid UUID NOT NULL,
             branch_uuid UUID NOT NULL,
             active_from DATE NOT NULL,
             active_until DATE NOT NULL,
@@ -32,18 +32,18 @@ export async function prepareClosedSegments(
     const rows = await query<{ lines: number }>(
         `
         WITH versions AS (
-            SELECT DISTINCT ON (lower(staff.employees_uuid::text), staff.date_modified)
-                   lower(staff.employees_uuid::text) AS employee_uuid,
+            SELECT DISTINCT ON (staff.employees_uuid, staff.date_modified)
+                   staff.employees_uuid AS employee_uuid,
                    staff.date_modified,
-                   lower(btrim(staff.branch_uuid::text)) AS branch_uuid,
+                   staff.branch_uuid,
                    btrim(COALESCE(staff.title, '')) AS title,
                    btrim(COALESCE(staff.status, '')) AS status
             FROM raw.hr_ktu staff
             WHERE staff.employees_uuid IS NOT NULL
               AND staff.date_modified IS NOT NULL
               AND staff.date_modified <= $1::date
-              AND btrim(staff.branch_uuid::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            ORDER BY lower(staff.employees_uuid::text), staff.date_modified, staff.period DESC NULLS LAST
+              AND staff.branch_uuid IS NOT NULL
+            ORDER BY staff.employees_uuid, staff.date_modified, staff.period DESC NULLS LAST
         ),
         events AS (
             SELECT version.employee_uuid,
@@ -70,7 +70,7 @@ export async function prepareClosedSegments(
         inserted AS (
             INSERT INTO closed_staff_segments (employee_uuid, branch_uuid, active_from, active_until, reason)
             SELECT event.employee_uuid,
-                   event.branch_uuid::uuid,
+                   event.branch_uuid,
                    GREATEST(month.month_start::date, event.opened_on),
                    LEAST((month.month_start::date + INTERVAL '1 month' - INTERVAL '1 day')::date, (event.event_on - 1)),
                    event.reason
@@ -130,7 +130,7 @@ export async function lockStaffSegments(
                 SELECT 1
                 FROM main.premium_accruals accrual
                 WHERE accrual.period = date_trunc('month', segment.active_from)::date
-                  AND lower(accrual.employee_uuid) = segment.employee_uuid
+                  AND accrual.employee_uuid = segment.employee_uuid
                   AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = segment.branch_uuid)
                   AND accrual.active_from <= segment.active_until
                   AND accrual.active_until >= segment.active_from
@@ -179,7 +179,7 @@ export async function lockStaffSegments(
         WHERE day.accrual_id IS NULL
           AND accrual.lock_reason <> ''
           AND accrual.period = day.period
-          AND lower(accrual.employee_uuid) = lower(day.employee_uuid)
+          AND accrual.employee_uuid = day.employee_uuid
           AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = day.branch_uuid)
           AND day.day BETWEEN accrual.active_from AND accrual.active_until
         `,
@@ -192,7 +192,7 @@ export async function lockStaffSegments(
         WHERE share.accrual_id IS NULL
           AND accrual.lock_reason <> ''
           AND accrual.period = share.period
-          AND lower(accrual.employee_uuid) = lower(share.employee_uuid)
+          AND accrual.employee_uuid = share.employee_uuid
           AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
           AND share.active_from <= accrual.active_until
           AND share.active_until >= accrual.active_from

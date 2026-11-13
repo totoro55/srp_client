@@ -18,14 +18,14 @@ function workedAssignmentsSql(employeeIdSql: string, periodSql: string): string 
                    LEAD(assignment.started) OVER (ORDER BY assignment.started, assignment.branch_id) AS ended
             FROM (
                 SELECT DISTINCT ON (staff.date_modified)
-                       lower(btrim(staff.branch_uuid::text)) AS branch_id,
+                       staff.branch_uuid AS branch_id,
                        staff.date_modified AS started,
                        btrim(COALESCE(staff.status, '')) AS status
                 FROM raw.hr_ktu staff
                 WHERE ${employeeIdSql} IS NOT NULL
-                  AND lower(staff.employees_uuid::text) = ${employeeIdSql}
+                  AND staff.employees_uuid = ${employeeIdSql}
                   AND staff.date_modified IS NOT NULL
-                  AND btrim(staff.branch_uuid::text) ~* '${BRANCH_UUID}'
+                  AND staff.branch_uuid IS NOT NULL
                 ORDER BY staff.date_modified, staff.period DESC NULLS LAST
             ) assignment
         ) version
@@ -41,14 +41,14 @@ EXISTS (
     FROM main.basket_premium_days day
     WHERE day.period = $3::date
       AND day.branch_uuid = branch.uuid
-      AND lower(day.employee_uuid) = lower(home.employee_id)
+      AND day.employee_uuid = home.employee_id
 )
 OR EXISTS (
     SELECT 1
     FROM main.shared_premiums share
     WHERE share.period = $3::date
       AND share.branch_uuid = branch.uuid
-      AND lower(share.employee_uuid) = lower(home.employee_id)
+      AND share.employee_uuid = home.employee_id
 )
 `;
 
@@ -56,7 +56,7 @@ export const CABINET_HOME_SQL = `
 LEFT JOIN LATERAL (
     SELECT employee.branch_uuid,
            employee.territory_uuid,
-           lower(employee.uuid::text) AS employee_id
+           employee.uuid AS employee_id
     FROM employees employee
     WHERE lower(employee.login) = lower($2)
       AND NOT employee.deleted
@@ -78,7 +78,7 @@ export const CABINET_SCOPE_SQL = `
                     OR 'granted' = ANY($1::text[])
                     OR 'territory' = ANY($1::text[])
                 )
-                AND lower(branch.uuid::text) IN (
+                AND branch.uuid IN (
                     SELECT assignment.branch_id
                     FROM (${workedAssignmentsSql("home.employee_id", "$3")}) assignment
                 )
@@ -177,8 +177,8 @@ export async function readBranchPlacement(access: AccessView, period: string): P
     const rows = await db.query<{ currentBranch: string | null; id: string | null }>(
         `
         WITH person AS (
-            SELECT lower(employee.uuid::text) AS employee_id,
-                   employee.branch_uuid::text AS current_branch
+            SELECT employee.uuid AS employee_id,
+                   employee.branch_uuid AS current_branch
             FROM employees employee
             WHERE lower(employee.login) = lower($1)
               AND NOT employee.deleted
@@ -188,14 +188,14 @@ export async function readBranchPlacement(access: AccessView, period: string): P
                worked.id
         FROM person
         LEFT JOIN LATERAL (
-            SELECT DISTINCT ON (lower(branch.uuid::text))
-                   branch.uuid::text AS id,
+            SELECT DISTINCT ON (branch.uuid)
+                   branch.uuid AS id,
                    assignment.started
             FROM (${workedAssignmentsSql("person.employee_id", "$2")}) assignment
             JOIN branches branch
-                ON lower(branch.uuid::text) = assignment.branch_id
+                ON branch.uuid = assignment.branch_id
                AND NOT branch.deleted
-            ORDER BY lower(branch.uuid::text), assignment.started DESC
+            ORDER BY branch.uuid, assignment.started DESC
         ) worked ON true
         ORDER BY worked.started DESC NULLS LAST, worked.id
         `,
@@ -217,7 +217,7 @@ export async function readBranchPlacement(access: AccessView, period: string): P
 export async function cabinetViewer(access: AccessView): Promise<{ employeeId: string | null; foreignDetail: boolean }> {
     const rows = await db.query<{ id: string | null }>(
         `
-        SELECT lower(employee.uuid::text) AS id
+        SELECT employee.uuid AS id
         FROM employees employee
         WHERE lower(employee.login) = lower($1)
           AND NOT employee.deleted
@@ -249,7 +249,7 @@ export async function branchVisible(access: AccessView, period: string, branchId
                   SELECT 1
                   FROM raw.hr_ktu staff
                   WHERE staff.period <= $3::date
-                    AND lower(staff.branch_uuid::text) = lower(branch.uuid::text)
+                    AND staff.branch_uuid = branch.uuid
               )
               OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
           )
@@ -284,7 +284,7 @@ export async function canReadEmployeeDetail(
         FROM main.shared_premium_authors author
         WHERE author.period = $1::date
           AND author.branch_uuid = $2::uuid
-          AND lower(author.employee_uuid) = lower($3)
+          AND author.employee_uuid = $3::uuid
         LIMIT 1
         `,
         [period, branchId, employeeId],

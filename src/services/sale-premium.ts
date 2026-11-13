@@ -34,14 +34,14 @@ const OPEN_DAYS_DELETE = `
           SELECT 1
           FROM main.premium_accruals accrual
           WHERE accrual.period = day.period
-            AND lower(accrual.employee_uuid) = lower(day.employee_uuid)
+            AND accrual.employee_uuid = day.employee_uuid
             AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = day.branch_uuid)
             AND day.day BETWEEN accrual.active_from AND accrual.active_until
       )
       AND NOT EXISTS (
           SELECT 1
           FROM closed_staff_segments closed
-          WHERE closed.employee_uuid = lower(day.employee_uuid)
+          WHERE closed.employee_uuid = day.employee_uuid
             AND closed.branch_uuid = day.branch_uuid
             AND day.day BETWEEN closed.active_from AND closed.active_until
       )
@@ -61,7 +61,7 @@ const ACCRUAL_LINK = `
       )
       AND day.accrual_id IS NULL
       AND accrual.period = day.period
-      AND lower(accrual.employee_uuid) = lower(day.employee_uuid)
+      AND accrual.employee_uuid = day.employee_uuid
       AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = day.branch_uuid)
       AND day.day BETWEEN accrual.active_from AND accrual.active_until
 `;
@@ -109,7 +109,7 @@ ${selectSql}
             SELECT 1
             FROM main.premium_accruals accrual
             WHERE accrual.period = priced_line.period
-              AND lower(accrual.employee_uuid) = lower(priced_line.employee_uuid)
+              AND accrual.employee_uuid = priced_line.employee_uuid
               AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = priced_line.branch_uuid)
               AND COALESCE(priced_line.document_date::date, priced_line.period)
                   BETWEEN accrual.active_from AND accrual.active_until
@@ -121,9 +121,9 @@ ${selectSql}
                 ON existing.period = priced_line.period
                AND existing.basket_id = basket.id
                AND existing.branch_uuid = priced_line.branch_uuid
-               AND lower(existing.employee_uuid) = lower(priced_line.employee_uuid)
+               AND existing.employee_uuid = priced_line.employee_uuid
                AND existing.day = COALESCE(priced_line.document_date::date, priced_line.period)
-            WHERE closed.employee_uuid = lower(priced_line.employee_uuid)
+            WHERE closed.employee_uuid = priced_line.employee_uuid
               AND closed.branch_uuid = priced_line.branch_uuid
               AND COALESCE(priced_line.document_date::date, priced_line.period)
                   BETWEEN closed.active_from AND closed.active_until
@@ -144,7 +144,7 @@ const PRICED_LINES = `
         period date,
         territory_uuid uuid,
         branch_uuid uuid,
-        employee_uuid text,
+        employee_uuid uuid,
         author_kind text,
         document_date timestamp,
         premium numeric
@@ -239,7 +239,7 @@ export async function premiumAccrualId(
         SELECT accrual.id
         FROM main.premium_accruals accrual
         WHERE accrual.period = $1::date
-          AND lower(accrual.employee_uuid) = lower(btrim($2))
+          AND accrual.employee_uuid = $2::uuid
           AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = $3::uuid)
           AND accrual.active_from <= $4::date
           AND accrual.active_until >= COALESCE($5::date, $4::date)
@@ -357,7 +357,7 @@ ${selectSql}
 export async function readBranchSalePremiumDays(period: string, branchId: string): Promise<{ id: string; day: string; amount: number }[]> {
     const rows = await db.query<{ id: string; day: string; amount: number | string }>(
         `
-        SELECT lower(day.employee_uuid) AS id,
+        SELECT day.employee_uuid AS id,
                to_char(day.day, 'YYYY-MM-DD') AS day,
                day.premium::float8 AS amount
         FROM main.basket_premium_days day
@@ -400,7 +400,7 @@ export interface SalePremiumDetail {
 
 interface PremiumDetailRow {
     axis: string;
-    code: string;
+    code: string | null;
     itemTitle: string;
     channel: string;
     baseMode: string;
@@ -490,7 +490,7 @@ ${selectSql}
             ) line
         )
         SELECT matched.code,
-               COALESCE(category.name, kind.name, matched.code) AS "itemTitle",
+               COALESCE(category.name, kind.name, matched.code::text, 'Без названия') AS "itemTitle",
                matched.channel,
                matched.base_mode AS "baseMode",
                matched.tariff,
@@ -504,16 +504,10 @@ ${selectSql}
         FROM matched
         LEFT JOIN product_categories category
             ON matched.axis = 'category'
-           AND category.uuid = CASE
-               WHEN matched.code ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                   THEN matched.code::uuid
-           END
+           AND category.uuid = matched.code
         LEFT JOIN product_kinds kind
             ON matched.axis = 'product_kind'
-           AND kind.uuid = CASE
-               WHEN matched.code ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                   THEN matched.code::uuid
-           END
+           AND kind.uuid = matched.code
         `,
         [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
@@ -527,7 +521,7 @@ ${selectSql}
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
         return {
-            id: `${row.code}:${documentId}:${index}`,
+            id: `${row.code ?? ""}:${documentId}:${index}`,
             channel: channelLabel(row.channel),
             categoryTitle: row.itemTitle.trim() || "Без названия",
             calculation: calculationLabel(row),

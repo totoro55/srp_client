@@ -54,18 +54,15 @@ rates AS (
 operation_hits AS (
     SELECT operation.*
     FROM raw.kassa_oper operation
-    WHERE $2::text IS NOT NULL
+    WHERE $2::uuid IS NOT NULL
       AND operation.period = $1::timestamp
-      AND operation.author IS NOT NULL
-      AND btrim(operation.author::text) <> ''
-      AND lower(btrim(operation.author::text)) = lower(btrim($2))
+      AND operation.author = $2::uuid
     UNION ALL
     SELECT operation.*
     FROM raw.kassa_oper operation
-    WHERE $2::text IS NULL
+    WHERE $2::uuid IS NULL
       AND operation.period = $1::timestamp
       AND operation.author IS NOT NULL
-      AND btrim(operation.author::text) <> ''
       AND (
           $4::date IS NULL
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
@@ -83,7 +80,7 @@ SELECT $1::date AS period,
        ROUND(operation.minute::numeric * rates.rate * COALESCE(coef.value, 1), 2) AS premium
 FROM operation_hits operation
 CROSS JOIN LATERAL (
-    SELECT NULLIF(lower(btrim(operation.author::text)), '') AS employee_uuid
+    SELECT operation.author AS employee_uuid
 ) issuer
 JOIN main.author_days author_day
     ON author_day.period = $1::date
@@ -91,10 +88,7 @@ JOIN main.author_days author_day
    AND author_day.day = COALESCE(operation.date::date, $1::date)
 CROSS JOIN LATERAL (
     SELECT CASE
-               WHEN author_day.author_kind = 'system'
-                    AND btrim(operation."Фирма"::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                   THEN btrim(operation."Фирма"::text)::uuid
-               WHEN author_day.author_kind = 'system' THEN NULL
+               WHEN author_day.author_kind = 'system' THEN operation."Фирма"
                ELSE author_day.branch_uuid
            END AS branch_uuid,
            author_day.author_kind

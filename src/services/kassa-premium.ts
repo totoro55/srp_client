@@ -39,7 +39,7 @@ export async function calculateKassaPremium(period: string, refreshSchedule = tr
 export async function readBranchKassaPremiumDays(period: string, branchId: string): Promise<{ id: string; day: string; amount: number }[]> {
     const rows = await db.query<{ id: string; day: string; amount: number | string }>(
         `
-        SELECT lower(day.employee_uuid) AS id,
+        SELECT day.employee_uuid AS id,
                to_char(day.day, 'YYYY-MM-DD') AS day,
                day.premium::float8 AS amount
         FROM main.basket_premium_days day
