@@ -1,3 +1,4 @@
+import { basketScriptIssue } from "@/lib/basket-scripts";
 import {
     isBasketStatus,
     isBasketVersionStatus,
@@ -74,6 +75,7 @@ interface VersionRow {
     status: string;
     settings: unknown;
     tariffAxis: string | null;
+    scriptId: string | null;
     publishedAt: Date | string | null;
     wikiArticleId: number | null;
     wikiArticleTitle: string | null;
@@ -165,6 +167,7 @@ export async function getBasket(id: number): Promise<BasketDetails | null> {
             version.status,
             version.settings,
             version.tariff_axis AS "tariffAxis",
+            version.script_id AS "scriptId",
             version.published_at AS "publishedAt",
             article.id AS "wikiArticleId",
             article.title AS "wikiArticleTitle"
@@ -477,13 +480,14 @@ export async function updateBasketVersion(
 ): Promise<BasketDetails> {
     try {
         await db.transaction(async (query) => {
-        const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown; tariffAxis: string | null; indicatorName: string }>(
+        const rows = await query<{ id: number; status: string; dataTable: string | null; settings: unknown; tariffAxis: string | null; scriptId: string | null; indicatorName: string }>(
             `
             SELECT v.id,
                    v.status,
                    v.data_table AS "dataTable",
                    v.settings,
                    v.tariff_axis AS "tariffAxis",
+                   v.script_id AS "scriptId",
                    i.name AS "indicatorName"
             FROM basket_versions v
             JOIN baskets b ON b.id = v.basket_id
@@ -531,6 +535,11 @@ export async function updateBasketVersion(
                 throw new BasketRuleError(400, boundsIssue);
             }
         }
+        const scriptId = input.scriptId;
+        const scriptProblem = basketScriptIssue(version.indicatorName, scriptId, settings.parameters);
+        if (scriptProblem) {
+            throw new BasketRuleError(400, scriptProblem);
+        }
         if (correctLocked && version.dataTable && !parametersEqual(currentSettings.parameters, settings.parameters)) {
             await syncPublishedParameterColumns(
                 query,
@@ -565,10 +574,11 @@ export async function updateBasketVersion(
                 description = $3,
                 settings = $4::jsonb,
                 tariff_axis = $5,
-                wiki_article_id = $6
+                script_id = $6,
+                wiki_article_id = $7
             WHERE id = $1
             `,
-            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings)), settings.tariffAxis, input.wikiArticleId]
+            [versionId, input.name, input.description, JSON.stringify(versionSettingsPayload(settings)), settings.tariffAxis, scriptId, input.wikiArticleId]
         );
         await insertVersionChange(query, versionId, {
             comment: input.comment,
@@ -606,9 +616,9 @@ export async function setBasketVersionStatus(
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const versions = await query<{ name: string; versionNo: number; status: string; settings: unknown; dataTable: string | null; tariffAxis: string | null }>(
+        const versions = await query<{ name: string; versionNo: number; status: string; settings: unknown; dataTable: string | null; tariffAxis: string | null; scriptId: string | null }>(
             `
-            SELECT name, version_no AS "versionNo", status, settings, data_table AS "dataTable", tariff_axis AS "tariffAxis"
+            SELECT name, version_no AS "versionNo", status, settings, data_table AS "dataTable", tariff_axis AS "tariffAxis", script_id AS "scriptId"
             FROM basket_versions
             WHERE id = $2 AND basket_id = $1
             FOR UPDATE
@@ -636,6 +646,10 @@ export async function setBasketVersionStatus(
             const boundsIssue = tariffBoundIssue(publishedSettings);
             if (boundsIssue) {
                 throw new BasketRuleError(400, boundsIssue);
+            }
+            const scriptProblem = basketScriptIssue(basket.indicatorName, version.scriptId, publishedSettings.parameters);
+            if (scriptProblem) {
+                throw new BasketRuleError(400, scriptProblem);
             }
         }
 
@@ -693,15 +707,15 @@ export async function openBasketDraft(
             throw new BasketRuleError(404, "Корзина не найдена");
         }
 
-        const sources = await query<{ versionNo: number; name: string; settings: unknown; tariffAxis: string | null; wikiArticleId: number | null }>(
+        const sources = await query<{ versionNo: number; name: string; settings: unknown; tariffAxis: string | null; scriptId: string | null; wikiArticleId: number | null }>(
             sourceVersionId
                 ? `
-                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", wiki_article_id AS "wikiArticleId"
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", script_id AS "scriptId", wiki_article_id AS "wikiArticleId"
                 FROM basket_versions
                 WHERE basket_id = $1 AND id = $2
                 `
                 : `
-                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", wiki_article_id AS "wikiArticleId"
+                SELECT version_no AS "versionNo", name, settings, tariff_axis AS "tariffAxis", script_id AS "scriptId", wiki_article_id AS "wikiArticleId"
                 FROM basket_versions
                 WHERE basket_id = $1
                 ORDER BY version_no DESC
@@ -722,8 +736,8 @@ export async function openBasketDraft(
         const name = `Версия ${versionNo}`;
         const created = await query<{ id: number }>(
             `
-            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings, tariff_axis, wiki_article_id)
-            VALUES ($1, $2, 'draft', $3, '', $4::jsonb, $5, $6)
+            INSERT INTO basket_versions (basket_id, version_no, status, name, description, settings, tariff_axis, script_id, wiki_article_id)
+            VALUES ($1, $2, 'draft', $3, '', $4::jsonb, $5, $6, $7)
             RETURNING id
             `,
             [
@@ -732,6 +746,7 @@ export async function openBasketDraft(
                 name,
                 JSON.stringify(source.settings ?? {}),
                 isTariffAxis(source.tariffAxis) ? source.tariffAxis : null,
+                source.scriptId,
                 source.wikiArticleId,
             ]
         );
@@ -889,6 +904,7 @@ function toVersion(row: VersionRow, changes: VersionChangeRow[]): BasketVersion 
         status: row.status,
         settings,
         publishedAt: toIso(row.publishedAt),
+        scriptId: row.scriptId,
         wikiArticle: row.wikiArticleId === null ? null : { id: row.wikiArticleId, title: row.wikiArticleTitle?.trim() || "Статья" },
         changes: changes.map((change) => ({
             id: change.id,

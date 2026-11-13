@@ -7,7 +7,8 @@
 -- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
 -- Уже входит в формулу:
---   корзина с показателем «Выдача товара», подключённая версия 1, таблица release_v1;
+--   корзина с показателем «Выдача товара», версия со скриптом release.quantity-volume;
+--   ставки quantity и volume читаются из таблицы этой версии;
 --   выдача засчитывается author2, пустой author2 не входит;
 --   поиск сотрудника повторяет условие индекса raw.sale_period_author2_idx,
 --   иначе планировщик читает весь месяц;
@@ -27,7 +28,8 @@ WITH issue_basket AS (
 ),
 connected AS (
     SELECT latest.territory_uuid,
-           latest.version_id
+           latest.version_id,
+           version.data_table
     FROM (
         SELECT DISTINCT ON (connection.territory_uuid)
                connection.territory_uuid,
@@ -39,25 +41,22 @@ connected AS (
         ORDER BY connection.territory_uuid, connection.period DESC
     ) latest
     JOIN basket_versions version ON version.id = latest.version_id
-    WHERE version.version_no = 1
-      AND version.data_table = 'release_v1'
+    WHERE version.script_id = 'release.quantity-volume'
 ),
 rates AS (
-    SELECT connected.territory_uuid,
-           connected.version_id,
+    SELECT tariff.territory_uuid,
+           tariff.version_id,
            tariff.quantity,
            tariff.volume
-    FROM connected
-    JOIN LATERAL (
-        SELECT params.quantity,
-               params.volume
-        FROM basket_data.release_v1 params
-        WHERE params.territory_uuid = connected.territory_uuid
-          AND params.period <= $1::date
-        ORDER BY params.period DESC
-        LIMIT 1
-    ) tariff ON tariff.quantity IS NOT NULL
-            AND tariff.volume IS NOT NULL
+    FROM (
+        SELECT connected.territory_uuid,
+               connected.version_id,
+               basket_data.connection_number(connected.data_table, 'quantity', connected.territory_uuid, $1::date) AS quantity,
+               basket_data.connection_number(connected.data_table, 'volume', connected.territory_uuid, $1::date) AS volume
+        FROM connected
+    ) tariff
+    WHERE tariff.quantity IS NOT NULL
+      AND tariff.volume IS NOT NULL
 ),
 issue_hits AS (
     SELECT sale.*

@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAccess } from "@/hooks/useAccess";
+import { basketScriptById, basketScriptIssue, basketScriptsFor } from "@/lib/basket-scripts";
 import { notifySuccess } from "@/lib/notify";
 import { useRequiredFields } from "@/lib/required-fields";
 import { FormAlert } from "@/components/form-alert";
@@ -80,6 +81,7 @@ export function BasketDetail() {
     const [parameters, setParameters] = useState<BasketParameter[]>([]);
     const [coefficients, setCoefficients] = useState<BasketCoefficient[]>([]);
     const [tariffAxis, setTariffAxis] = useState<TariffAxis | null>(null);
+    const [scriptId, setScriptId] = useState<string | null>(null);
     const [coefficientEditor, setCoefficientEditor] = useState<{ index: number | null; coefficient: BasketCoefficient | null } | null>(null);
     const [coefficientToRemove, setCoefficientToRemove] = useState<{ index: number; title: string } | null>(null);
     const [parameterEditor, setParameterEditor] = useState<{ index: number | null; parameter: BasketParameter | null } | null>(null);
@@ -110,6 +112,7 @@ export function BasketDetail() {
         || !parametersEqual(parameters, selected.settings.parameters)
         || !coefficientsEqual(coefficients, selected.settings.coefficients)
         || tariffAxis !== selected.settings.tariffAxis
+        || scriptId !== selected.scriptId
     );
     const salesBasket = basket?.indicatorName === SALES_INDICATOR_NAME;
     const axisMissing = salesBasket && selected !== null && selected.settings.tariffAxis === null;
@@ -119,9 +122,16 @@ export function BasketDetail() {
     const draftBoundsIssue = salesBasket && selected !== null && !structureLocked
         ? tariffBoundIssue({ parameters, coefficients, tariffAxis })
         : null;
+    const scriptChoices = basket ? basketScriptsFor(basket.indicatorName) : [];
+    const savedScriptIssue = basket && selected && scriptChoices.length > 0
+        ? basketScriptIssue(basket.indicatorName, selected.scriptId, selected.settings.parameters)
+        : null;
+    const draftScriptIssue = basket && selected && scriptChoices.length > 0
+        ? basketScriptIssue(basket.indicatorName, scriptId, parameters)
+        : null;
 
     function availabilityDisabled(target: VersionAvailability): boolean {
-        return saving || versionDirty || ((axisMissing || boundsIssue !== null) && target !== "off");
+        return saving || versionDirty || ((axisMissing || boundsIssue !== null || savedScriptIssue !== null) && target !== "off");
     }
 
     function availabilityTitle(target: VersionAvailability): string | undefined {
@@ -133,6 +143,9 @@ export function BasketDetail() {
         }
         if (boundsIssue && target !== "off") {
             return boundsIssue;
+        }
+        if (savedScriptIssue && target !== "off") {
+            return savedScriptIssue;
         }
         return undefined;
     }
@@ -156,6 +169,7 @@ export function BasketDetail() {
         setParameters(version?.settings.parameters ?? []);
         setCoefficients(version?.settings.coefficients ?? []);
         setTariffAxis(version?.settings.tariffAxis ?? null);
+        setScriptId(version?.scriptId ?? null);
         setCoefficientEditor(null);
         setCoefficientToRemove(null);
         setParameterEditor(null);
@@ -375,10 +389,14 @@ export function BasketDetail() {
                 return;
             }
         }
+        if (draftScriptIssue) {
+            setError(draftScriptIssue);
+            return;
+        }
         await mutate(
             `/api/admin/baskets/${basketId}/versions/${selected.id}`,
             "PATCH",
-            { name: versionName, description: versionDescription, comment: versionComment, wikiArticleId: wikiArticle?.id ?? null, settings: { parameters, coefficients, tariffAxis } },
+            { name: versionName, description: versionDescription, comment: versionComment, wikiArticleId: wikiArticle?.id ?? null, scriptId, settings: { parameters, coefficients, tariffAxis } },
             selected.id,
             undefined,
             "Версия сохранена",
@@ -725,6 +743,10 @@ export function BasketDetail() {
                                             <span className="w-full truncate text-xs text-muted-foreground">
                                                 {version.settings.tariffAxis ? tariffAxisTitle(version.settings.tariffAxis) : "Вид расчета не выбран"}
                                             </span>
+                                        ) : scriptChoices.length > 0 ? (
+                                            <span className="w-full truncate text-xs text-muted-foreground">
+                                                {basketScriptById(version.scriptId ?? "")?.title ?? "Скрипт не выбран"}
+                                            </span>
                                         ) : null}
                                         {version.description.trim() ? (
                                             <span className="w-full truncate text-xs text-muted-foreground">{version.description}</span>
@@ -1044,6 +1066,32 @@ export function BasketDetail() {
                                                 : "Категория или вид изделия. После публикации вид расчета меняет администратор или новая версия."}
                                     </p>
                                     {draftBoundsIssue ? <p className="text-xs text-destructive">{draftBoundsIssue}</p> : null}
+                                </div>
+                            ) : null}
+                            {scriptChoices.length > 0 ? (
+                                <div className="flex flex-col gap-1.5">
+                                    <Label htmlFor="version-script">Скрипт расчёта</Label>
+                                    <Select
+                                        value={scriptId ?? "none"}
+                                        disabled={!canWrite || saving}
+                                        onValueChange={(value) => setScriptId(value && value !== "none" ? value : null)}
+                                    >
+                                        <SelectTrigger id="version-script" className="w-full">
+                                            <SelectValue placeholder="Без скрипта">
+                                                {(value) => typeof value === "string" ? basketScriptById(value)?.title ?? "Без скрипта" : "Без скрипта"}
+                                            </SelectValue>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">Без скрипта</SelectItem>
+                                            {scriptChoices.map((script) => (
+                                                <SelectItem key={script.id} value={script.id}>{script.title}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        {basketScriptById(scriptId ?? "")?.summary ?? "Без скрипта версия хранит параметры и не пишет премию. Скрипт читает параметры из таблицы этой версии."}
+                                    </p>
+                                    {draftScriptIssue ? <p className="text-xs text-destructive">{draftScriptIssue}</p> : null}
                                 </div>
                             ) : null}
                             <div className="flex flex-col gap-1.5">

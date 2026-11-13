@@ -1,11 +1,10 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { DETAIL_STATEMENT_TIMEOUT_MS } from "@/lib/detail-timeout";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
+import { readIndicatorScriptSql } from "@/services/basket-script-sql";
 import { assignmentSql } from "@/services/promoter-premium";
 import { canReadEmployeeDetail } from "@/services/premium-access";
 import { premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
@@ -26,7 +25,7 @@ export async function calculateReleasePremium(period: string, refreshSchedule = 
         throw new SalePremiumError(closedPeriodMessage(policy));
     }
     const asOf = premiumAsOf(run);
-    const selectSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const selectSql = await releaseSelectSql();
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
         await query("SET LOCAL statement_timeout = 0");
@@ -38,7 +37,7 @@ export async function calculateReleasePremium(period: string, refreshSchedule = 
 }
 
 export async function sumDocumentBranchReleasePremium(period: string, branchId: string, employeeId: string): Promise<number> {
-    const selectSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const selectSql = await releaseSelectSql();
     const rows = await db.query<{ premium: number | string }>(
         `
         SELECT COALESCE(SUM(line.premium), 0)::float8 AS premium
@@ -123,7 +122,7 @@ export async function readReleasePremiumDetail(
         return null;
     }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, RELEASE_INDICATOR);
-    const sourceSql = (await readFile(path.join(process.cwd(), "src/services/release-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const sourceSql = await releaseSelectSql();
     const selectSql = await assignmentSql(sourceSql, period, employeeId);
     const rows = await db.queryWithTimeout<ReleaseDetailRow>(
         `
@@ -178,6 +177,14 @@ ${selectSql}
         rowLabel: "Категория",
         lines,
     };
+}
+
+async function releaseSelectSql(): Promise<string> {
+    const parts = await readIndicatorScriptSql(RELEASE_INDICATOR);
+    if (parts.length === 0) {
+        throw new SalePremiumError("Для выдачи не задан скрипт расчёта");
+    }
+    return parts.join("\nUNION ALL\n");
 }
 
 function calculationLabel(row: ReleaseDetailRow): string {

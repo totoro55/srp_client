@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { DETAIL_STATEMENT_TIMEOUT_MS } from "@/lib/detail-timeout";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import type { AccessView } from "@/server/authz/resolve-access";
@@ -7,6 +5,7 @@ import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 import { canReadEmployeeDetail } from "@/services/premium-access";
+import { readIndicatorScriptSql } from "@/services/basket-script-sql";
 import { premiumAccrualId, premiumAsOf, SalePremiumError, writeOpenPremiumDays, type PremiumRun } from "@/services/sale-premium";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
@@ -25,7 +24,7 @@ export async function calculateKassaPremium(period: string, refreshSchedule = tr
         throw new SalePremiumError(closedPeriodMessage(policy));
     }
     const asOf = premiumAsOf(run);
-    const selectSql = (await readFile(path.join(process.cwd(), "src/services/kassa-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const selectSql = await kassaSelectSql();
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
         await query("SET LOCAL statement_timeout = 0");
@@ -96,7 +95,7 @@ export async function readKassaPremiumDetail(
         return null;
     }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, KASSA_INDICATOR);
-    const selectSql = (await readFile(path.join(process.cwd(), "src/services/kassa-premium-v1.sql"), "utf8")).replace(/;\s*$/, "");
+    const selectSql = await kassaSelectSql();
     const rows = await db.queryWithTimeout<KassaDetailRow>(
         `
         SELECT to_char(line.document_date, 'DD.MM.YYYY') AS day,
@@ -128,6 +127,14 @@ ${selectSql}
             }];
         }),
     };
+}
+
+async function kassaSelectSql(): Promise<string> {
+    const parts = await readIndicatorScriptSql(KASSA_INDICATOR);
+    if (parts.length === 0) {
+        throw new SalePremiumError("Для кассы не задан скрипт расчёта");
+    }
+    return parts.join("\nUNION ALL\n");
 }
 
 function finiteNumber(value: number | string): number | null {

@@ -7,7 +7,8 @@
 -- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
 --
 -- Уже входит в формулу:
---   корзина с показателем «Кассовые операции», подключённая версия 1, таблица kassa_v1;
+--   корзина с показателем «Кассовые операции», версия со скриптом kassa.minutes;
+--   ставка kassa_oper читается из таблицы этой версии;
 --   минуты × тариф kassa_oper × kassa_coef филиала, коэффициента нет — единица;
 --   нет тарифа или минут — строка не входит;
 --   филиал — филиал автора из main.author_days на дату документа;
@@ -23,7 +24,8 @@ WITH kassa_basket AS (
 ),
 connected AS (
     SELECT latest.territory_uuid,
-           latest.version_id
+           latest.version_id,
+           version.data_table
     FROM (
         SELECT DISTINCT ON (connection.territory_uuid)
                connection.territory_uuid,
@@ -35,21 +37,17 @@ connected AS (
         ORDER BY connection.territory_uuid, connection.period DESC
     ) latest
     JOIN basket_versions version ON version.id = latest.version_id
-    WHERE version.version_no = 1
-      AND version.data_table = 'kassa_v1'
+    WHERE version.script_id = 'kassa.minutes'
 ),
 rates AS (
-    SELECT connected.territory_uuid,
-           tariff.kassa_oper AS rate
-    FROM connected
-    JOIN LATERAL (
-        SELECT params.kassa_oper
-        FROM basket_data.kassa_v1 params
-        WHERE params.territory_uuid = connected.territory_uuid
-          AND params.period <= $1::date
-        ORDER BY params.period DESC
-        LIMIT 1
-    ) tariff ON tariff.kassa_oper IS NOT NULL
+    SELECT tariff.territory_uuid,
+           tariff.rate
+    FROM (
+        SELECT connected.territory_uuid,
+               basket_data.connection_number(connected.data_table, 'kassa_oper', connected.territory_uuid, $1::date) AS rate
+        FROM connected
+    ) tariff
+    WHERE tariff.rate IS NOT NULL
 ),
 operation_hits AS (
     SELECT operation.*

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
+import { basketScriptById } from "@/lib/basket-scripts";
 import {
     parseVersionCoefficients,
     parseVersionComment,
@@ -62,13 +63,28 @@ function readDraft(body: unknown): BasketVersionDraftInput | { error: string } {
     if (typeof wikiArticleId !== "number" && wikiArticleId !== null) {
         return wikiArticleId;
     }
+    const scriptId = readScriptId(record.scriptId);
+    if (typeof scriptId !== "string" && scriptId !== null) {
+        return scriptId;
+    }
     return {
         name,
         description,
         comment,
         settings: { parameters: parsed.parameters, coefficients: coefficients.coefficients, tariffAxis },
         wikiArticleId,
+        scriptId,
     };
+}
+
+function readScriptId(value: unknown): string | null | { error: string } {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+    if (typeof value !== "string" || !basketScriptById(value)) {
+        return { error: "Выберите скрипт расчёта из списка" };
+    }
+    return value;
 }
 
 function parseWikiArticleId(value: unknown): number | null | { error: string } {

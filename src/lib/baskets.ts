@@ -193,6 +193,8 @@ export interface BasketVersion {
     status: BasketVersionStatus;
     settings: VersionSettings;
     publishedAt: string | null;
+    /** Пусто — версия не пишет снимок премии. */
+    scriptId: string | null;
     wikiArticle: BasketVersionArticle | null;
     changes: BasketVersionChange[];
 }
@@ -236,6 +238,7 @@ export interface BasketVersionDraftInput {
     comment: string;
     settings: VersionSettings;
     wikiArticleId: number | null;
+    scriptId: string | null;
 }
 
 export function settingsSchemaTitle(code: string): string {
