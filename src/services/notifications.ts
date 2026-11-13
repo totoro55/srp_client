@@ -60,6 +60,7 @@ export async function notifyRecalc(input: {
     body: string;
     href: string;
     runId: number;
+    sourceKey?: string;
 }): Promise<void> {
     const actor = input.actor.trim();
     if (actor === "" || actor.toLowerCase() === "airflow") {
@@ -70,7 +71,7 @@ export async function notifyRecalc(input: {
         INSERT INTO app_notifications (recipient, kind, body, href, source_key)
         VALUES ($1, 'recalc', $2, $3, $4)
         `,
-        [actor, input.body, input.href, `recalc:${input.runId}`],
+        [actor, input.body, input.href, input.sourceKey ?? `recalc:${input.runId}`],
     );
 }
 

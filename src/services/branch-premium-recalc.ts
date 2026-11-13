@@ -52,7 +52,7 @@ export async function recalculateBranchPremiums(input: {
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 
-export type MonthRecalcTarget = "baskets" | BasketUpdateKind;
+export type MonthRecalcTarget = "baskets" | Exclude<BasketUpdateKind, "tariffs">;
 
 /** Одна корзина, все корзины или общая премия за выбранные даты. Ручной запуск всех корзин в конце считает общую премию. Штатное расписание собирается только для корзин за весь месяц. */
 export async function recalculateMonthSelection(input: RecalcWindow & {

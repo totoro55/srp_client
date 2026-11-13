@@ -19,6 +19,7 @@ import { formatRecalcConditions, monthLastDay, recalcWindowError, wholeMonth, ty
 import { recalcReasonPhrase } from "@/lib/recalc-reasons";
 import { JournalActorLabel } from "@/components/recalc-journal";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
+import { SaleTariffRecalcDialog } from "./SaleTariffRecalcDialog";
 import type { BasketCalculationBoard, BasketRecalcRun, BasketUpdate, BasketUpdateKind, BasketUpdateMonth, SharedPremiumMonth } from "@/services/basket-updates";
 import { ApiResponse } from "@/types/api";
 
@@ -46,8 +47,10 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
     const session = useSession();
     const access = useAccess();
     const canRecalculate = access.has("recalc:write");
+    const canEditTariffs = access.has("baskets:connect");
     const [error, setError] = useState<string | null>(null);
     const [form, setForm] = useState<MonthForm | null>(null);
+    const [tariffPeriod, setTariffPeriod] = useState<string | null>(null);
 
     const months = useMemo(() => groupMonths(initial.baskets), [initial.baskets]);
     const [period, setPeriod] = useState(() => months.find((month) => month.open)?.period ?? months[0]?.period ?? "");
@@ -105,8 +108,10 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
                         months={months}
                         shared={sharedMonth(initial.shared, selected.period)}
                         canRecalculate={canRecalculate}
+                        canEditTariffs={canEditTariffs}
                         onPeriod={setPeriod}
                         onOpenForm={openForm}
+                        onOpenTariffs={() => setTariffPeriod(selected.period)}
                     />
                 )}
             </div>
@@ -121,6 +126,16 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
                 onChange={setForm}
                 onSubmit={submitForm}
             />
+            <SaleTariffRecalcDialog
+                period={tariffPeriod ?? ""}
+                open={tariffPeriod !== null}
+                actor={session.data?.user?.username ?? ""}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setTariffPeriod(null);
+                    }
+                }}
+            />
         </>
     );
 }
@@ -130,15 +145,19 @@ function MonthBoard({
     months,
     shared,
     canRecalculate,
+    canEditTariffs,
     onPeriod,
     onOpenForm,
+    onOpenTariffs,
 }: {
     month: MonthGroup;
     months: MonthGroup[];
     shared: SharedPremiumMonth;
     canRecalculate: boolean;
+    canEditTariffs: boolean;
     onPeriod: (period: string) => void;
     onOpenForm: (period: string, target: MonthForm["target"], label?: string) => void;
+    onOpenTariffs: () => void;
 }) {
     return (
         <section className="flex flex-col gap-4">
@@ -165,6 +184,11 @@ function MonthBoard({
                     {month.open ? (
                         <Button type="button" size="sm" variant="outline" disabled={!canRecalculate} onClick={() => onOpenForm(month.period, "baskets")}>
                             Все корзины
+                        </Button>
+                    ) : null}
+                    {month.open && canEditTariffs ? (
+                        <Button type="button" size="sm" variant="outline" onClick={onOpenTariffs}>
+                            Тарифы продажи
                         </Button>
                     ) : null}
                 </div>

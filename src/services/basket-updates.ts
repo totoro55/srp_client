@@ -7,7 +7,7 @@ import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 import { notifyRecalc } from "@/services/notifications";
 
-export type BasketUpdateKind = "sale" | "release" | "kassa" | "shared";
+export type BasketUpdateKind = "sale" | "release" | "kassa" | "shared" | "tariffs";
 export type RecalcRunStatus = "running" | "success" | "failed";
 export type { RecalcScopeLevel };
 
@@ -69,7 +69,7 @@ export interface BasketUpdate {
     id: number;
     name: string;
     indicator: string;
-    kind: Exclude<BasketUpdateKind, "shared">;
+    kind: Exclude<BasketUpdateKind, "shared" | "tariffs">;
     months: BasketUpdateMonth[];
     runs: BasketRecalcRun[];
 }
@@ -79,7 +79,7 @@ export interface BasketCalculationBoard {
     shared: SharedPremiumMonth[];
 }
 
-const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared">> = {
+const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared" | "tariffs">> = {
     "Продажа товара": "sale",
     "Выдача товара": "release",
     "Кассовые операции": "kassa",
@@ -290,7 +290,7 @@ function sharedMonths(
 }
 
 const JOURNAL_PAGE = 40;
-const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "shared"];
+const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "shared", "tariffs"];
 const JOURNAL_STATUSES: RecalcRunStatus[] = ["running", "success", "failed"];
 
 export function parseJournalBasket(value: string | null | undefined): BasketUpdateKind | null {
@@ -387,6 +387,9 @@ function journalWordMatches(token: string): string[] {
     }
     if (hit("премия")) {
         parts.push("run.basket_kind = 'shared'");
+    }
+    if (hit("тариф")) {
+        parts.push("run.basket_kind = 'tariffs'");
     }
     if (hit("ошибка")) {
         parts.push("run.status = 'failed'");
@@ -535,12 +538,12 @@ export async function finishPremiumRecalc(id: number, lines: number, options?: {
     }
 }
 
-export async function failPremiumRecalc(id: number, error: unknown, route?: string | null): Promise<void> {
+export async function failPremiumRecalc(id: number, error: unknown, route?: string | null, options?: { announce?: boolean }): Promise<void> {
     const described = typeof error === "string"
         ? describeRecalcError(new Error(error), route)
         : describeRecalcError(error, route);
     const rows = await db.query<RunNoticeRow>(FAIL_RETURNING, [id, described.summary, JSON.stringify(described.detail)]);
-    if (rows[0]) {
+    if (rows[0] && options?.announce !== false) {
         await announceFinished(rows[0], "failed", described.summary);
     }
 }
@@ -751,7 +754,10 @@ async function announceFinished(row: RunNoticeRow, outcome: "success" | "failed"
         const scope = labels.get(row.id) ?? formatScopeLabel(scopeLevel(row.scope_level), []);
         const reason = recalcReasonPhrase(row.trigger_name, row.origin);
         const month = formatMonth(row.period);
-        const lead = outcome === "success" ? "Пересчёт премии завершён" : "Пересчёт премии остановился";
+        const tariffs = row.basket_kind === "tariffs";
+        const lead = tariffs
+            ? outcome === "success" ? "Тарифы продажи записаны" : "Тарифы продажи не записаны"
+            : outcome === "success" ? "Пересчёт премии завершён" : "Пересчёт премии остановился";
         const detail = outcome === "failed" && error !== "" ? ` ${error}` : "";
         await notifyRecalc({
             actor: row.actor,
