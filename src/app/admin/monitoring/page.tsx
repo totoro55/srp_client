@@ -6,8 +6,7 @@ import { getRequestAccess } from "@/server/authz/resolve-access";
 import { parseJournalDateRange, parseJournalQuery } from "@/lib/journal-query";
 import { parseJournalBasket, parseJournalStatus, readBasketUpdates, readRewriteJournal } from "@/services/basket-updates";
 import { readAutoSchedules } from "@/services/recalc-schedule";
-import { readLoadMonitor, readSettingsMonitor } from "@/services/service-monitor";
-import { LoadMonitor } from "./_components/LoadMonitor";
+import { readSettingsMonitor } from "@/services/service-monitor";
 import { MonitorTabs, parseMonitorTab } from "./_components/MonitorTabs";
 import { RecalcScheduleForm } from "./_components/RecalcScheduleForm";
 import { RewriteJournal } from "./_components/RewriteJournal";
@@ -39,7 +38,6 @@ export default async function MonitoringPage({
         <AdminPageShell>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
                 <MonitorTabs active={tab} />
-                {tab === "loads" ? <LoadMonitor data={await readLoadMonitor()} /> : null}
                 {tab === "settings" ? <SettingsMonitor data={await readSettingsMonitor(period)} /> : null}
                 {tab === "calculations" ? <BasketUpdates initial={await readBasketUpdates()} /> : null}
                 {tab === "journal" ? <RewriteJournal initial={await readRewriteJournal(null, basket, status, query, dates.from, dates.to)} basket={basket} status={status} query={query} from={dates.from} to={dates.to} preview={preview} /> : null}

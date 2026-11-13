@@ -2,7 +2,6 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-    { id: "loads", label: "Загрузка" },
     { id: "settings", label: "Настройки" },
     { id: "calculations", label: "Расчёты" },
     { id: "journal", label: "Журнал" },
@@ -13,10 +12,10 @@ export type MonitorTab = (typeof TABS)[number]["id"];
 
 export function parseMonitorTab(value: string | string[] | undefined): MonitorTab {
     const raw = Array.isArray(value) ? value[0] : value;
-    if (raw === "settings" || raw === "calculations" || raw === "loads" || raw === "journal" || raw === "schedule") {
+    if (raw === "settings" || raw === "calculations" || raw === "journal" || raw === "schedule") {
         return raw;
     }
-    return "loads";
+    return "settings";
 }
 
 export function MonitorTabs({ active }: { active: MonitorTab }) {
