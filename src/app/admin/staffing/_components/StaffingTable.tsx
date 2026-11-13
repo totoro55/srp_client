@@ -315,7 +315,7 @@ export function StaffingTable({
                         ) : null}
                         {groups.length === 1 ? (
                             <p className="flex flex-wrap items-center gap-x-1 text-[11px] text-muted-foreground sm:text-xs">
-                                <span className="inline-flex items-center gap-1 text-foreground">
+                                <span className="group/copy inline-flex items-center gap-1 text-foreground">
                                     {groups[0].branchName}
                                     <CopyUuidButton id={groups[0].branchId} kind="филиала" />
                                 </span>
@@ -545,7 +545,7 @@ function BranchRows({
                     <TableCell colSpan={COLUMN_COUNT} className="bg-muted py-1.5">
                         <div className="sticky left-0 flex w-[100cqw] flex-wrap items-baseline gap-x-3 gap-y-0.5 whitespace-normal">
                             <span className="text-muted-foreground">{group.territoryName}</span>
-                            <span className="inline-flex items-center gap-1 font-medium">
+                            <span className="group/copy inline-flex items-center gap-1 font-medium">
                                 {group.branchName}
                                 <CopyUuidButton id={group.branchId} kind="филиала" />
                             </span>
@@ -620,7 +620,7 @@ function StayRows({
                         ) : <span className="size-4 shrink-0" />}
                         <span className="min-w-0">
                             {first ? (
-                                <span className="inline-flex items-center gap-1">
+                                <span className="group/copy inline-flex items-center gap-1">
                                     {row.name}
                                     <CopyUuidButton id={row.employeeId} kind="сотрудника" />
                                 </span>
@@ -685,7 +685,7 @@ function CopyUuidButton({ id, kind }: { id: string; kind: "филиала" | "с
     return (
         <button
             type="button"
-            className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+            className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground opacity-0 pointer-events-none hover:text-foreground group-hover/copy:pointer-events-auto group-hover/copy:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
             aria-label={label}
             title={label}
             onClick={() => {
