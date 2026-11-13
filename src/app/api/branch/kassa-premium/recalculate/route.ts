@@ -39,8 +39,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<K
             await audit(actor, "kassa-premium.recalculate", `${period}; ${origin}; ${trigger}`);
             return NextResponse.json({ success: true, data: { period, lines } });
         } catch (error) {
-            const message = error instanceof SalePremiumError ? error.message : "Не удалось пересчитать премию за кассовые операции";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, error, "/api/branch/kassa-premium/recalculate");
             throw error;
         }
     } catch (error) {

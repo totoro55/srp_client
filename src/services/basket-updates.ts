@@ -1,5 +1,7 @@
 import { escapeJournalLike, journalSearchTokens } from "@/lib/journal-query";
+import { describeRecalcError, parseRecalcErrorDetail, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { formatScopeLabel, recalcReasonPhrase, recalcTriggersMatching, type RecalcScopeLevel } from "@/lib/recalc-reasons";
+import { decideAccess } from "@/server/authz/match-access";
 import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
@@ -18,6 +20,14 @@ export class PremiumRecalcBusyError extends Error {
     }
 }
 
+export interface JournalActor {
+    login: string;
+    name: string | null;
+    role: string | null;
+    branch: string | null;
+    title: string | null;
+}
+
 export interface BasketRecalcRun {
     id: number;
     kind: BasketUpdateKind;
@@ -25,9 +35,11 @@ export interface BasketRecalcRun {
     origin: "system" | "manual";
     trigger: string;
     actor: string;
+    actorPerson: JournalActor | null;
     lines: number | null;
     status: RecalcRunStatus;
     error: string;
+    errorDetail: RecalcErrorDetail | null;
     createdAt: string;
     finishedAt: string | null;
     scopeLevel: RecalcScopeLevel;
@@ -101,6 +113,7 @@ interface RunRow {
     lines: number | null;
     status: RecalcRunStatus;
     error_message: string;
+    error_detail: unknown;
     created_at: Date;
     finished_at: Date | null;
     scope_level: RecalcScopeLevel;
@@ -118,6 +131,7 @@ const RUN_COLUMNS = `
     lines,
     status,
     error_message,
+    error_detail,
     created_at,
     finished_at,
     scope_level,
@@ -300,6 +314,16 @@ function journalSearchSql(params: unknown[], tokens: string[]): string {
             `run.actor ILIKE '%' || ${like} || '%' ESCAPE '\\'`,
             `run.conditions ILIKE '%' || ${like} || '%' ESCAPE '\\'`,
             `run.error_message ILIKE '%' || ${like} || '%' ESCAPE '\\'`,
+            `run.error_detail::text ILIKE '%' || ${like} || '%' ESCAPE '\\'`,
+            `EXISTS (
+                SELECT 1
+                FROM employees employee
+                WHERE lower(employee.login) = lower(run.actor)
+                  AND (
+                      employee.name ILIKE '%' || ${like} || '%' ESCAPE '\\'
+                      OR employee.title ILIKE '%' || ${like} || '%' ESCAPE '\\'
+                  )
+            )`,
             `run.trigger_name ILIKE '%' || ${like} || '%' ESCAPE '\\'`,
             `run.trigger_name = ANY(${triggers}::text[])`,
             `EXISTS (
@@ -366,6 +390,24 @@ function journalWordMatches(token: string): string[] {
     }
     if (hit("ошибка")) {
         parts.push("run.status = 'failed'");
+    }
+    if (hit("таймаут")) {
+        parts.push("run.error_detail->>'type' = 'timeout'");
+    }
+    if (hit("соединен")) {
+        parts.push("run.error_detail->>'type' = 'connection'");
+    }
+    if (hit("база данных") || hit("sqlstate") || needle === "sql") {
+        parts.push("run.error_detail->>'type' = 'database'");
+    }
+    if (hit("занято")) {
+        parts.push("run.error_detail->>'type' = 'busy'");
+    }
+    if (hit("внутренняя")) {
+        parts.push("run.error_detail->>'type' = 'internal'");
+    }
+    if (hit("проверка")) {
+        parts.push("run.error_detail->>'type' = 'check'");
     }
     if (hit("готово")) {
         parts.push("run.status = 'success'");
@@ -493,11 +535,13 @@ export async function finishPremiumRecalc(id: number, lines: number, options?: {
     }
 }
 
-export async function failPremiumRecalc(id: number, message: string): Promise<void> {
-    const text = message.replace(/\s+/g, " ").trim().slice(0, 500);
-    const rows = await db.query<RunNoticeRow>(FAIL_RETURNING, [id, text]);
+export async function failPremiumRecalc(id: number, error: unknown, route?: string | null): Promise<void> {
+    const described = typeof error === "string"
+        ? describeRecalcError(new Error(error), route)
+        : describeRecalcError(error, route);
+    const rows = await db.query<RunNoticeRow>(FAIL_RETURNING, [id, described.summary, JSON.stringify(described.detail)]);
     if (rows[0]) {
-        await announceFinished(rows[0], "failed", text);
+        await announceFinished(rows[0], "failed", described.summary);
     }
 }
 
@@ -548,6 +592,7 @@ const FAIL_RETURNING = `
     UPDATE premium_recalc_runs
     SET status = 'failed',
         error_message = $2,
+        error_detail = $3::jsonb,
         finished_at = NOW()
     WHERE id = $1
       AND status = 'running'
@@ -573,8 +618,50 @@ interface NameRow {
 const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" });
 
 async function withScope(rows: RunRow[]): Promise<BasketRecalcRun[]> {
-    const labels = await scopeLabels(rows);
-    return rows.map((row) => toRun(row, labels.get(row.id) ?? formatScopeLabel(scopeLevel(row.scope_level), [])));
+    const [labels, people] = await Promise.all([
+        scopeLabels(rows),
+        journalActors(rows.map((row) => row.actor)),
+    ]);
+    return rows.map((row) => toRun(
+        row,
+        labels.get(row.id) ?? formatScopeLabel(scopeLevel(row.scope_level), []),
+        people.get(row.actor.trim().toLowerCase()) ?? null,
+    ));
+}
+
+async function journalActors(actors: string[]): Promise<Map<string, JournalActor>> {
+    const logins = [...new Set(actors.map((actor) => actor.trim()).filter((actor) => actor !== ""))];
+    if (logins.length === 0) {
+        return new Map();
+    }
+    const rows = await db.query<{ login: string; name: string; title: string; branch: string | null }>(
+        `
+        SELECT DISTINCT ON (lower(employee.login))
+               employee.login,
+               employee.name,
+               employee.title,
+               branch.name AS branch
+        FROM employees employee
+        LEFT JOIN branches branch ON branch.uuid = employee.branch_uuid
+        WHERE lower(employee.login) = ANY($1::text[])
+        ORDER BY lower(employee.login), employee.deleted
+        `,
+        [logins.map((login) => login.toLowerCase())],
+    );
+    const byLogin = new Map(rows.map((row) => [row.login.toLowerCase(), row]));
+    const people = await Promise.all(logins.map(async (login) => {
+        const employee = byLogin.get(login.toLowerCase());
+        const decision = await decideAccess(login, employee?.title ?? "");
+        const person: JournalActor = {
+            login,
+            name: employee && employee.name.trim() !== "" ? employee.name.trim() : null,
+            role: decision.role?.name ?? (decision.source === "conflict" ? "Конфликт правил" : null),
+            branch: employee?.branch?.trim() || null,
+            title: employee && employee.title.trim() !== "" ? employee.title.trim() : null,
+        };
+        return [login.toLowerCase(), person] as const;
+    }));
+    return new Map(people);
 }
 
 async function scopeLabels(rows: Array<{ id: number; scope_level: RecalcScopeLevel; scope_ids: unknown }>): Promise<Map<number, string>> {
@@ -616,7 +703,7 @@ async function lookupNames(table: "branches" | "territories", ids: string[]): Pr
     return new Map(rows.map((row) => [row.id.toLowerCase(), row.name]));
 }
 
-function toRun(row: RunRow, scopeLabel: string): BasketRecalcRun {
+function toRun(row: RunRow, scopeLabel: string, actorPerson: JournalActor | null): BasketRecalcRun {
     return {
         id: row.id,
         kind: row.basket_kind,
@@ -624,9 +711,11 @@ function toRun(row: RunRow, scopeLabel: string): BasketRecalcRun {
         origin: row.origin,
         trigger: row.trigger_name,
         actor: row.actor,
+        actorPerson: row.actor.trim() === "" ? null : actorPerson,
         lines: row.lines,
         status: row.status,
         error: row.error_message,
+        errorDetail: parseRecalcErrorDetail(row.error_detail),
         createdAt: row.created_at.toISOString(),
         finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
         scopeLevel: scopeLevel(row.scope_level),

@@ -48,7 +48,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<M
         }
         const origin = loader ? "system" as const : "manual" as const;
         const trigger = origin === "system" ? systemTrigger(body?.trigger) : "manual";
-        await recalculateMonthSelection({ period, from, until, target, dismissal, transfer, title, actor, trigger, origin });
+        await recalculateMonthSelection({ period, from, until, target, dismissal, transfer, title, actor, trigger, origin, route: "/api/branch/month-premium/recalculate" });
         await audit(actor, "month-premium.recalculate", `${period}; ${from}; ${until}; ${target}; ${origin}; ${trigger}`);
         return NextResponse.json({ success: true, data: { period } });
     } catch (error) {

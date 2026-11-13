@@ -16,6 +16,7 @@ function enqueueSaleTariffPremium(
     territoryUuid: string,
     period: string,
     origin: "manual" | "system" = "manual",
+    route = "/api/rrs/cards/[territoryUuid]/tariff-exceptions",
 ): Promise<StartedPremiumRecalc | null> {
     return enqueuePremiumScopes({
         period,
@@ -25,6 +26,7 @@ function enqueueSaleTariffPremium(
         territoryId: territoryUuid.toLowerCase(),
         territoryKinds: ["sale"],
         branchKinds: new Map(),
+        route,
     });
 }
 
@@ -653,7 +655,7 @@ export async function saveRecalculatedTariffs(
         throw new RrsRuleError(400, EMPTY_TARIFF_SAVE_MESSAGE);
     }
     await writeCalculatedSaleTariffs(territoryUuid, period, versionId, axis, chosen, rows);
-    const recalc = await enqueueSaleTariffPremium(access.username, territoryUuid, period);
+    const recalc = await enqueueSaleTariffPremium(access.username, territoryUuid, period, "manual", "/api/rrs/cards/[territoryUuid]/tariff-recalc");
     return { saved: rows.length, recalc };
 }
 
@@ -713,7 +715,7 @@ export async function calculateAndSaveSaleTariffs(territoryUuid: string, period:
     }
     await writeCalculatedSaleTariffs(territoryUuid, period, connection.versionId, axis, reference, rows);
     try {
-        await enqueueSaleTariffPremium("system", territoryUuid, period, "system");
+        await enqueueSaleTariffPremium("system", territoryUuid, period, "system", "авторасчёт тарифов");
     } catch (error) {
         console.error("Премия после авторасчёта тарифов не поставлена в очередь", error);
     }

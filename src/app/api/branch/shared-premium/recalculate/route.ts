@@ -39,8 +39,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<S
             await audit(actor, "shared-premium.recalculate", `${period}; ${origin}; ${trigger}`);
             return NextResponse.json({ success: true, data: { period, lines } });
         } catch (error) {
-            const message = error instanceof SalePremiumError ? error.message : "Не удалось пересчитать общую премию";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, error, "/api/branch/shared-premium/recalculate");
             throw error;
         }
     } catch (error) {

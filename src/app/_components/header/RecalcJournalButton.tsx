@@ -229,6 +229,10 @@ function sameEvents(left: BasketRecalcRun[], right: BasketRecalcRun[]): boolean 
             && event.status === other.status
             && event.finishedAt === other.finishedAt
             && event.lines === other.lines
-            && event.error === other.error;
+            && event.error === other.error
+            && event.actorPerson?.name === other.actorPerson?.name
+            && event.actorPerson?.role === other.actorPerson?.role
+            && event.actorPerson?.branch === other.actorPerson?.branch
+            && event.actorPerson?.title === other.actorPerson?.title;
     });
 }

@@ -398,7 +398,7 @@ export async function saveBranchSharedPremiumRoles(
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : "Не удалось пересчитать общую премию";
-        await failPremiumRecalc(runId, message);
+        await failPremiumRecalc(runId, error, "/api/branch/shared-premium-roles");
         return { recalculated: false, shares: {}, recalcMessage: message };
     }
 }

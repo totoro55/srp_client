@@ -39,9 +39,9 @@ export async function runAutomaticBaskets(now = new Date()): Promise<void> {
     };
     try {
         console.info(`Автозагрузка премии за ${period}: штатное расписание, затем корзины`);
-        await recalculateMonthSelection({ ...input, target: "baskets" });
+        await recalculateMonthSelection({ ...input, target: "baskets", route: "автозагрузка" });
         console.info(`Автозагрузка премии за ${period}: общая премия`);
-        await recalculateMonthSelection({ ...input, target: "shared" });
+        await recalculateMonthSelection({ ...input, target: "shared", route: "автозагрузка" });
         await rememberBasketAutoRun(day, period, "success", "");
         console.info(`Автозагрузка премии за ${period} записана в журнал`);
     } catch (error) {

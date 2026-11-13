@@ -85,5 +85,6 @@ function enqueueStmPremium(actor: string): Promise<StartedPremiumRecalc | null> 
         territoryId: null,
         territoryKinds: ["sale"],
         branchKinds: new Map(),
+        route: "/api/admin/stm-brands",
     });
 }

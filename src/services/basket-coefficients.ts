@@ -228,6 +228,7 @@ export async function saveBranchCoefficients(
         territoryId: territoryUuid.toLowerCase(),
         territoryKinds: [],
         branchKinds,
+        route: "/api/rrs/cards/[territoryUuid]/coefficients",
     });
 }
 

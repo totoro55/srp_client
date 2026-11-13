@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useAccess } from "@/hooks/useAccess";
 import { formatRecalcConditions, monthLastDay, recalcWindowError, wholeMonth, type RecalcWindow } from "@/lib/recalc-window";
 import { recalcReasonPhrase } from "@/lib/recalc-reasons";
+import { JournalActorLabel } from "@/components/recalc-journal";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
 import type { BasketCalculationBoard, BasketRecalcRun, BasketUpdate, BasketUpdateKind, BasketUpdateMonth, SharedPremiumMonth } from "@/services/basket-updates";
 import { ApiResponse } from "@/types/api";
@@ -244,7 +245,7 @@ function SnapshotCard({
             </p>
             <p className="text-sm text-muted-foreground">
                 {calculatedAt ? whenFormat.format(new Date(calculatedAt)) : "Снимок ещё не записывался"}
-                {lastRun ? ` · ${runCaption(lastRun)}` : ""}
+                {lastRun ? <RunCaption run={lastRun} /> : null}
             </p>
             <div className="mt-auto flex items-center justify-end gap-1">
                 {open ? (
@@ -456,19 +457,24 @@ function groupMonths(baskets: BasketUpdate[]): MonthGroup[] {
     });
 }
 
-function runCaption(run: BasketRecalcRun): string {
+function RunCaption({ run }: { run: BasketRecalcRun }) {
     if (run.status === "running") {
-        return "идёт пересчёт";
+        return " · идёт пересчёт";
     }
     if (run.status === "failed") {
-        return "последний запуск не записался";
+        return " · последний запуск не записался";
     }
     const reason = recalcReasonPhrase(run.trigger, run.origin);
     const scope = run.scopeLabel ? `${run.scopeLabel}, ` : "";
     if (run.origin === "manual") {
-        return `${scope}${reason}, ${run.actor}`;
+        return (
+            <>
+                {` · ${scope}${reason}, `}
+                <JournalActorLabel actor={run.actor} person={run.actorPerson} />
+            </>
+        );
     }
-    return `система, ${scope}${reason}`;
+    return ` · система, ${scope}${reason}`;
 }
 
 function formatMonth(period: string): string {

@@ -251,8 +251,7 @@ async function runJob(job: Job): Promise<void> {
             const lines = await calculate(kind, job.period, branches);
             await finishPremiumRecalc(runId, lines, { announce: index === kinds.length - 1 });
         } catch (error) {
-            const message = error instanceof Error ? error.message : "Не удалось пересчитать премию";
-            await failPremiumRecalc(runId, job.route ? `${message} · ${job.route}` : message);
+            await failPremiumRecalc(runId, error, job.route || "очередь пересчёта");
             throw error;
         }
     }

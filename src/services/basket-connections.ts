@@ -292,6 +292,7 @@ export async function saveRrsMonth(
         territoryId: territoryUuid.toLowerCase(),
         territoryKinds,
         branchKinds: new Map(),
+        route: "/api/rrs/connections",
     });
 }
 

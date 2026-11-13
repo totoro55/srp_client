@@ -39,8 +39,7 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<R
             await audit(actor, "release-premium.recalculate", `${period}; ${origin}; ${trigger}`);
             return NextResponse.json({ success: true, data: { period, lines } });
         } catch (error) {
-            const message = error instanceof SalePremiumError ? error.message : "Не удалось пересчитать премию за выдачу";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, error, "/api/branch/release-premium/recalculate");
             throw error;
         }
     } catch (error) {

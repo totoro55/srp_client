@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon } from "lucide-react";
+import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
 import { syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
     TraceCollapsible,
     TraceCollapsibleContent,
@@ -14,7 +16,7 @@ import {
     TraceLine,
     TraceTitle,
 } from "@/components/ui/trace";
-import type { BasketRecalcRun, BasketUpdateKind } from "@/services/basket-updates";
+import type { BasketRecalcRun, BasketUpdateKind, JournalActor } from "@/services/basket-updates";
 
 const PROCESS_GAP_MS = 2 * 60 * 1000;
 
@@ -26,8 +28,10 @@ interface JournalOperation {
     origin: BasketRecalcRun["origin"] | null;
     trigger: string;
     actor: string;
+    actorPerson: JournalActor | null;
     lines: number | null;
     error: string;
+    errorDetail: RecalcErrorDetail | null;
     startedAt: string | null;
     finishedAt: string | null;
     scope: string;
@@ -221,6 +225,11 @@ function OperationCells({ operation, showScope }: { operation: JournalOperation;
                 {time !== null ? <span className="tabular-nums">{time}</span> : null}
                 {operation.status === "running" && operation.startedAt !== null ? <Elapsed startedAt={operation.startedAt} /> : null}
                 {showScope && operation.scope !== "" ? <span className="mt-0.5 block">{operation.scope}</span> : null}
+                {actorLabel(operation) !== "" ? (
+                    <span className="mt-0.5 block">
+                        <JournalActorLabel actor={operation.actor} person={operation.actorPerson} focusable={false} />
+                    </span>
+                ) : null}
             </span>
         </>
     );
@@ -257,7 +266,7 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
         <div className="flex flex-col gap-1">
             {operation.conditions !== "" ? <p>{operation.conditions}</p> : null}
             {operation.scope !== "" ? <p>{operation.scope}</p> : null}
-            <p>{originTitle(operation)}</p>
+            <OriginLine operation={operation} />
             <p>{`Начало в ${timeFormat.format(started)}.`}</p>
             {operation.status === "running" ? (
                 <p>
@@ -271,9 +280,7 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
             {operation.status === "failed" && finished !== null && spent !== null ? (
                 <p>{`Остановилась в ${timeFormat.format(finished)}, прошло ${spent}.`}</p>
             ) : null}
-            {operation.status === "failed" && operation.error !== "" ? (
-                <p className="text-destructive">{operation.error}</p>
-            ) : null}
+            {operation.status === "failed" ? <ErrorReport operation={operation} /> : null}
         </div>
     );
 }
@@ -458,6 +465,9 @@ function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): 
     if (fresh.some((event) => event.status === "failed")) {
         return [];
     }
+    const person = plan.actor === ""
+        ? null
+        : events.find((event) => event.actor.toLowerCase() === plan.actor.toLowerCase())?.actorPerson ?? null;
     return plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind)).map((kind) => ({
         key: `queue-${plan.period}-${kind}`,
         kind,
@@ -466,8 +476,10 @@ function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): 
         origin: "manual" as const,
         trigger: plan.reason,
         actor: plan.actor,
+        actorPerson: person,
         lines: null,
         error: "",
+        errorDetail: null,
         startedAt: null,
         finishedAt: null,
         scope: plan.scopeLabel,
@@ -485,8 +497,10 @@ function toOperation(event: BasketRecalcRun): JournalOperation {
         origin: event.origin,
         trigger: event.trigger,
         actor: event.actor,
+        actorPerson: event.actorPerson,
         lines: event.lines,
         error: event.error,
+        errorDetail: event.errorDetail,
         startedAt: event.createdAt,
         finishedAt: event.finishedAt,
         scope: event.scopeLabel,
@@ -529,13 +543,108 @@ function continues(operations: JournalOperation[], next: JournalOperation): bool
     return gap >= -1000 && gap <= PROCESS_GAP_MS;
 }
 
-function originTitle(operation: JournalOperation): string {
+function actorLabel(operation: JournalOperation): string {
+    return operation.actorPerson?.name?.trim() || operation.actor;
+}
+
+function OriginLine({ operation }: { operation: JournalOperation }) {
     const reason = recalcReasonLabel(operation.trigger, operation.origin);
+    const person = actorLabel(operation);
     if (operation.origin === "manual") {
-        return operation.actor === "" ? `${reason}, вручную` : `${reason}, вручную, ${operation.actor}`;
+        return (
+            <p>
+                {person === "" ? `${reason}, вручную` : <>{reason}, вручную, <ActorName operation={operation} /></>}
+            </p>
+        );
     }
     const phrase = recalcReasonPhrase(operation.trigger, operation.origin);
-    return operation.actor === "" ? `Система, ${phrase}` : `Система, ${phrase}, ${operation.actor}`;
+    return (
+        <p>
+            {person === "" ? `Система, ${phrase}` : <>Система, {phrase}, <ActorName operation={operation} /></>}
+        </p>
+    );
+}
+
+function ActorName({ operation }: { operation: JournalOperation }) {
+    return <JournalActorLabel actor={operation.actor} person={operation.actorPerson} />;
+}
+
+export function JournalActorLabel({
+    actor,
+    person,
+    focusable = true,
+}: {
+    actor: string;
+    person: JournalActor | null;
+    focusable?: boolean;
+}) {
+    const label = person?.name?.trim() || actor;
+    const hover = person !== null && (person.role !== null || person.branch !== null || person.title !== null);
+    if (!hover || person === null) {
+        return <span>{label}</span>;
+    }
+    return (
+        <Tooltip>
+            <TooltipTrigger render={<span tabIndex={focusable ? 0 : undefined} className="cursor-help underline decoration-dotted underline-offset-4" />}>
+                {label}
+            </TooltipTrigger>
+            <TooltipContent className="flex! w-72 max-w-xs flex-col items-start! gap-1 whitespace-normal text-left">
+                <span className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+                    <span>Логин</span>
+                    <span className="break-all">{person.login}</span>
+                    <span>Роль</span>
+                    <span>{person.role ?? "не назначена"}</span>
+                    <span>Филиал</span>
+                    <span>{person.branch ?? "не указан"}</span>
+                    <span>Должность</span>
+                    <span>{person.title ?? "не указана"}</span>
+                </span>
+            </TooltipContent>
+        </Tooltip>
+    );
+}
+
+function ErrorReport({ operation }: { operation: JournalOperation }) {
+    const detail = operation.errorDetail;
+    if (!detail) {
+        return operation.error !== "" ? <p className="text-destructive">{operation.error}</p> : null;
+    }
+    const place = [detail.schema, detail.table, detail.column].filter((item) => item !== null).join(".");
+    const source = [detail.file, detail.line].filter((item) => item !== null).join(":");
+    const rows = [
+        ["Маршрут", detail.route],
+        ["Класс", detail.name],
+        ["Код", detail.code],
+        ["Уровень", detail.severity],
+        ["Место", place === "" ? null : place],
+        ["Ограничение", detail.constraint],
+        ["Тип данных", detail.dataType],
+        ["Позиция", detail.position],
+        ["Пояснение", detail.detail],
+        ["Подсказка", detail.hint],
+        ["Контекст", detail.where],
+        ["Функция", detail.routine],
+        ["Файл", source === "" ? null : source],
+        ["Причина", detail.cause],
+    ].flatMap(([label, value]) => (label && value ? [{ label, value }] : []));
+    return (
+        <div className="flex flex-col gap-1 text-destructive">
+            <p>{RECALC_ERROR_TYPE_LABELS[detail.type]}</p>
+            <p>{detail.message}</p>
+            {rows.map((row) => (
+                <p key={row.label} className="break-words">
+                    <span className="text-muted-foreground">{row.label}: </span>
+                    {row.value}
+                </p>
+            ))}
+            {detail.query !== null ? (
+                <pre className="max-h-40 overflow-auto rounded-md bg-muted p-2 whitespace-pre-wrap break-words text-[11px] text-foreground">{detail.query}</pre>
+            ) : null}
+            {detail.stack !== null ? (
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2 whitespace-pre-wrap break-words text-[11px] text-foreground">{detail.stack}</pre>
+            ) : null}
+        </div>
+    );
 }
 
 function rrsQueueExample(now = Date.now()): JournalProcess[] {
@@ -550,8 +659,10 @@ function rrsQueueExample(now = Date.now()): JournalProcess[] {
         origin: "manual",
         trigger: "coefficients",
         actor: "администратор РРС",
+        actorPerson: null,
         lines: null,
         error: "",
+        errorDetail: null,
         startedAt: input.startedAt,
         finishedAt: null,
         scope: input.scope,

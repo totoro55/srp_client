@@ -18,6 +18,7 @@ export async function recalculateBranchPremiums(input: {
     branchId: string;
     actor: string;
     trigger: string;
+    route: string;
 }): Promise<void> {
     if (!UUID.test(input.branchId)) {
         throw new SalePremiumError("Укажите филиал");
@@ -43,8 +44,7 @@ export async function recalculateBranchPremiums(input: {
             const lines = await step.calculate();
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
-            const message = error instanceof Error ? error.message : "Не удалось пересчитать премию филиала";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, error, input.route);
             throw error;
         }
     }
@@ -60,6 +60,7 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
     actor: string;
     trigger: string;
     origin: "manual" | "system";
+    route: string;
 }): Promise<void> {
     const windowError = recalcWindowError(input);
     if (windowError || !PERIOD.test(input.period)) {
@@ -95,8 +96,7 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
             const lines = await step.calculate();
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
-            const message = error instanceof Error ? error.message : "Не удалось пересчитать месяц";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, error, input.route);
             throw error;
         }
     }

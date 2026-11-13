@@ -62,6 +62,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
                     branchId,
                     actor: access.username,
                     trigger: "branch.roles",
+                    route: "/api/branch/roles",
                 });
                 recalculated = true;
             } catch (error) {

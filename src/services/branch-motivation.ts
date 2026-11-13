@@ -130,6 +130,7 @@ export async function saveBranchMotivation(
         territoryId: territoryUuid.toLowerCase(),
         territoryKinds: [],
         branchKinds,
+        route: "/api/rrs/cards/[territoryUuid]/motivation",
     });
 }
 
