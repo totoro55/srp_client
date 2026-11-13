@@ -85,7 +85,7 @@ SELECT $1::date AS period,
        assignment.author_kind,
        issuer.employee_uuid,
        rates.version_id,
-       COALESCE(NULLIF(lower(btrim(sale.category)), ''), '') AS category_code,
+       COALESCE(NULLIF(lower(btrim(sale.category::text)), ''), '') AS category_code,
        (rates.quantity * COALESCE(coef.value, 1))::numeric AS quantity_tariff,
        (rates.volume * COALESCE(coef.value, 1))::numeric AS volume_tariff,
        sale.count AS item_count,
@@ -95,10 +95,10 @@ SELECT $1::date AS period,
            * COALESCE(coef.value, 1),
            2
        ) AS premium,
-       NULLIF(btrim(sale.link_doc), '') AS link_doc,
-       NULLIF(btrim(sale.document_number), '') AS document_number,
+       NULLIF(btrim(sale.link_doc::text), '') AS link_doc,
+       NULLIF(btrim(sale.document_number::text), '') AS document_number,
        sale.date AS document_date,
-       NULLIF(btrim(sale.name_product), '') AS product_name
+       NULLIF(btrim(sale.name_product::text), '') AS product_name
 FROM issue_hits sale
 CROSS JOIN LATERAL (
     SELECT NULLIF(lower(btrim(sale.author2::text)), '') AS employee_uuid

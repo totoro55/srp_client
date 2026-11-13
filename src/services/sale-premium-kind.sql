@@ -110,10 +110,10 @@ sale_lines AS (
                assignment.author_kind,
                seller.employee_uuid,
                connected.version_id,
-               lower(btrim(sale.kinde)) AS code,
+               lower(btrim(sale.kinde::text)) AS code,
                CASE
-                   WHEN btrim(sale.kinde) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                       THEN lower(btrim(sale.kinde))::uuid
+                   WHEN btrim(sale.kinde::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                       THEN lower(btrim(sale.kinde::text))::uuid
                END AS code_uuid,
                CASE
                    -- Безнал перекрывает автора интернет-магазина.
@@ -121,15 +121,15 @@ sale_lines AS (
                    WHEN lower(btrim(sale.author::text)) IN (SELECT author FROM site_authors) THEN 'im'
                    ELSE 'main'
                END AS channel,
-               lower(btrim(sale.brend)) IN (
+               lower(btrim(sale.brend::text)) IN (
                    SELECT lower(btrim(brand.name))
                    FROM stm_brands brand
                ) AS is_stm,
                sale.price,
                sale.count AS item_count,
-               NULLIF(btrim(sale.name_product), '') AS product_name,
-               NULLIF(btrim(sale.link_doc), '') AS link_doc,
-               NULLIF(btrim(sale.document_number), '') AS document_number,
+               NULLIF(btrim(sale.name_product::text), '') AS product_name,
+               NULLIF(btrim(sale.link_doc::text), '') AS link_doc,
+               NULLIF(btrim(sale.document_number::text), '') AS document_number,
                sale.date AS document_date
         FROM sale_hits sale
         CROSS JOIN LATERAL (

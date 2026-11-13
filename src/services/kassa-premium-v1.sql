@@ -92,8 +92,8 @@ JOIN main.author_days author_day
 CROSS JOIN LATERAL (
     SELECT CASE
                WHEN author_day.author_kind = 'system'
-                    AND btrim(operation."Фирма") ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                   THEN btrim(operation."Фирма")::uuid
+                    AND btrim(operation."Фирма"::text) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                   THEN btrim(operation."Фирма"::text)::uuid
                WHEN author_day.author_kind = 'system' THEN NULL
                ELSE author_day.branch_uuid
            END AS branch_uuid,
