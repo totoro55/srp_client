@@ -69,7 +69,7 @@ export interface BasketUpdate {
     id: number;
     name: string;
     indicator: string;
-    kind: Exclude<BasketUpdateKind, "shared">;
+    kind: Exclude<BasketUpdateKind, "shared" | "tariffs">;
     months: BasketUpdateMonth[];
     runs: BasketRecalcRun[];
 }
@@ -79,7 +79,7 @@ export interface BasketCalculationBoard {
     shared: SharedPremiumMonth[];
 }
 
-const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared">> = {
+const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared" | "tariffs">> = {
     "Продажа товара": "sale",
     "Выдача товара": "release",
     "Кассовые операции": "kassa",
