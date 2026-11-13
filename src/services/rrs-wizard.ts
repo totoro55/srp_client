@@ -191,6 +191,7 @@ export async function commitRrsWizard(access: AccessView, input: WizardCommitInp
         territoryId: input.territoryUuid.toLowerCase(),
         territoryKinds,
         branchKinds,
+        route: "/api/rrs/wizard",
     });
 }
 

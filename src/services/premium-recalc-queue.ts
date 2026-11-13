@@ -29,6 +29,7 @@ export interface PremiumScopePlan {
     actor: string;
     trigger: string;
     origin?: "manual" | "system";
+    route?: string;
     /** Пусто — весь дивизион. */
     territoryId: string | null;
     territoryKinds: readonly PremiumRecalcKind[];
@@ -46,6 +47,7 @@ interface Job {
     actor: string;
     trigger: string;
     origin: "manual" | "system";
+    route: string;
     scopes: Map<PremiumRecalcKind, KindScope>;
     cachedBranches?: string[];
 }
@@ -117,6 +119,7 @@ function absorbPlan(
         divisionJob.actor = plan.actor;
         divisionJob.trigger = plan.trigger;
         divisionJob.origin = plan.origin ?? divisionJob.origin;
+        divisionJob.route = plan.route ?? divisionJob.route;
         return divisionJob;
     }
     let job = queue.jobs.find((item) => item.period === plan.period && item.territoryId === territoryId);
@@ -127,6 +130,7 @@ function absorbPlan(
             actor: plan.actor,
             trigger: plan.trigger,
             origin: plan.origin ?? "manual",
+            route: plan.route ?? "",
             scopes: new Map(),
         };
         queue.jobs.push(job);
@@ -162,6 +166,7 @@ function absorbPlan(
     job.actor = plan.actor;
     job.trigger = plan.trigger;
     job.origin = plan.origin ?? "manual";
+    job.route = plan.route ?? job.route;
     return job;
 }
 
@@ -247,7 +252,7 @@ async function runJob(job: Job): Promise<void> {
             await finishPremiumRecalc(runId, lines, { announce: index === kinds.length - 1 });
         } catch (error) {
             const message = error instanceof Error ? error.message : "Не удалось пересчитать премию";
-            await failPremiumRecalc(runId, message);
+            await failPremiumRecalc(runId, job.route ? `${message} · ${job.route}` : message);
             throw error;
         }
     }
