@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { SALES_INDICATOR_NAME, isTariffAxis, readVersionSettings, TARIFF_BOUND_KEYS, type TariffAxis } from "@/lib/baskets";
+import { SALES_INDICATOR_NAME, isTariffAxis, readVersionSettings, TARIFF_AXES, TARIFF_BOUND_KEYS, type TariffAxis } from "@/lib/baskets";
 import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { resolveConnectionValues } from "@/lib/rrs";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
@@ -8,10 +8,16 @@ import { isTariffBaseMode, type TariffCategoryFolder, type TariffExceptionInput,
 import type { AccessView } from "@/server/authz/resolve-access";
 import { getRrsCard, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { getAppSettings } from "@/services/app-settings";
+import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, PremiumRecalcBusyError } from "@/services/basket-updates";
 import { db } from "@/services/db";
 import { enqueuePremiumScopes } from "@/services/premium-recalc-queue";
 
-function enqueueSaleTariffPremium(
+const TARIFF_JOURNAL_ROUTE = "/api/rrs/cards/[territoryUuid]/tariff-recalc";
+const NO_SALE_CONNECTION = "Корзина продаж не подключена";
+const NO_TARIFF_AXIS = "У версии не выбран вид расчёта тарифов";
+const NO_SALE_STATISTICS = "Нет статистики этого месяца";
+
+export function enqueueSaleTariffPremium(
     actor: string,
     territoryUuid: string,
     period: string,
@@ -369,6 +375,20 @@ export async function saveTariffExceptions(
             );
         }
     });
+    await rememberSaleTariffRun(territoryUuid, period, "success", rows.length, "");
+    try {
+        const runId = await openSaleTariffJournal({
+            actor: access.username,
+            origin: "manual",
+            period,
+            territoryUuid,
+            route: "/api/rrs/cards/[territoryUuid]/tariff-exceptions",
+            conditions: saleTariffConditions(page.connection.versionNo, page.connection.versionName, axis, `Записано ${rows.length}.`),
+        });
+        await closeSaleTariffJournal(runId, { lines: rows.length, announce: true });
+    } catch (error) {
+        console.error("Запись тарифов в журнал не выполнена", error);
+    }
     return enqueueSaleTariffPremium(access.username, territoryUuid, period);
 }
 
@@ -655,7 +675,21 @@ export async function saveRecalculatedTariffs(
         throw new RrsRuleError(400, EMPTY_TARIFF_SAVE_MESSAGE);
     }
     await writeCalculatedSaleTariffs(territoryUuid, period, versionId, axis, chosen, rows);
-    const recalc = await enqueueSaleTariffPremium(access.username, territoryUuid, period, "manual", "/api/rrs/cards/[territoryUuid]/tariff-recalc");
+    await rememberSaleTariffRun(territoryUuid, period, "success", rows.length, "");
+    try {
+        const runId = await openSaleTariffJournal({
+            actor: access.username,
+            origin: "manual",
+            period,
+            territoryUuid,
+            route: TARIFF_JOURNAL_ROUTE,
+            conditions: saleTariffConditions(page.connection?.versionNo ?? null, page.connection?.versionName ?? null, axis, `Записано ${rows.length}.`),
+        });
+        await closeSaleTariffJournal(runId, { lines: rows.length, announce: true });
+    } catch (error) {
+        console.error("Запись тарифов в журнал не выполнена", error);
+    }
+    const recalc = await enqueueSaleTariffPremium(access.username, territoryUuid, period, "manual", TARIFF_JOURNAL_ROUTE);
     return { saved: rows.length, recalc };
 }
 
@@ -663,6 +697,10 @@ export interface SaleTariffAutoResult {
     status: "success" | "skipped" | "failed";
     saved: number;
     detail: string;
+    versionNo: number | null;
+    versionName: string | null;
+    axis: TariffAxis | null;
+    error: unknown | null;
 }
 
 const SYSTEM_ACCESS: AccessView = {
@@ -678,24 +716,25 @@ const SYSTEM_ACCESS: AccessView = {
     previewChoices: [],
 };
 
-/** Тот же расчёт, что ручное сохранение пересчёта. Исключения вне статистики месяца не применяются и не удаляются. */
+/** Тот же расчёт, что ручное сохранение пересчёта. Исключения вне статистики месяца не применяются и не удаляются. Премию не ставит: её посчитает расписание корзин. */
 export async function calculateAndSaveSaleTariffs(territoryUuid: string, period: string): Promise<SaleTariffAutoResult> {
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
     if (!monthIsOpen(period.slice(0, 7), policy)) {
-        return { status: "failed", saved: 0, detail: closedPeriodMessage(policy) };
+        return emptyTariffResult("failed", closedPeriodMessage(policy));
     }
     const connection = await loadSalesConnection(territoryUuid, period);
     if (!connection?.versionId) {
-        return { status: "skipped", saved: 0, detail: "Корзина продаж не подключена" };
+        return emptyTariffResult("skipped", NO_SALE_CONNECTION);
     }
     const axis = connection.axis;
     if (!axis) {
-        return { status: "skipped", saved: 0, detail: "У версии не выбран вид расчёта тарифов" };
+        return { ...emptyTariffResult("skipped", NO_TARIFF_AXIS), versionNo: connection.versionNo, versionName: connection.versionName };
     }
+    const version = { versionNo: connection.versionNo, versionName: connection.versionName, axis };
     const stats = await loadSalesStats(territoryUuid, period, axis);
     if (stats.length === 0) {
-        return { status: "skipped", saved: 0, detail: "Нет статистики этого месяца" };
+        return { ...emptyTariffResult("skipped", NO_SALE_STATISTICS), ...version };
     }
     const present = new Set(stats.map((stat) => stat.code));
     const slices = await loadSlices(territoryUuid, period);
@@ -711,15 +750,107 @@ export async function calculateAndSaveSaleTariffs(territoryUuid: string, period:
         reference,
     });
     if (rows.some((row) => !tariffRowComplete(row))) {
-        return { status: "failed", saved: 0, detail: EMPTY_TARIFF_SAVE_MESSAGE };
+        return { ...emptyTariffResult("failed", EMPTY_TARIFF_SAVE_MESSAGE), ...version };
     }
-    await writeCalculatedSaleTariffs(territoryUuid, period, connection.versionId, axis, reference, rows);
     try {
-        await enqueueSaleTariffPremium("system", territoryUuid, period, "system", "авторасчёт тарифов");
+        await writeCalculatedSaleTariffs(territoryUuid, period, connection.versionId, axis, reference, rows);
     } catch (error) {
-        console.error("Премия после авторасчёта тарифов не поставлена в очередь", error);
+        return { ...emptyTariffResult("failed", ""), ...version, error };
     }
-    return { status: "success", saved: rows.length, detail: "" };
+    return { status: "success", saved: rows.length, detail: "", ...version, error: null };
+}
+
+function emptyTariffResult(status: "skipped" | "failed", detail: string): SaleTariffAutoResult {
+    return { status, saved: 0, detail, versionNo: null, versionName: null, axis: null, error: null };
+}
+
+export function saleTariffConditions(versionNo: number | null, versionName: string | null, axis: TariffAxis | null, extra: string): string {
+    const axisTitle = TARIFF_AXES.find((item) => item.code === axis)?.title ?? "вид расчёта не выбран";
+    const version = versionNo !== null && versionName ? `Версия ${versionNo} «${versionName}»` : "Версия не подключена";
+    return `${version}, ${axisTitle}. ${extra}`.replace(/\s+/g, " ").trim();
+}
+
+export async function rememberSaleTariffRun(territoryUuid: string, period: string, status: "success" | "failed", saved: number, detail: string): Promise<void> {
+    await db.query(
+        `
+        INSERT INTO sale_tariff_auto_runs (territory_uuid, period, status, saved, detail)
+        VALUES ($1::uuid, $2::date, $3, $4, $5)
+        ON CONFLICT (territory_uuid, period) DO UPDATE
+        SET status = EXCLUDED.status,
+            saved = EXCLUDED.saved,
+            detail = EXCLUDED.detail,
+            updated_at = NOW()
+        `,
+        [territoryUuid, period, status, saved, detail],
+    );
+}
+
+export async function saleTariffJournalRepeated(territoryUuid: string, period: string, signature: string): Promise<boolean> {
+    const rows = await db.query<{ id: number }>(
+        `
+        SELECT id
+        FROM premium_recalc_runs
+        WHERE basket_kind = 'tariffs'
+          AND period = $1::date
+          AND origin = 'system'
+          AND scope_level = 'territory'
+          AND scope_ids = ARRAY[$2]::uuid[]
+          AND created_at >= ((NOW() AT TIME ZONE 'Europe/Moscow')::date) AT TIME ZONE 'Europe/Moscow'
+          AND created_at < (((NOW() AT TIME ZONE 'Europe/Moscow')::date + 1) AT TIME ZONE 'Europe/Moscow')
+          AND (
+              (status = 'success' AND conditions = $3)
+              OR (status = 'failed' AND (error_message = $3 OR conditions = $3))
+          )
+        LIMIT 1
+        `,
+        [period, territoryUuid, signature],
+    );
+    return rows.length > 0;
+}
+
+export async function openSaleTariffJournal(input: {
+    actor: string;
+    origin: "manual" | "system";
+    period: string;
+    territoryUuid: string;
+    route: string;
+    conditions: string;
+}): Promise<number> {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        try {
+            return await beginPremiumRecalc({
+                kind: "tariffs",
+                period: input.period,
+                origin: input.origin,
+                trigger: "tariffs",
+                actor: input.actor,
+                scopeLevel: "territory",
+                scopeIds: [input.territoryUuid],
+                conditions: input.conditions,
+            });
+        } catch (error) {
+            if (error instanceof PremiumRecalcBusyError && attempt < 7) {
+                await delay(1000);
+                continue;
+            }
+            throw error;
+        }
+    }
+    throw new PremiumRecalcBusyError();
+}
+
+export async function closeSaleTariffJournal(id: number, outcome: { lines: number; announce?: boolean } | { error: unknown; route: string; announce?: boolean }): Promise<void> {
+    if ("error" in outcome) {
+        await failPremiumRecalc(id, outcome.error, outcome.route, { announce: outcome.announce });
+        return;
+    }
+    await finishPremiumRecalc(id, outcome.lines, { announce: outcome.announce });
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 
 export async function previewConnectionTariffs(

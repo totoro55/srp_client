@@ -388,11 +388,15 @@ function stepTitle(operation: JournalOperation): string {
         return `${name} в очереди`;
     }
     if (operation.status === "running") {
-        const label = operation.kind === "shared" ? "общей премии" : kindName(operation.kind).toLowerCase();
+        const label = operation.kind === "shared"
+            ? "общей премии"
+            : operation.kind === "tariffs"
+                ? "тарифов продажи"
+                : kindName(operation.kind).toLowerCase();
         return `Пересчёт ${label} за ${formatMonth(operation.period)}`;
     }
     if (operation.status === "failed") {
-        return `${name} не записана`;
+        return operation.kind === "tariffs" ? `${name} не записаны` : `${name} не записана`;
     }
     return name;
 }
@@ -728,6 +732,9 @@ function kindName(kind: BasketUpdateKind): string {
     }
     if (kind === "kassa") {
         return "Касса";
+    }
+    if (kind === "tariffs") {
+        return "Тарифы";
     }
     return "Общая премия";
 }

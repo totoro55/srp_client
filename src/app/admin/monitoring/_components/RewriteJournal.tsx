@@ -31,6 +31,7 @@ const BASKET_OPTIONS: { id: BasketUpdateKind | "all"; label: string }[] = [
     { id: "release", label: "Выдача товара" },
     { id: "kassa", label: "Кассовые операции" },
     { id: "shared", label: "Общая премия" },
+    { id: "tariffs", label: "Тарифы продажи" },
 ];
 
 const STATUS_OPTIONS: { id: RecalcRunStatus | "all"; label: string }[] = [
