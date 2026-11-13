@@ -16,6 +16,7 @@
 --   автокасса и терминал берут филиал документа, штатная строка важнее промоутера;
 --   ставка quantity × количество, ставка volume × объём;
 --   обе ставки умножаются на release_coef филиала, коэффициента нет — единица;
+--   коэффициент читается один раз на филиал, не на каждую строку;
 --   нет ставки количества или объёма — строка не входит;
 --   каналы, СТМ и множитель ×2 не применяются.
 
@@ -43,7 +44,7 @@ connected AS (
     JOIN basket_versions version ON version.id = latest.version_id
     WHERE version.script_id = 'release.quantity-volume'
 ),
-rates AS (
+rates AS MATERIALIZED (
     SELECT tariff.territory_uuid,
            tariff.version_id,
            tariff.quantity,
@@ -74,73 +75,104 @@ issue_hits AS (
           $4::date IS NULL
           OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
+),
+issued AS (
+    SELECT $1::date AS period,
+           branch.territory_uuid,
+           assignment.branch_uuid,
+           assignment.author_kind,
+           issuer.employee_uuid,
+           rates.version_id,
+           sale.category AS category_code,
+           rates.quantity,
+           rates.volume AS volume_rate,
+           sale.count AS item_count,
+           sale.volume,
+           NULLIF(btrim(sale.link_doc), '') AS link_doc,
+           NULLIF(btrim(sale.document_number), '') AS document_number,
+           sale.date AS document_date,
+           NULLIF(btrim(sale.name_product), '') AS product_name
+    FROM issue_hits sale
+    CROSS JOIN LATERAL (
+        SELECT sale.author2 AS employee_uuid
+    ) issuer
+    JOIN main.author_days author_day
+        ON author_day.period = $1::date
+       AND author_day.employee_uuid = issuer.employee_uuid
+       AND author_day.day = COALESCE(sale.date::date, $1::date)
+    CROSS JOIN LATERAL (
+        SELECT CASE
+                   WHEN author_day.author_kind = 'system' THEN sale.firm_uuid
+                   ELSE author_day.branch_uuid
+               END AS branch_uuid,
+               author_day.author_kind
+    ) assignment
+    JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
+    JOIN rates ON rates.territory_uuid = branch.territory_uuid
+    WHERE issuer.employee_uuid IS NOT NULL
+      AND sale.count IS NOT NULL
+      AND sale.volume IS NOT NULL
+      AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
+      AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
+      AND (
+          $4::date IS NULL
+          OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
+      )
+),
+coefficients AS (
+    SELECT branch.territory_uuid,
+           branch.branch_uuid,
+           COALESCE(MAX(coefficient.value), 1) AS release_coef
+    FROM (
+        SELECT DISTINCT territory_uuid, branch_uuid
+        FROM issued
+    ) branch
+    LEFT JOIN LATERAL (
+        SELECT source.value
+        FROM (
+            SELECT coefficient.value,
+                   coefficient.period
+            FROM basket_branch_coefficients coefficient
+            WHERE $6::bigint IS NULL
+              AND coefficient.basket_id = (SELECT id FROM issue_basket)
+              AND coefficient.territory_uuid = branch.territory_uuid
+              AND coefficient.branch_uuid = branch.branch_uuid
+              AND coefficient.coefficient_key = 'release_coef'
+              AND coefficient.period <= $1::date
+            UNION ALL
+            SELECT frozen.value,
+                   $1::date AS period
+            FROM main.premium_accrual_coefficients frozen
+            WHERE frozen.accrual_id = $6::bigint
+              AND frozen.basket_id = (SELECT id FROM issue_basket)
+              AND frozen.coefficient_key = 'release_coef'
+        ) source
+        ORDER BY source.period DESC
+        LIMIT 1
+    ) coefficient ON TRUE
+    GROUP BY branch.territory_uuid, branch.branch_uuid
 )
-SELECT $1::date AS period,
-       branch.territory_uuid,
-       assignment.branch_uuid,
-       assignment.author_kind,
-       issuer.employee_uuid,
-       rates.version_id,
-       sale.category AS category_code,
-       (rates.quantity * COALESCE(coef.value, 1))::numeric AS quantity_tariff,
-       (rates.volume * COALESCE(coef.value, 1))::numeric AS volume_tariff,
-       sale.count AS item_count,
-       sale.volume,
+SELECT issued.period,
+       issued.territory_uuid,
+       issued.branch_uuid,
+       issued.author_kind,
+       issued.employee_uuid,
+       issued.version_id,
+       issued.category_code,
+       (issued.quantity * coefficients.release_coef)::numeric AS quantity_tariff,
+       (issued.volume_rate * coefficients.release_coef)::numeric AS volume_tariff,
+       issued.item_count,
+       issued.volume,
        ROUND(
-           (rates.quantity * sale.count::numeric + rates.volume * sale.volume::numeric)
-           * COALESCE(coef.value, 1),
+           (issued.quantity * issued.item_count::numeric + issued.volume_rate * issued.volume::numeric)
+           * coefficients.release_coef,
            2
        ) AS premium,
-       NULLIF(btrim(sale.link_doc), '') AS link_doc,
-       NULLIF(btrim(sale.document_number), '') AS document_number,
-       sale.date AS document_date,
-       NULLIF(btrim(sale.name_product), '') AS product_name
-FROM issue_hits sale
-CROSS JOIN LATERAL (
-    SELECT sale.author2 AS employee_uuid
-) issuer
-JOIN main.author_days author_day
-    ON author_day.period = $1::date
-   AND author_day.employee_uuid = issuer.employee_uuid
-   AND author_day.day = COALESCE(sale.date::date, $1::date)
-CROSS JOIN LATERAL (
-    SELECT CASE
-               WHEN author_day.author_kind = 'system' THEN sale.firm_uuid
-               ELSE author_day.branch_uuid
-           END AS branch_uuid,
-           author_day.author_kind
-) assignment
-JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
-JOIN rates ON rates.territory_uuid = branch.territory_uuid
-LEFT JOIN LATERAL (
-    SELECT source.value
-    FROM (
-        SELECT coefficient.value,
-               coefficient.period
-        FROM basket_branch_coefficients coefficient
-        WHERE $6::bigint IS NULL
-          AND coefficient.basket_id = (SELECT id FROM issue_basket)
-          AND coefficient.territory_uuid = branch.territory_uuid
-          AND coefficient.branch_uuid = assignment.branch_uuid
-          AND coefficient.coefficient_key = 'release_coef'
-          AND coefficient.period <= $1::date
-        UNION ALL
-        SELECT frozen.value,
-               $1::date AS period
-        FROM main.premium_accrual_coefficients frozen
-        WHERE frozen.accrual_id = $6::bigint
-          AND frozen.basket_id = (SELECT id FROM issue_basket)
-          AND frozen.coefficient_key = 'release_coef'
-    ) source
-    ORDER BY source.period DESC
-    LIMIT 1
-) coef ON TRUE
-WHERE issuer.employee_uuid IS NOT NULL
-  AND sale.count IS NOT NULL
-  AND sale.volume IS NOT NULL
-  AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
-  AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
-  AND (
-      $4::date IS NULL
-      OR COALESCE(sale.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
-  );
+       issued.link_doc,
+       issued.document_number,
+       issued.document_date,
+       issued.product_name
+FROM issued
+JOIN coefficients
+    ON coefficients.territory_uuid = issued.territory_uuid
+   AND coefficients.branch_uuid = issued.branch_uuid;

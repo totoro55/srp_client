@@ -10,6 +10,7 @@
 --   корзина с показателем «Кассовые операции», версия со скриптом kassa.minutes;
 --   ставка kassa_oper читается из таблицы этой версии;
 --   минуты × тариф kassa_oper × kassa_coef филиала, коэффициента нет — единица;
+--   коэффициент читается один раз на филиал, не на каждую строку;
 --   нет тарифа или минут — строка не входит;
 --   филиал — филиал автора из main.author_days на дату документа;
 --   автокасса и терминал берут филиал документа, штатная строка важнее промоутера;
@@ -39,7 +40,7 @@ connected AS (
     JOIN basket_versions version ON version.id = latest.version_id
     WHERE version.script_id = 'kassa.minutes'
 ),
-rates AS (
+rates AS MATERIALIZED (
     SELECT tariff.territory_uuid,
            tariff.rate
     FROM (
@@ -65,64 +66,88 @@ operation_hits AS (
           $4::date IS NULL
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
-)
-SELECT $1::date AS period,
-       branch.territory_uuid,
-       assignment.branch_uuid,
-       assignment.author_kind,
-       issuer.employee_uuid,
-       operation.date AS document_date,
-       operation.minute::numeric AS minute,
-       rates.rate AS tariff,
-       COALESCE(coef.value, 1)::numeric AS coefficient,
-       ROUND(operation.minute::numeric * rates.rate * COALESCE(coef.value, 1), 2) AS premium
-FROM operation_hits operation
-CROSS JOIN LATERAL (
-    SELECT operation.author AS employee_uuid
-) issuer
-JOIN main.author_days author_day
-    ON author_day.period = $1::date
-   AND author_day.employee_uuid = issuer.employee_uuid
-   AND author_day.day = COALESCE(operation.date::date, $1::date)
-CROSS JOIN LATERAL (
-    SELECT CASE
-               WHEN author_day.author_kind = 'system' THEN operation."Фирма"
-               ELSE author_day.branch_uuid
-           END AS branch_uuid,
-           author_day.author_kind
-) assignment
-JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
-JOIN rates ON rates.territory_uuid = branch.territory_uuid
-LEFT JOIN LATERAL (
-    SELECT source.value
+),
+worked AS (
+    SELECT $1::date AS period,
+           branch.territory_uuid,
+           assignment.branch_uuid,
+           assignment.author_kind,
+           issuer.employee_uuid,
+           operation.date AS document_date,
+           operation.minute::numeric AS minute,
+           rates.rate AS tariff
+    FROM operation_hits operation
+    CROSS JOIN LATERAL (
+        SELECT operation.author AS employee_uuid
+    ) issuer
+    JOIN main.author_days author_day
+        ON author_day.period = $1::date
+       AND author_day.employee_uuid = issuer.employee_uuid
+       AND author_day.day = COALESCE(operation.date::date, $1::date)
+    CROSS JOIN LATERAL (
+        SELECT CASE
+                   WHEN author_day.author_kind = 'system' THEN operation."Фирма"
+                   ELSE author_day.branch_uuid
+               END AS branch_uuid,
+               author_day.author_kind
+    ) assignment
+    JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
+    JOIN rates ON rates.territory_uuid = branch.territory_uuid
+    WHERE issuer.employee_uuid IS NOT NULL
+      AND operation.minute IS NOT NULL
+      AND operation.minute <> 0
+      AND assignment.branch_uuid IS NOT NULL
+      AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
+      AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
+      AND (
+          $4::date IS NULL
+          OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
+      )
+),
+coefficients AS (
+    SELECT branch.territory_uuid,
+           branch.branch_uuid,
+           COALESCE(MAX(coefficient.value), 1) AS kassa_coef
     FROM (
-        SELECT coefficient.value,
-               coefficient.period
-        FROM basket_branch_coefficients coefficient
-        WHERE $6::bigint IS NULL
-          AND coefficient.basket_id = (SELECT id FROM kassa_basket)
-          AND coefficient.territory_uuid = branch.territory_uuid
-          AND coefficient.branch_uuid = assignment.branch_uuid
-          AND coefficient.coefficient_key = 'kassa_coef'
-          AND coefficient.period <= $1::date
-        UNION ALL
-        SELECT frozen.value,
-               $1::date AS period
-        FROM main.premium_accrual_coefficients frozen
-        WHERE frozen.accrual_id = $6::bigint
-          AND frozen.basket_id = (SELECT id FROM kassa_basket)
-          AND frozen.coefficient_key = 'kassa_coef'
-    ) source
-    ORDER BY source.period DESC
-    LIMIT 1
-) coef ON TRUE
-WHERE issuer.employee_uuid IS NOT NULL
-  AND operation.minute IS NOT NULL
-  AND operation.minute <> 0
-  AND assignment.branch_uuid IS NOT NULL
-  AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
-  AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
-  AND (
-      $4::date IS NULL
-      OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
-  );
+        SELECT DISTINCT territory_uuid, branch_uuid
+        FROM worked
+    ) branch
+    LEFT JOIN LATERAL (
+        SELECT source.value
+        FROM (
+            SELECT coefficient.value,
+                   coefficient.period
+            FROM basket_branch_coefficients coefficient
+            WHERE $6::bigint IS NULL
+              AND coefficient.basket_id = (SELECT id FROM kassa_basket)
+              AND coefficient.territory_uuid = branch.territory_uuid
+              AND coefficient.branch_uuid = branch.branch_uuid
+              AND coefficient.coefficient_key = 'kassa_coef'
+              AND coefficient.period <= $1::date
+            UNION ALL
+            SELECT frozen.value,
+                   $1::date AS period
+            FROM main.premium_accrual_coefficients frozen
+            WHERE frozen.accrual_id = $6::bigint
+              AND frozen.basket_id = (SELECT id FROM kassa_basket)
+              AND frozen.coefficient_key = 'kassa_coef'
+        ) source
+        ORDER BY source.period DESC
+        LIMIT 1
+    ) coefficient ON TRUE
+    GROUP BY branch.territory_uuid, branch.branch_uuid
+)
+SELECT worked.period,
+       worked.territory_uuid,
+       worked.branch_uuid,
+       worked.author_kind,
+       worked.employee_uuid,
+       worked.document_date,
+       worked.minute,
+       worked.tariff,
+       coefficients.kassa_coef::numeric AS coefficient,
+       ROUND(worked.minute * worked.tariff * coefficients.kassa_coef, 2) AS premium
+FROM worked
+JOIN coefficients
+    ON coefficients.territory_uuid = worked.territory_uuid
+   AND coefficients.branch_uuid = worked.branch_uuid;

@@ -2,9 +2,11 @@ import { SALES_INDICATOR_NAME } from "@/lib/baskets";
 import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { parseTariffReference, parseTariffSaveRows, type TariffReference, type TariffSaveRow } from "@/lib/tariff-calculation";
 import { parseTariffWeightOverride } from "@/lib/tariff-exceptions";
-import { parseRrsSaveInput, type RrsCoefficientValue, type RrsConnectionInput, type RrsMotivationItem } from "@/lib/rrs";
+import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
+import { parseRrsSaveInput, type RrsCoefficientPage, type RrsCoefficientValue, type RrsConnectionInput, type RrsMotivationItem } from "@/lib/rrs";
 import type { AccessView } from "@/server/authz/resolve-access";
-import { applyRrsMonth, changedConnectionKinds, getRrsMonth, guardRrsMonth, RrsRuleError } from "@/services/basket-connections";
+import { getAppSettings } from "@/services/app-settings";
+import { applyRrsMonth, changedConnectionKinds, getRrsMonth, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { prepareBranchMotivation, writeBranchMotivation } from "@/services/branch-motivation";
 import { coefficientBranchChanges, getBranchCoefficients, replacePeriodCoefficients } from "@/services/basket-coefficients";
 import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
@@ -153,7 +155,7 @@ export async function commitRrsWizard(access: AccessView, input: WizardCommitInp
     await guardRrsMonth(access, input.territoryUuid, input.period);
     const [month, coefficients, motivation] = await Promise.all([
         getRrsMonth(access, input.territoryUuid, input.period),
-        getBranchCoefficients(access, input.territoryUuid, input.period),
+        wizardCoefficients(access, input.territoryUuid, input.period),
         prepareBranchMotivation(access, input.territoryUuid, input.period, input.motivation),
     ]);
     const territoryKinds = changedConnectionKinds(month, input.items);
@@ -190,6 +192,33 @@ export async function commitRrsWizard(access: AccessView, input: WizardCommitInp
         territoryKinds,
         branchKinds,
     });
+}
+
+async function wizardCoefficients(access: AccessView, territoryUuid: string, period: string): Promise<RrsCoefficientPage> {
+    try {
+        return await getBranchCoefficients(access, territoryUuid, period);
+    } catch (error) {
+        if (!(error instanceof RrsRuleError) || error.status !== 404) {
+            throw error;
+        }
+    }
+    const territory = (await listRrsTerritories(access)).find((item) => item.uuid.toLowerCase() === territoryUuid.toLowerCase());
+    if (!territory) {
+        throw new RrsRuleError(403, "Эта РРС вам не назначена");
+    }
+    const settings = await getAppSettings();
+    const editPolicy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
+    return {
+        territory,
+        period,
+        editable: monthIsOpen(period.slice(0, 7), editPolicy),
+        branches: [],
+        baskets: [],
+        values: [],
+        savedPeriods: [],
+        appliedPeriod: null,
+        editPolicy,
+    };
 }
 
 function connectedKinds(
