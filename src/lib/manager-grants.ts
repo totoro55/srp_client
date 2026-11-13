@@ -73,11 +73,36 @@ export interface ManagerAccessPerson {
     branches: ManagerAccessBranch[];
 }
 
+export interface ManagerGrantPolicy {
+    access: boolean;
+    roles: boolean;
+    brigades: boolean;
+    shared: boolean;
+}
+
+export const CLOSED_GRANT_POLICY: ManagerGrantPolicy = {
+    access: false,
+    roles: false,
+    brigades: false,
+    shared: false,
+};
+
+export type ManagerGrantPolicies = Record<ManagerTitleGroup, ManagerGrantPolicy>;
+
+export function closedGrantPolicies(): ManagerGrantPolicies {
+    return {
+        manager: { ...CLOSED_GRANT_POLICY },
+        deputy: { ...CLOSED_GRANT_POLICY },
+        senior: { ...CLOSED_GRANT_POLICY },
+    };
+}
+
 export interface ManagerAccessPage {
     territory: { uuid: string; name: string; code: string };
     editable: boolean;
     notice: string | null;
     settings: ManagerGrantSettings;
+    policies: ManagerGrantPolicies;
     managers: ManagerAccessPerson[];
 }
 
@@ -94,38 +119,38 @@ const EMPTY_FLAGS: ManagerGrantSettings & { access: boolean } = {
 };
 
 /**
- * Свой филиал внутри РРС: доступ есть, настройка роли действует, пока нет строки с ложью.
- * Чужой филиал этой РРС: доступ и каждая настройка включаются отдельной строкой с истиной.
- * Филиал вне текущей РРС управляющего настройками этой РРС не перекрывается.
+ * Свой филиал внутри РРС открыт всегда. Остальные отметки выключены,
+ * пока их не включат лично или общей выдачей. Личная строка важнее общей выдачи.
+ * Свой филиал вне текущей РРС этой выдачей не меняется: там остаются настройки роли.
  */
 export function effectiveManagerFlags(
     home: boolean,
     sameTerritory: boolean,
     grants: readonly StoredManagerGrant[],
     roleSettings: ManagerGrantSettings,
+    policy: ManagerGrantPolicy,
 ): ManagerGrantSettings & { access: boolean } {
-    const denied = (code: string) => grants.some((grant) => grant.code === code && !grant.allowed);
-    const allowed = (code: string) => grants.some((grant) => grant.code === code && grant.allowed);
     if (home && !sameTerritory) {
         return { access: true, ...roleSettings };
     }
-    if (home) {
-        return {
-            access: true,
-            roles: roleSettings.roles && !denied("branch.roles:write"),
-            brigades: roleSettings.brigades && !denied("branch.brigades:write"),
-            shared: roleSettings.shared && !denied("branch.shared:write"),
-        };
+    if (!sameTerritory) {
+        return EMPTY_FLAGS;
     }
-    if (!sameTerritory || !allowed(MANAGER_BRANCH_ACCESS)) {
+    const access = home || grantFlag(grants, MANAGER_BRANCH_ACCESS, policy.access);
+    if (!access) {
         return EMPTY_FLAGS;
     }
     return {
         access: true,
-        roles: roleSettings.roles && allowed("branch.roles:write"),
-        brigades: roleSettings.brigades && allowed("branch.brigades:write"),
-        shared: roleSettings.shared && allowed("branch.shared:write"),
+        roles: roleSettings.roles && grantFlag(grants, "branch.roles:write", policy.roles),
+        brigades: roleSettings.brigades && grantFlag(grants, "branch.brigades:write", policy.brigades),
+        shared: roleSettings.shared && grantFlag(grants, "branch.shared:write", policy.shared),
     };
+}
+
+function grantFlag(grants: readonly StoredManagerGrant[], code: string, baseline: boolean): boolean {
+    const grant = grants.find((item) => item.code === code);
+    return grant ? grant.allowed : baseline;
 }
 
 export interface ManagerGrantDraft {
@@ -146,21 +171,11 @@ export function sparseManagerGrants(
     branch: ManagerGrantDraft,
     home: boolean,
     roleSettings: ManagerGrantSettings,
+    policy: ManagerGrantPolicy,
+    existing: readonly StoredManagerGrant[],
 ): { rows: SparseManagerGrant[] } | { error: string } {
-    if (home) {
-        if (!branch.access) {
-            return { error: "Свой филиал остаётся открытым" };
-        }
-        const rows: SparseManagerGrant[] = [];
-        for (const [field, code] of MANAGER_SETTING_FIELDS) {
-            if (branch[field] && !roleSettings[field]) {
-                return { error: "Этой настройки нет у роли управляющего" };
-            }
-            if (!branch[field] && roleSettings[field]) {
-                rows.push({ branchId: branch.id, code, allowed: false });
-            }
-        }
-        return { rows };
+    if (home && !branch.access) {
+        return { error: "Свой филиал остаётся открытым" };
     }
     if (!branch.access) {
         for (const [field] of MANAGER_SETTING_FIELDS) {
@@ -168,16 +183,44 @@ export function sparseManagerGrants(
                 return { error: "Настройка чужого филиала включается вместе с доступом" };
             }
         }
-        return { rows: [] };
     }
-    const rows: SparseManagerGrant[] = [{ branchId: branch.id, code: MANAGER_BRANCH_ACCESS, allowed: true }];
+    const rows: SparseManagerGrant[] = [];
+    if (!home) {
+        const accessRow = retainGrant(existing, MANAGER_BRANCH_ACCESS, branch.access, policy.access);
+        if (accessRow) {
+            rows.push({ ...accessRow, branchId: branch.id });
+        }
+    }
+    if (!branch.access) {
+        return { rows };
+    }
     for (const [field, code] of MANAGER_SETTING_FIELDS) {
         if (branch[field] && !roleSettings[field]) {
             return { error: "Этой настройки нет у роли управляющего" };
         }
-        if (branch[field]) {
-            rows.push({ branchId: branch.id, code, allowed: true });
+        if (!roleSettings[field]) {
+            continue;
+        }
+        const settingRow = retainGrant(existing, code, branch[field], policy[field]);
+        if (settingRow) {
+            rows.push({ ...settingRow, branchId: branch.id });
         }
     }
     return { rows };
+}
+
+function retainGrant(
+    existing: readonly StoredManagerGrant[],
+    code: ManagerGrantCode,
+    desired: boolean,
+    baseline: boolean,
+): Omit<SparseManagerGrant, "branchId"> | null {
+    const previous = existing.find((item) => item.code === code);
+    if (desired === baseline) {
+        if (previous && previous.allowed === desired) {
+            return { code, allowed: desired };
+        }
+        return null;
+    }
+    return { code, allowed: desired };
 }

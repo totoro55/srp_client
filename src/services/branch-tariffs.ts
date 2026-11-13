@@ -3,6 +3,7 @@ import { receivesManagerGrants } from "@/lib/manager-grants";
 import { isTariffBaseMode, type TariffBaseMode } from "@/lib/tariff-exceptions";
 import type { AccessView } from "@/server/authz/resolve-access";
 import { db } from "@/services/db";
+import { managerBranchOpenSql } from "@/services/premium-access";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATA_TABLE = /^[a-z][a-z0-9_]{1,49}_v[1-9][0-9]*$/;
@@ -129,16 +130,9 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                   AND EXISTS (
                       SELECT 1
                       FROM employees employee
-                      JOIN manager_branch_grants grant_row
-                        ON grant_row.employee_uuid = employee.uuid
-                       AND grant_row.branch_uuid = branch.uuid
-                       AND grant_row.permission_code = 'branch.access'
-                       AND grant_row.allowed
-                       AND grant_row.territory_uuid = employee.territory_uuid
                       WHERE lower(employee.login) = lower($2)
                         AND NOT employee.deleted
-                        AND employee.territory_uuid IS NOT NULL
-                        AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid
+                        AND ${managerBranchOpenSql("employee.uuid", "employee.territory_uuid")}
                   )
               )
           )
@@ -155,16 +149,9 @@ async function visibleBranch(access: AccessView, period: string, branchId: strin
                   AND EXISTS (
                       SELECT 1
                       FROM employees employee
-                      JOIN manager_branch_grants grant_row
-                        ON grant_row.employee_uuid = employee.uuid
-                       AND grant_row.branch_uuid = branch.uuid
-                       AND grant_row.permission_code = 'branch.access'
-                       AND grant_row.allowed
-                       AND grant_row.territory_uuid = employee.territory_uuid
                       WHERE lower(employee.login) = lower($2)
                         AND NOT employee.deleted
-                        AND employee.territory_uuid IS NOT NULL
-                        AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid
+                        AND ${managerBranchOpenSql("employee.uuid", "employee.territory_uuid")}
                   )
               )
           )

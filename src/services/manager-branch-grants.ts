@@ -1,5 +1,6 @@
 import { can } from "@/lib/access";
 import {
+    closedGrantPolicies,
     effectiveManagerFlags,
     managerTitleGroup,
     receivesManagerGrants,
@@ -7,6 +8,8 @@ import {
     type ManagerAccessPage,
     type ManagerAccessPerson,
     type ManagerGrantDraft,
+    type ManagerGrantPolicies,
+    type ManagerGrantPolicy,
     type ManagerGrantSettings,
     type ManagerTitleGroup,
     type StoredManagerGrant,
@@ -16,6 +19,7 @@ import { decideAccess } from "@/server/authz/match-access";
 import { audit, type AccessView } from "@/server/authz/resolve-access";
 import { listRrsTerritories } from "@/services/basket-connections";
 import { db } from "@/services/db";
+import { managerTitleGroupSql } from "@/services/premium-access";
 import { isDevLoginName } from "@/services/dev-auth";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -83,23 +87,29 @@ interface FlagRow {
     sameTerritory: boolean;
     code: string | null;
     allowed: boolean | null;
+    policyAccess: boolean;
+    policyRoles: boolean;
+    policyBrigades: boolean;
+    policyShared: boolean;
 }
 
 export async function readManagerAccess(access: AccessView, territoryUuid: string): Promise<ManagerAccessPage> {
     const territory = await openTerritory(access, territoryUuid);
     const mode = await accessMode(access, territory.uuid);
     const settings = await roleSettings();
+    const policies = await readPolicies(territory.uuid, settings);
     if (mode === "readonly") {
         return {
             territory,
             editable: false,
             notice: "Выдача доступа доступна только в вашей РРС.",
             settings,
+            policies,
             managers: [],
         };
     }
-    const managers = await readManagers(territory.uuid, settings);
-    return { territory, editable: true, notice: null, settings, managers };
+    const managers = await readManagers(territory.uuid, settings, policies);
+    return { territory, editable: true, notice: null, settings, policies, managers };
 }
 
 export async function saveManagerAccess(
@@ -140,8 +150,11 @@ export async function saveManagerAccess(
     }
     const homeId = employee.branchId && branchIds.has(employee.branchId) ? employee.branchId : null;
     const settings = await roleSettings();
+    const policies = await readPolicies(territory.uuid, settings);
+    const existing = await readStoredGrants(territory.uuid, [employee.id]);
+    const stored = existing.get(employee.id) ?? new Map<string, StoredManagerGrant[]>();
     const rows = normalized.flatMap((draft) => {
-        const sparse = sparseManagerGrants(draft, draft.id === homeId, settings);
+        const sparse = sparseManagerGrants(draft, draft.id === homeId, settings, policies[group], stored.get(draft.id) ?? []);
         if ("error" in sparse) {
             throw new ManagerGrantError(400, sparse.error);
         }
@@ -167,6 +180,41 @@ export async function saveManagerAccess(
         );
     });
     await audit(access.username, "manager.branch.grant", `${employee.login} → ${territory.uuid}`);
+    return readManagerAccess(access, territory.uuid);
+}
+
+export async function saveManagerGrantPolicy(
+    access: AccessView,
+    territoryUuid: string,
+    policies: ManagerGrantPolicies,
+): Promise<ManagerAccessPage> {
+    const territory = await openTerritory(access, territoryUuid);
+    const mode = await accessMode(access, territory.uuid);
+    if (mode !== "edit") {
+        throw new ManagerGrantError(403, "Выдача доступа доступна только в вашей РРС");
+    }
+    const settings = await roleSettings();
+    const rows = policyRows(policies, settings);
+    await db.transaction(async (query) => {
+        await query("DELETE FROM manager_grant_policies WHERE territory_uuid = $1::uuid", [territory.uuid]);
+        if (rows.length === 0) {
+            return;
+        }
+        await query(
+            `
+            INSERT INTO manager_grant_policies (
+                territory_uuid, permission_code, enabled, updated_by, title_group
+            )
+            SELECT $1::uuid, row.permission_code, true, $2, row.title_group
+            FROM unnest($3::text[], $4::text[]) AS row(permission_code, title_group)
+            `,
+            [territory.uuid, access.username, rows.map((row) => row.code), rows.map((row) => row.group)],
+        );
+    });
+    const details = rows.length === 0
+        ? "выключено"
+        : rows.map((row) => `${row.group}:${row.code}`).join(", ");
+    await audit(access.username, "manager.grant.policy", `${territory.uuid}: ${details}`);
     return readManagerAccess(access, territory.uuid);
 }
 
@@ -210,7 +258,7 @@ export async function managerMayChangeBranch(
     return settings.shared;
 }
 
-async function readManagers(territoryId: string, settings: ManagerGrantSettings): Promise<ManagerAccessPerson[]> {
+async function readManagers(territoryId: string, settings: ManagerGrantSettings, policies: ManagerGrantPolicies): Promise<ManagerAccessPerson[]> {
     const people = await db.query<PersonRow>(
         `
         WITH people AS (
@@ -277,38 +325,14 @@ async function readManagers(territoryId: string, settings: ManagerGrantSettings)
         if (isDevLoginName(person.login)) {
             return false;
         }
-        const group = managerTitleGroup(person.title);
-        return group !== null && titleMayReceiveGrant(group, person.roleCode);
+        const titleGroup = managerTitleGroup(person.title);
+        return titleGroup !== null && titleMayReceiveGrant(titleGroup, person.roleCode);
     });
     if (managers.length === 0) {
         return [];
     }
     const branches = await territoryBranches(territoryId);
-    const grants = await db.query<GrantRow>(
-        `
-        SELECT employee_uuid::text AS "employeeId",
-               branch_uuid::text AS "branchId",
-               permission_code AS code,
-               allowed
-        FROM manager_branch_grants
-        WHERE territory_uuid = $1::uuid
-          AND employee_uuid = ANY($2::uuid[])
-        `,
-        [territoryId, managers.map((person) => person.id)],
-    );
-    const byEmployee = new Map<string, Map<string, StoredManagerGrant[]>>();
-    for (const grant of grants) {
-        const employeeId = grant.employeeId.toLowerCase();
-        const branchId = grant.branchId.toLowerCase();
-        let branchesOfEmployee = byEmployee.get(employeeId);
-        if (!branchesOfEmployee) {
-            branchesOfEmployee = new Map();
-            byEmployee.set(employeeId, branchesOfEmployee);
-        }
-        const list = branchesOfEmployee.get(branchId) ?? [];
-        list.push({ code: grant.code, allowed: grant.allowed });
-        branchesOfEmployee.set(branchId, list);
-    }
+    const byEmployee = await readStoredGrants(territoryId, managers.map((person) => person.id));
     return managers.map((person) => {
         const homeId = person.branchId?.toLowerCase() ?? null;
         const stored = byEmployee.get(person.id.toLowerCase()) ?? new Map<string, StoredManagerGrant[]>();
@@ -324,11 +348,113 @@ async function readManagers(territoryId: string, settings: ManagerGrantSettings)
             branchName: person.branchName,
             branches: branches.map((branch) => {
                 const home = homeId === branch.id;
-                const flags = effectiveManagerFlags(home, true, stored.get(branch.id) ?? [], settings);
+                const flags = effectiveManagerFlags(home, true, stored.get(branch.id) ?? [], settings, policies[group]);
                 return { ...branch, ...flags, home };
             }),
         };
     }).filter((person): person is ManagerAccessPerson => person !== null);
+}
+
+async function readStoredGrants(territoryId: string, employeeIds: string[]): Promise<Map<string, Map<string, StoredManagerGrant[]>>> {
+    const byEmployee = new Map<string, Map<string, StoredManagerGrant[]>>();
+    if (employeeIds.length === 0) {
+        return byEmployee;
+    }
+    const grants = await db.query<GrantRow>(
+        `
+        SELECT employee_uuid::text AS "employeeId",
+               branch_uuid::text AS "branchId",
+               permission_code AS code,
+               allowed
+        FROM manager_branch_grants
+        WHERE territory_uuid = $1::uuid
+          AND employee_uuid = ANY($2::uuid[])
+        `,
+        [territoryId, employeeIds],
+    );
+    for (const grant of grants) {
+        const employeeId = grant.employeeId.toLowerCase();
+        const branchId = grant.branchId.toLowerCase();
+        let branchesOfEmployee = byEmployee.get(employeeId);
+        if (!branchesOfEmployee) {
+            branchesOfEmployee = new Map();
+            byEmployee.set(employeeId, branchesOfEmployee);
+        }
+        const list = branchesOfEmployee.get(branchId) ?? [];
+        list.push({ code: grant.code, allowed: grant.allowed });
+        branchesOfEmployee.set(branchId, list);
+    }
+    return byEmployee;
+}
+
+async function readPolicies(territoryId: string, settings: ManagerGrantSettings): Promise<ManagerGrantPolicies> {
+    const rows = await db.query<{ code: string; titleGroup: ManagerTitleGroup }>(
+        `
+        SELECT permission_code AS code,
+               title_group AS "titleGroup"
+        FROM manager_grant_policies
+        WHERE territory_uuid = $1::uuid
+          AND enabled
+        `,
+        [territoryId],
+    );
+    const policies = closedGrantPolicies();
+    for (const row of rows) {
+        const policy = policies[row.titleGroup];
+        if (!policy) {
+            continue;
+        }
+        if (row.code === "branch.access") {
+            policy.access = true;
+        } else if (row.code === "branch.roles:write") {
+            policy.roles = settings.roles;
+        } else if (row.code === "branch.brigades:write") {
+            policy.brigades = settings.brigades;
+        } else if (row.code === "branch.shared:write") {
+            policy.shared = settings.shared;
+        }
+    }
+    return policies;
+}
+
+function policyRows(
+    policies: ManagerGrantPolicies,
+    settings: ManagerGrantSettings,
+): { code: string; group: ManagerTitleGroup }[] {
+    const rows: { code: string; group: ManagerTitleGroup }[] = [];
+    for (const group of ["manager", "deputy", "senior"] as const) {
+        const policy = maskPolicy(policies[group], settings);
+        for (const code of policyCodes(policy)) {
+            rows.push({ code, group });
+        }
+    }
+    return rows;
+}
+
+function maskPolicy(policy: ManagerGrantPolicy, settings: ManagerGrantSettings): ManagerGrantPolicy {
+    return {
+        access: policy.access,
+        roles: policy.roles && settings.roles,
+        brigades: policy.brigades && settings.brigades,
+        shared: policy.shared && settings.shared,
+    };
+}
+
+function policyCodes(policy: ManagerGrantPolicy): string[] {
+    const codes: string[] = [];
+    if (policy.access) {
+        codes.push("branch.access");
+    }
+    if (policy.roles) {
+        codes.push("branch.roles:write");
+    }
+    if (policy.brigades) {
+        codes.push("branch.brigades:write");
+    }
+    if (policy.shared) {
+        codes.push("branch.shared:write");
+    }
+    return codes;
 }
 
 function titleMayReceiveGrant(group: ManagerTitleGroup, roleCode: string | null | undefined): boolean {
@@ -351,14 +477,19 @@ async function readManagerFlags(
         SELECT place.home,
                place.same_territory AS "sameTerritory",
                grant_row.permission_code AS code,
-               grant_row.allowed
+               grant_row.allowed,
+               COALESCE(policy.access, false) AS "policyAccess",
+               COALESCE(policy.roles, false) AS "policyRoles",
+               COALESCE(policy.brigades, false) AS "policyBrigades",
+               COALESCE(policy.shared, false) AS "policyShared"
         FROM (
             SELECT employee.uuid AS employee_id,
                    employee.territory_uuid AS employee_territory,
                    branch.territory_uuid AS branch_territory,
                    branch.uuid IS NOT DISTINCT FROM employee.branch_uuid AS home,
                    employee.territory_uuid IS NOT NULL
-                       AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid AS same_territory
+                       AND branch.territory_uuid IS NOT DISTINCT FROM employee.territory_uuid AS same_territory,
+                   ${managerTitleGroupSql("employee.title")} AS title_group
             FROM employees employee
             JOIN branches branch ON branch.uuid = $2::uuid AND NOT branch.deleted
             WHERE lower(employee.login) = lower($1)
@@ -370,6 +501,15 @@ async function readManagerFlags(
          AND grant_row.territory_uuid = place.employee_territory
          AND grant_row.employee_uuid = place.employee_id
          AND grant_row.branch_uuid = $2::uuid
+        LEFT JOIN LATERAL (
+            SELECT bool_or(permission_code = 'branch.access' AND enabled) AS access,
+                   bool_or(permission_code = 'branch.roles:write' AND enabled) AS roles,
+                   bool_or(permission_code = 'branch.brigades:write' AND enabled) AS brigades,
+                   bool_or(permission_code = 'branch.shared:write' AND enabled) AS shared
+            FROM manager_grant_policies
+            WHERE territory_uuid = place.employee_territory
+              AND title_group = place.title_group
+        ) policy ON place.same_territory
         `,
         [username, branchId],
     );
@@ -377,7 +517,13 @@ async function readManagerFlags(
         return { access: false, roles: false, brigades: false, shared: false };
     }
     const grants = rows.flatMap((row) => row.code ? [{ code: row.code, allowed: row.allowed === true }] : []);
-    return effectiveManagerFlags(rows[0].home, rows[0].sameTerritory, grants, roleSettings);
+    const policy: ManagerGrantPolicy = {
+        access: rows[0].policyAccess === true,
+        roles: rows[0].policyRoles === true && roleSettings.roles,
+        brigades: rows[0].policyBrigades === true && roleSettings.brigades,
+        shared: rows[0].policyShared === true && roleSettings.shared,
+    };
+    return effectiveManagerFlags(rows[0].home, rows[0].sameTerritory, grants, roleSettings, policy);
 }
 
 async function openTerritory(access: AccessView, territoryUuid: string): Promise<TerritoryRow> {

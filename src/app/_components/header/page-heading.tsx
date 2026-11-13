@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import {
     Breadcrumb,
     BreadcrumbItem,
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 export type PageHeadingMenuItem = {
     id: string;
     label: string;
+    group?: string;
 };
 
 export type PageHeadingCrumb = {
@@ -44,7 +45,7 @@ const PageHeadingTrailContext = createContext<PageHeadingCrumb[] | null>(null);
 const PageHeadingMenuContext = createContext<RefObject<((key: string, id: string) => void) | null> | null>(null);
 
 function menuSignature(item: PageHeadingCrumb): string {
-    return `${item.menuKey ?? ""}\0${item.menuValue ?? ""}\0${(item.menu ?? []).map((entry) => `${entry.id}:${entry.label}`).join(",")}`;
+    return `${item.menuKey ?? ""}\0${item.menuValue ?? ""}\0${(item.menu ?? []).map((entry) => `${entry.id}:${entry.label}:${entry.group ?? ""}`).join(",")}`;
 }
 
 function sameTrail(left: PageHeadingCrumb[], right: PageHeadingCrumb[]): boolean {
@@ -147,10 +148,28 @@ function BranchMenu({
     onSelect: (id: string) => void;
 }) {
     const [query, setQuery] = useState("");
+    const [opened, setOpened] = useState<string[]>([]);
+    const groups = groupMenu(choices);
+    const folders = groups.length > 1;
     const needle = query.trim().toLowerCase();
-    const visible = needle ? choices.filter((choice) => choice.label.toLowerCase().includes(needle)) : choices;
+    const selectedKey = groups.find((group) => group.items.some((item) => item.id === value))?.key ?? "";
+
+    function expanded(key: string): boolean {
+        if (needle !== "") {
+            return true;
+        }
+        return opened.includes(key);
+    }
+
     return (
-        <DropdownMenu>
+        <DropdownMenu
+            onOpenChange={(open) => {
+                if (open) {
+                    setQuery("");
+                    setOpened(selectedKey === "" ? [] : [selectedKey]);
+                }
+            }}
+        >
             <DropdownMenuTrigger
                 type="button"
                 aria-label="Выбрать филиал"
@@ -163,23 +182,93 @@ function BranchMenu({
                     <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
                         <Input
                             value={query}
-                            placeholder="Филиал"
+                            placeholder={folders ? "РРС или филиал" : "Филиал"}
                             aria-label="Найти филиал"
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={(event) => event.stopPropagation()}
                         />
                     </div>
                 ) : null}
-                {visible.length === 0 ? <p className="px-2 py-1.5 text-sm text-muted-foreground">Ничего не найдено</p> : null}
-                {visible.map((choice) => (
+                {folders ? groups.map((group) => {
+                    const visible = matchingItems(group, needle);
+                    if (visible.length === 0) {
+                        return null;
+                    }
+                    const open = expanded(group.key);
+                    return (
+                        <div key={group.key}>
+                            <button
+                                type="button"
+                                className="flex w-full items-center gap-1 rounded-sm px-2 py-1.5 text-left text-sm font-medium hover:bg-muted"
+                                aria-expanded={open}
+                                onClick={() => {
+                                    if (needle !== "") {
+                                        return;
+                                    }
+                                    setOpened((current) => current.includes(group.key) ? current.filter((key) => key !== group.key) : [...current, group.key]);
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                            >
+                                {open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+                                <span className="min-w-0 truncate">{group.name}</span>
+                            </button>
+                            {open ? visible.map((choice) => (
+                                <DropdownMenuItem key={choice.id} inset onClick={() => onSelect(choice.id)}>
+                                    <Check className={choice.id === value ? undefined : "invisible"} />
+                                    {choice.label}
+                                </DropdownMenuItem>
+                            )) : null}
+                        </div>
+                    );
+                }) : null}
+                {folders && groups.every((group) => matchingItems(group, needle).length === 0) ? (
+                    <p className="px-2 py-1.5 text-sm text-muted-foreground">Ничего не найдено</p>
+                ) : null}
+                {folders ? null : matchingItems(groups[0], needle).map((choice) => (
                     <DropdownMenuItem key={choice.id} onClick={() => onSelect(choice.id)}>
                         <Check className={choice.id === value ? undefined : "invisible"} />
                         {choice.label}
                     </DropdownMenuItem>
                 ))}
+                {!folders && matchingItems(groups[0], needle).length === 0 ? (
+                    <p className="px-2 py-1.5 text-sm text-muted-foreground">Ничего не найдено</p>
+                ) : null}
             </DropdownMenuContent>
         </DropdownMenu>
     );
+}
+
+function groupMenu(choices: readonly PageHeadingMenuItem[]): { key: string; name: string; items: PageHeadingMenuItem[] }[] {
+    const groups: { key: string; name: string; items: PageHeadingMenuItem[] }[] = [];
+    const index = new Map<string, number>();
+    for (const choice of choices) {
+        const name = choice.group?.trim() || "РРС не указана";
+        const key = name.toLowerCase();
+        const at = index.get(key);
+        if (at === undefined) {
+            index.set(key, groups.length);
+            groups.push({ key, name, items: [choice] });
+        } else {
+            groups[at]?.items.push(choice);
+        }
+    }
+    return groups;
+}
+
+function matchingItems(
+    group: { name: string; items: PageHeadingMenuItem[] } | undefined,
+    needle: string,
+): PageHeadingMenuItem[] {
+    if (!group) {
+        return [];
+    }
+    if (needle === "") {
+        return group.items;
+    }
+    if (group.name.toLowerCase().includes(needle)) {
+        return group.items;
+    }
+    return group.items.filter((item) => item.label.toLowerCase().includes(needle));
 }
 
 function trailKey(item: PageHeadingCrumb): string {

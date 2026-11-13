@@ -10,23 +10,30 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, DataTableSkeleton } from "@/components/loading-state";
 import { useAccess } from "@/hooks/useAccess";
-import { DEFAULT_TITLE_FILTER, TITLE_FILTERS, type ManagerAccessBranch, type ManagerAccessPage, type ManagerAccessPerson, type ManagerSettingField, type ManagerTitleGroup } from "@/lib/manager-grants";
+import { closedGrantPolicies, DEFAULT_TITLE_FILTER, TITLE_FILTERS, type ManagerAccessBranch, type ManagerAccessPage, type ManagerAccessPerson, type ManagerGrantPolicies, type ManagerGrantPolicy, type ManagerSettingField, type ManagerTitleGroup } from "@/lib/manager-grants";
 import { notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { ApiResponse } from "@/types/api";
 import { RrsSectionNav } from "../../../_components/RrsSectionNav";
 
-const ACCESS_HINT = "Открывает кабинет филиала. На филиале сотрудника доступ включён всегда. Кабинет другого филиала этой РРС закрыт, пока доступ не выдан.";
+const ACCESS_HINT = "Открывает кабинет филиала. На филиале сотрудника доступ включён всегда. Кабинет другого филиала закрыт, пока его не откроют этому сотруднику или всем сотрудникам его должности.";
+
+const TERRITORY_GROUPS: { id: ManagerTitleGroup; label: string }[] = [
+    { id: "manager", label: "Управляющие" },
+    { id: "deputy", label: "Заместители управляющего" },
+    { id: "senior", label: "Старшие продавцы" },
+];
 
 const SETTING_COLUMNS: { field: ManagerSettingField; title: string; hint: string }[] = [
-    { field: "roles", title: "Сотрудники", hint: "Разрешает назначать роли сотрудников и менять признак «В расчёте». На своём филиале включено, пока отметку не снимут. На другом филиале включается отдельно и только вместе с доступом." },
-    { field: "brigades", title: "Бригады", hint: "Разрешает настраивать бригады филиала. На своём филиале включено, пока отметку не снимут. На другом филиале включается отдельно и только вместе с доступом." },
-    { field: "shared", title: "Общая премия", hint: "Разрешает выбирать роли, между которыми распределяется общая премия. На своём филиале включено, пока отметку не снимут. На другом филиале включается отдельно и только вместе с доступом." },
+    { field: "roles", title: "Сотрудники", hint: "Разрешает назначать роли сотрудников и менять признак «В расчёте». По умолчанию выключено. Включается этому сотруднику или всем сотрудникам его должности и только на филиале, куда есть доступ." },
+    { field: "brigades", title: "Бригады", hint: "Разрешает настраивать бригады филиала. По умолчанию выключено. Включается этому сотруднику или всем сотрудникам его должности и только на филиале, куда есть доступ." },
+    { field: "shared", title: "Общая премия", hint: "Разрешает выбирать роли, между которыми распределяется общая премия. По умолчанию выключено. Включается этому сотруднику или всем сотрудникам его должности и только на филиале, куда есть доступ." },
 ];
 
 export function ManagerAccess() {
@@ -40,8 +47,11 @@ export function ManagerAccess() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [query, setQuery] = useState("");
     const [titles, setTitles] = useState<Record<ManagerTitleGroup, boolean>>(DEFAULT_TITLE_FILTER);
+    const [tab, setTab] = useState("people");
+    const [policyDraft, setPolicyDraft] = useState<ManagerGrantPolicies | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savingPolicy, setSavingPolicy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [preparedTerritory, setPreparedTerritory] = useState<string | null>(null);
     if (territoryUuid !== preparedTerritory) {
@@ -53,6 +63,7 @@ export function ManagerAccess() {
         setSelectedId(null);
         setQuery("");
         setTitles(DEFAULT_TITLE_FILTER);
+        setPolicyDraft(null);
     }
 
     const load = useCallback(async () => {
@@ -103,6 +114,12 @@ export function ManagerAccess() {
     const selected = filtered.find((manager) => manager.id === selectedId) ?? filtered[0] ?? null;
     const selectedBranches = selected ? drafts[selected.id] ?? selected.branches : [];
     const dirty = selected ? !sameBranches(selectedBranches, selected.branches) : false;
+    const personDirty = page?.managers.some((manager) => {
+        const draft = drafts[manager.id];
+        return draft ? !sameBranches(draft, manager.branches) : false;
+    }) ?? false;
+    const policies = policyDraft ?? page?.policies ?? closedGrantPolicies();
+    const policyDirty = page ? !samePolicies(policies, page.policies) : false;
     const columns = SETTING_COLUMNS.filter((column) => page?.settings[column.field]);
 
     function branchesOf(manager: ManagerAccessPerson): ManagerAccessBranch[] {
@@ -170,6 +187,34 @@ export function ManagerAccess() {
         }
     }
 
+    async function savePolicy() {
+        if (!page || !policyDirty || personDirty) {
+            return;
+        }
+        setSavingPolicy(true);
+        setError(null);
+        try {
+            const response = await fetch(`/api/rrs/cards/${territoryUuid}/access/policy`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(policies),
+            });
+            const json = (await response.json()) as ApiResponse<ManagerAccessPage>;
+            if (!json.success) {
+                setError(json.error.message);
+                return;
+            }
+            setPage(json.data);
+            setPolicyDraft(null);
+            setDrafts({});
+            notifySuccess("Общая выдача сохранена");
+        } catch {
+            setError("Не удалось сохранить общую выдачу");
+        } finally {
+            setSavingPolicy(false);
+        }
+    }
+
     return (
         <form className="flex w-full flex-col gap-4" onSubmit={(event) => event.preventDefault()}>
             <RrsSectionNav
@@ -182,7 +227,7 @@ export function ManagerAccess() {
                         <p className={cn("text-sm text-amber-800 max-sm:w-full max-sm:text-right sm:absolute sm:right-full sm:mr-2 sm:whitespace-nowrap dark:text-amber-200", !dirty && "hidden")}>
                             Есть несохранённые изменения
                         </p>
-                        <Button type="button" size="sm" disabled={saving || loading || !selected || !dirty} onClick={() => void save()}>
+                        <Button type="button" size="sm" disabled={saving || savingPolicy || loading || !selected || !dirty} onClick={() => void save()}>
                             {saving ? <ButtonSpinner /> : <Save />}
                             Сохранить
                         </Button>
@@ -190,7 +235,7 @@ export function ManagerAccess() {
                             type="button"
                             size="sm"
                             variant="outline"
-                            disabled={saving || !dirty || !selected}
+                            disabled={saving || savingPolicy || !dirty || !selected}
                             onClick={() => {
                                 if (!selected) {
                                     return;
@@ -222,6 +267,12 @@ export function ManagerAccess() {
             {loading && !page ? <DataTableSkeleton columns={2 + columns.length} rows={8} /> : null}
             {page && !page.editable ? <p className="text-sm text-muted-foreground">{page.notice}</p> : null}
             {page?.editable ? (
+                <Tabs value={tab} onValueChange={(value) => { if (typeof value === "string") setTab(value); }} className="gap-4">
+                    <TabsList>
+                        <TabsTrigger value="people">Сотрудники</TabsTrigger>
+                        <TabsTrigger value="territory">Территория</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="people">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
                     <div className="flex min-w-0 flex-col gap-2 lg:w-80 lg:shrink-0">
                         <div className="flex items-center gap-2">
@@ -268,6 +319,7 @@ export function ManagerAccess() {
                             })}
                         </div>
                     </div>
+                    <div className="flex min-w-0 flex-1 flex-col gap-3">
                     {selected && selectedBranches.length > 0 ? (
                         <Table containerClassName="max-h-[calc(100vh-16rem)] min-w-0 flex-1 rounded-lg border">
                             <TableHeader className="sticky top-0 z-10 bg-background">
@@ -297,7 +349,7 @@ export function ManagerAccess() {
                                             <div className="flex justify-center">
                                                 <Checkbox
                                                     checked={branch.home || branch.access}
-                                                    disabled={saving || branch.home}
+                                                    disabled={saving || savingPolicy || branch.home}
                                                     aria-label={branch.home ? `${branch.name}: свой филиал открыт` : `${branch.name}: доступ`}
                                                     onCheckedChange={(value) => updateBranch(branch.id, { access: value === true })}
                                                 />
@@ -310,7 +362,7 @@ export function ManagerAccess() {
                                                     <div className="flex justify-center">
                                                         <Checkbox
                                                             checked={enabled && branch[column.field]}
-                                                            disabled={saving || !enabled}
+                                                            disabled={saving || savingPolicy || !enabled}
                                                             aria-label={`${branch.name}: ${column.title}`}
                                                             onCheckedChange={(value) => updateBranch(branch.id, { [column.field]: value === true })}
                                                         />
@@ -326,9 +378,86 @@ export function ManagerAccess() {
                     {selected && selectedBranches.length === 0 ? (
                         <p className="text-sm text-muted-foreground">У этой РРС нет филиалов.</p>
                     ) : null}
+                    </div>
                 </div>
+                    </TabsContent>
+                    <TabsContent value="territory">
+                        <TerritoryGrant
+                            policies={policies}
+                            columns={columns}
+                            dirty={policyDirty}
+                            saving={savingPolicy}
+                            blocked={personDirty || saving}
+                            onChange={(group, patch) => setPolicyDraft({
+                                ...policies,
+                                [group]: { ...policies[group], ...patch },
+                            })}
+                            onApply={() => void savePolicy()}
+                        />
+                    </TabsContent>
+                </Tabs>
             ) : null}
         </form>
+    );
+}
+
+function TerritoryGrant({
+    policies,
+    columns,
+    dirty,
+    saving,
+    blocked,
+    onChange,
+    onApply,
+}: {
+    policies: ManagerGrantPolicies;
+    columns: { field: ManagerSettingField; title: string }[];
+    dirty: boolean;
+    saving: boolean;
+    blocked: boolean;
+    onChange: (group: ManagerTitleGroup, patch: Partial<ManagerGrantPolicy>) => void;
+    onApply: () => void;
+}) {
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="max-w-3xl text-sm text-muted-foreground">Отметка действует для всех текущих и новых сотрудников выбранной должности. «Все кабинеты» открывает каждый филиал этой РРС. Настройка включается на филиалах, куда у сотрудника есть доступ, включая свой. У отдельного сотрудника отметку можно снять на вкладке «Сотрудники».</p>
+                <Button type="button" size="sm" disabled={!dirty || saving || blocked} title={blocked ? "Сначала сохраните или отмените изменения сотрудника" : undefined} onClick={onApply}>
+                    {saving ? <ButtonSpinner /> : <Save />}
+                    Применить
+                </Button>
+            </div>
+            {TERRITORY_GROUPS.map((group) => {
+                const policy = policies[group.id];
+                return (
+                    <section key={group.id} className="flex flex-col gap-3 rounded-lg border p-3">
+                        <h3 className="text-sm font-medium">{group.label}</h3>
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                            <Label className="font-normal">
+                                <Checkbox
+                                    checked={policy.access}
+                                    disabled={saving || blocked}
+                                    aria-label={`${group.label}: все кабинеты`}
+                                    onCheckedChange={(value) => onChange(group.id, { access: value === true })}
+                                />
+                                <span>Все кабинеты</span>
+                            </Label>
+                            {columns.map((column) => (
+                                <Label key={column.field} className="font-normal">
+                                    <Checkbox
+                                        checked={policy[column.field]}
+                                        disabled={saving || blocked}
+                                        aria-label={`${group.label}: ${column.title}`}
+                                        onCheckedChange={(value) => onChange(group.id, { [column.field]: value === true })}
+                                    />
+                                    <span>{column.title}</span>
+                                </Label>
+                            ))}
+                        </div>
+                    </section>
+                );
+            })}
+        </div>
     );
 }
 
@@ -366,6 +495,17 @@ function TitleFilter({
     );
 }
 
+function samePolicies(left: ManagerGrantPolicies, right: ManagerGrantPolicies): boolean {
+    return TITLE_FILTERS.every((filter) => samePolicy(left[filter.id], right[filter.id]));
+}
+
+function samePolicy(left: ManagerGrantPolicy, right: ManagerGrantPolicy): boolean {
+    return left.access === right.access
+        && left.roles === right.roles
+        && left.brigades === right.brigades
+        && left.shared === right.shared;
+}
+
 function sameBranches(left: readonly ManagerAccessBranch[], right: readonly ManagerAccessBranch[]): boolean {
     if (left.length !== right.length) {
         return false;
@@ -400,11 +540,15 @@ function AccessHelp() {
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Свой филиал</h3>
-                <p className="text-muted-foreground">Филиал сотрудника в справочнике отмечен знаком «Свой». Доступ к нему включён и не отключается. Настройки на своём филиале включены, пока их не снимут. Снять можно только настройку, которая предусмотрена ролью «Управляющий».</p>
+                <p className="text-muted-foreground">Филиал сотрудника в справочнике отмечен знаком «Свой». Доступ к нему включён и не отключается. Настройки на своём филиале выключены, пока их не включат этому сотруднику или всем сотрудникам его должности. Выдать можно только настройку, которая предусмотрена ролью «Управляющий».</p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Другой филиал</h3>
-                <p className="text-muted-foreground">Кабинет другого филиала закрыт, пока не включён доступ. Каждая настройка включается отдельно и только вместе с доступом. Настройка, которой нет у роли «Управляющий», не выдаётся. В таблице показаны только такие настройки.</p>
+                <p className="text-muted-foreground">Кабинет другого филиала закрыт, пока доступ не включён этому сотруднику или всем сотрудникам его должности. Каждая настройка включается отдельно и только вместе с доступом. Настройка, которой нет у роли «Управляющий», не выдаётся.</p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Территория</h3>
+                <p className="text-muted-foreground">Вкладка «Территория» выдаёт отметку сразу всем сотрудникам одной должности: управляющим, заместителям управляющего или старшим продавцам. Например, просмотр всех кабинетов можно включить только управляющим. Пока отметка включена, новый сотрудник этой должности получает её без отдельной записи. На вкладке «Сотрудники» личная отметка важнее общей. Кнопка «Применить» записывает общую выдачу.</p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Виды доступа</h3>
@@ -412,11 +556,11 @@ function AccessHelp() {
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Перевод сотрудника</h3>
-                <p className="text-muted-foreground">Запись относится к сотруднику и к РРС, в которой она сделана. После перевода в другую РРС отметки прежней РРС не применяются. При возвращении в ту же РРС они снова действуют. Смена филиала внутри этой РРС сохраняет ранее выданные филиалы. На новом своём филиале снова действуют настройки роли.</p>
+                <p className="text-muted-foreground">Запись относится к сотруднику и к РРС, в которой она сделана. После перевода в другую РРС отметки прежней РРС не применяются. При возвращении в ту же РРС они снова действуют. Смена филиала внутри этой РРС сохраняет ранее выданные филиалы. На новом своём филиале действуют общие отметки его должности: выключенная настройка остаётся выключенной.</p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Сохранение</h3>
-                <p className="text-muted-foreground">Изменения записываются кнопкой «Сохранить» для выбранного сотрудника. «Отменить» возвращает несохранённые отметки этого сотрудника. Другой администратор той же РРС видит и изменяет те же отметки.</p>
+                <p className="text-muted-foreground">На вкладке «Сотрудники» кнопка «Сохранить» записывает отметки выбранного сотрудника, «Отменить» возвращает его несохранённые отметки. На вкладке «Территория» кнопка «Применить» записывает общую выдачу по должностям. Другой администратор той же РРС видит и изменяет те же отметки.</p>
             </section>
         </div>
     );

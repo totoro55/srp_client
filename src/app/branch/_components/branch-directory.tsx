@@ -11,6 +11,8 @@ export interface BranchChoice {
     name: string;
     code: string;
     own: boolean;
+    territoryId: string;
+    territoryName: string;
 }
 
 interface BranchDirectoryValue {

@@ -65,6 +65,54 @@ LEFT JOIN LATERAL (
 ) home ON true
 `;
 
+export function managerTitleGroupSql(titleSql: string): string {
+    const title = `replace(lower(COALESCE(${titleSql}, '')), 'ё', 'е')`;
+    return `CASE
+        WHEN ${title} LIKE 'зам. управляющего магазина%'
+          OR ${title} LIKE 'заместитель управляющего магазина%' THEN 'deputy'
+        WHEN ${title} LIKE 'старший продавец%' THEN 'senior'
+        WHEN ${title} LIKE 'управляющий маг.%'
+          OR ${title} LIKE 'управляющий филиала магазин-склад%' THEN 'manager'
+        ELSE ''
+    END`;
+}
+
+export function managerBranchOpenSql(employeeId: string, territoryId: string): string {
+    return `
+${territoryId} IS NOT NULL
+AND ${employeeId} IS NOT NULL
+AND branch.territory_uuid IS NOT DISTINCT FROM ${territoryId}
+AND NOT EXISTS (
+    SELECT 1
+    FROM manager_branch_grants deny_row
+    WHERE deny_row.territory_uuid = ${territoryId}
+      AND deny_row.employee_uuid = ${employeeId}
+      AND deny_row.branch_uuid = branch.uuid
+      AND deny_row.permission_code = 'branch.access'
+      AND NOT deny_row.allowed
+)
+AND (
+    EXISTS (
+        SELECT 1
+        FROM manager_grant_policies policy
+        JOIN employees policy_employee ON policy_employee.uuid = ${employeeId}
+        WHERE policy.territory_uuid = ${territoryId}
+          AND policy.permission_code = 'branch.access'
+          AND policy.enabled
+          AND policy.title_group = ${managerTitleGroupSql("policy_employee.title")}
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM manager_branch_grants grant_row
+        WHERE grant_row.territory_uuid = ${territoryId}
+          AND grant_row.employee_uuid = ${employeeId}
+          AND grant_row.branch_uuid = branch.uuid
+          AND grant_row.permission_code = 'branch.access'
+          AND grant_row.allowed
+    )
+)`;
+}
+
 export const CABINET_SCOPE_SQL = `
 (
     'all' = ANY($1::text[])
@@ -100,18 +148,7 @@ export const CABINET_SCOPE_SQL = `
     )
     OR (
         'manager' = ANY($1::text[])
-        AND home.territory_uuid IS NOT NULL
-        AND home.employee_id IS NOT NULL
-        AND branch.territory_uuid IS NOT DISTINCT FROM home.territory_uuid
-        AND EXISTS (
-            SELECT 1
-            FROM manager_branch_grants grant_row
-            WHERE grant_row.territory_uuid = home.territory_uuid
-              AND grant_row.employee_uuid = home.employee_id
-              AND grant_row.branch_uuid = branch.uuid
-              AND grant_row.permission_code = 'branch.access'
-              AND grant_row.allowed
-        )
+        AND ${managerBranchOpenSql("home.employee_id", "home.territory_uuid")}
     )
 )
 `;

@@ -153,6 +153,7 @@ export function BranchFrame({ children }: { children: ReactNode }) {
             ? choiceBranches.map((item) => ({
                 id: item.id,
                 label: directory.branchChoice === "assignment" ? item.name : item.own ? `${item.name} · свой` : item.name,
+                group: item.territoryName,
             }))
             : undefined,
     };

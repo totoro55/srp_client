@@ -13,6 +13,8 @@ export interface BranchOption {
     name: string;
     code: string;
     own: boolean;
+    territoryId: string;
+    territoryName: string;
 }
 
 export type { BranchStaffRow };
@@ -39,21 +41,24 @@ export async function readBranchStaff(
         SELECT branch.uuid::text AS id,
                branch.name,
                branch.code,
-               branch.uuid IS NOT DISTINCT FROM home.branch_uuid AS own
+               branch.uuid IS NOT DISTINCT FROM home.branch_uuid AS own,
+               COALESCE(territory.uuid::text, '') AS "territoryId",
+               COALESCE(territory.name, 'РРС не указана') AS "territoryName"
         FROM branches branch
+        LEFT JOIN territories territory ON territory.uuid = branch.territory_uuid
+        LEFT JOIN LATERAL (
+            SELECT motivation.enabled
+            FROM basket_branch_motivation motivation
+            WHERE motivation.branch_uuid = branch.uuid
+              AND motivation.period <= $3::date
+            ORDER BY motivation.period DESC
+            LIMIT 1
+        ) connected ON true
         ${CABINET_HOME_SQL}
         WHERE NOT branch.deleted
+          AND connected.enabled IS TRUE
           AND ${CABINET_SCOPE_SQL}
-          AND (
-              EXISTS (
-                  SELECT 1
-                  FROM raw.hr_ktu staff
-                  WHERE staff.period <= $3::date
-                    AND staff.branch_uuid = branch.uuid
-              )
-              OR branch.uuid IS NOT DISTINCT FROM home.branch_uuid
-          )
-        ORDER BY branch.name
+        ORDER BY territory.name, branch.name
         `,
         [branchListScopes(access), access.username, period],
     );
