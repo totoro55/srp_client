@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { ListFilter, Save, Undo2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -337,13 +336,12 @@ export function ManagerAccess() {
                             </TableHeader>
                             <TableBody>
                                 {selectedBranches.map((branch) => (
-                                    <TableRow key={branch.id}>
+                                    <TableRow key={branch.id} className={branch.home ? "bg-muted hover:bg-muted" : undefined}>
                                         <TableCell>
-                                            <span className="flex flex-wrap items-center gap-2">
+                                            <span className="flex min-w-0 items-baseline gap-2">
+                                                <span className="shrink-0 font-mono text-xs text-muted-foreground">{wholeBranchCode(branch.code)}</span>
                                                 <span>{branch.name}</span>
-                                                {branch.home ? <Badge variant="outline">Свой</Badge> : null}
                                             </span>
-                                            <span className="block font-mono text-xs text-muted-foreground">{branch.code}</span>
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex justify-center">
@@ -495,6 +493,11 @@ function TitleFilter({
     );
 }
 
+function wholeBranchCode(code: string): string {
+    const match = /^(\d+)\.\d+$/.exec(code.trim());
+    return match ? match[1] : code;
+}
+
 function samePolicies(left: ManagerGrantPolicies, right: ManagerGrantPolicies): boolean {
     return TITLE_FILTERS.every((filter) => samePolicy(left[filter.id], right[filter.id]));
 }
@@ -540,7 +543,7 @@ function AccessHelp() {
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Свой филиал</h3>
-                <p className="text-muted-foreground">Филиал сотрудника в справочнике отмечен знаком «Свой». Доступ к нему включён и не отключается. Настройки на своём филиале выключены, пока их не включат этому сотруднику или всем сотрудникам его должности. Выдать можно только настройку, которая предусмотрена ролью «Управляющий».</p>
+                <p className="text-muted-foreground">Филиал сотрудника в справочнике выделен в списке. Доступ к нему включён и не отключается. Настройки на своём филиале выключены, пока их не включат этому сотруднику или всем сотрудникам его должности. Выдать можно только настройку, которая предусмотрена ролью «Управляющий».</p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Другой филиал</h3>
