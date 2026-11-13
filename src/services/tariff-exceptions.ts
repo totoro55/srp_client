@@ -117,12 +117,6 @@ export async function getTariffExceptions(
     requestedPeriod: string | null,
 ): Promise<TariffExceptionPage> {
     const card = await getRrsCard(access, territoryUuid, requestedPeriod);
-    if (requestedPeriod && !card.savedPeriods.some((item) => item.period === requestedPeriod)) {
-        if (requestedPeriod.slice(0, 7) !== card.editPolicy.currentMonth) {
-            return emptyTariffPage(card, requestedPeriod);
-        }
-        throw new RrsRuleError(400, "Такого сохранения нет");
-    }
     const connection = await loadSalesConnection(territoryUuid, card.period);
     const axis = connection?.axis ?? null;
     const slices = await loadSlices(territoryUuid, card.period);
@@ -144,25 +138,6 @@ export async function getTariffExceptions(
         weights: axis === null ? null : await loadAlgorithmWeights(access, territoryUuid, axis),
         bounds: connection?.versionId ? await loadTariffBounds(territoryUuid, card.period, connection.versionId) : emptyTariffBounds(),
         reference: await loadMonthReference(territoryUuid, card.period),
-    };
-}
-
-function emptyTariffPage(card: Awaited<ReturnType<typeof getRrsCard>>, period: string): TariffExceptionPage {
-    return {
-        territory: card.territory,
-        period,
-        appliedPeriod: card.appliedPeriod,
-        savedPeriods: card.savedPeriods.map((item) => item.period),
-        editable: false,
-        editPolicy: card.editPolicy,
-        connection: null,
-        exceptions: [],
-        stats: [],
-        otherAxis: null,
-        otherAxisTitles: [],
-        weights: null,
-        bounds: emptyTariffBounds(),
-        reference: DEFAULT_TARIFF_REFERENCE,
     };
 }
 
