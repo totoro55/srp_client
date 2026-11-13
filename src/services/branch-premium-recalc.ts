@@ -54,7 +54,7 @@ const PERIOD = /^\d{4}-\d{2}-01$/;
 
 export type MonthRecalcTarget = "baskets" | BasketUpdateKind;
 
-/** Одна корзина, все корзины или общая премия за выбранные даты. Штатное расписание собирается только для корзин за весь месяц. */
+/** Одна корзина, все корзины или общая премия за выбранные даты. Ручной запуск всех корзин в конце считает общую премию. Штатное расписание собирается только для корзин за весь месяц. */
 export async function recalculateMonthSelection(input: RecalcWindow & {
     target: MonthRecalcTarget;
     actor: string;
@@ -82,6 +82,9 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
         });
     }
     const steps = selectionSteps(input.target, input.period, run);
+    if (input.origin === "manual" && input.target === "baskets") {
+        steps.push({ kind: "shared", calculate: () => calculateSharedPremium(input.period, run) });
+    }
     for (const [index, step] of steps.entries()) {
         const runId = await beginPremiumRecalc({
             kind: step.kind,

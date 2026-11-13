@@ -77,7 +77,7 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
         setError(null);
         openRecalcConsole({
             period: request.period,
-            kinds: request.target === "baskets" ? ["sale", "release", "kassa"] : [request.target],
+            kinds: request.target === "baskets" ? ["sale", "release", "kassa", "shared"] : [request.target],
             reason: "manual",
             actor: session.data?.user?.username ?? "",
             scopeLevel: "division",
@@ -406,9 +406,9 @@ function formDescription(form: MonthForm): string {
     }
     if (form.target === "baskets") {
         if (wholeMonth(form)) {
-            return "Сначала заново соберётся штатное расписание по дням. Затем по очереди пересчитаются продажа, выдача и касса. Общая премия этим запуском не считается.";
+            return "Сначала заново соберётся штатное расписание по дням. Затем по очереди пересчитаются продажа, выдача и касса, и в конце общая премия.";
         }
-        return "Пересчитаются документы выбранных дат. Штатное расписание по дням останется текущим. Общая премия этим запуском не считается.";
+        return "Пересчитаются документы выбранных дат. Штатное расписание по дням останется текущим. После корзин пересчитается общая премия за эти даты.";
     }
     if (wholeMonth(form)) {
         return "Сначала заново соберётся штатное расписание по дням. Затем пересчитается эта корзина. Другие корзины и общая премия этим запуском не считаются.";
