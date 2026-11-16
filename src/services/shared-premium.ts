@@ -133,6 +133,95 @@ export async function writeSharedPremiums(
     return inserts.length;
 }
 
+/** Смена ролей делит уже записанный вклад филиала. Документы корзин и закрытие отрезков не перечитываются. */
+async function redistributeBranchSharedPremium(query: PremiumQuery, period: string, branchId: string): Promise<number> {
+    const onlyBranch = branchId.toLowerCase();
+    const stored = await readStoredBranchPool(query, period, onlyBranch);
+    if (!stored.calculated) {
+        await query("SET LOCAL work_mem = '512MB'");
+        return writeSharedPremiums(query, period, onlyBranch);
+    }
+    const asOf = moscowToday();
+    const settings = await readSettings(query);
+    const overrides = await readOverrides(query, period);
+    const territories = await readTerritories(query);
+    const versions = await readVersions(query, period, asOf, onlyBranch);
+    const days = await readTimesheet(query, period, asOf, onlyBranch);
+    const roleSets = await readRoleSets(query);
+    const frozen = await readFrozenShares(query, period, onlyBranch);
+    const pools = new Map<string, number>([[onlyBranch, stored.pool]]);
+    const { inserts } = sharesToWrite(
+        period,
+        settings,
+        overrides,
+        territories,
+        versions,
+        days,
+        [],
+        frozen,
+        { pools, authors: [] },
+        roleSets,
+        onlyBranch,
+    );
+    await query(OPEN_SHARE_DELETE, [period, onlyBranch, null]);
+    await insertShares(query, period, inserts);
+    await query(
+        `
+        UPDATE main.shared_premiums share
+        SET accrual_id = accrual.id
+        FROM main.premium_accruals accrual
+        WHERE share.period = $1::date
+          AND share.branch_uuid = $2::uuid
+          AND share.accrual_id IS NULL
+          AND accrual.period = share.period
+          AND accrual.employee_uuid = share.employee_uuid
+          AND (accrual.branch_uuid IS NULL OR accrual.branch_uuid = share.branch_uuid)
+          AND share.active_from <= accrual.active_until
+          AND share.active_until >= accrual.active_from
+        `,
+        [period, onlyBranch],
+    );
+    return inserts.length;
+}
+
+async function readStoredBranchPool(
+    query: PremiumQuery,
+    period: string,
+    branchId: string,
+): Promise<{ pool: number; calculated: boolean }> {
+    const rows = await query<{ pool: number | string; authors: number; shares: number }>(
+        `
+        SELECT COALESCE((
+                   SELECT SUM(
+                       author.sale + author.release + author.kassa
+                       + author.osnt + author.warehouse + author.unloading
+                   )
+                   FROM main.shared_premium_authors author
+                   WHERE author.period = $1::date
+                     AND author.branch_uuid = $2::uuid
+               ), 0)::float8 AS pool,
+               (
+                   SELECT count(*)::int
+                   FROM main.shared_premium_authors author
+                   WHERE author.period = $1::date
+                     AND author.branch_uuid = $2::uuid
+               ) AS authors,
+               (
+                   SELECT count(*)::int
+                   FROM main.shared_premiums share
+                   WHERE share.period = $1::date
+                     AND share.branch_uuid = $2::uuid
+               ) AS shares
+        `,
+        [period, branchId],
+    );
+    const row = rows[0];
+    return {
+        pool: amount(row?.pool) ?? 0,
+        calculated: (row?.authors ?? 0) > 0 || (row?.shares ?? 0) > 0,
+    };
+}
+
 export async function refreshSharedPremiumAuthors(period: string): Promise<number> {
     if (!PERIOD.test(period)) {
         throw new SalePremiumError("Укажите месяц");
@@ -158,17 +247,17 @@ async function prepareSharedPremium(
     const settings = await readSettings(query);
     const overrides = await readOverrides(query, period);
     const territories = await readTerritories(query);
-    const versions = await readVersions(query, period, asOf);
-    const days = await readTimesheet(query, period, asOf);
-    const premiumDays = await readPremiumDays(query, period, asOf);
+    const versions = await readVersions(query, period, asOf, onlyBranch);
+    const days = await readTimesheet(query, period, asOf, onlyBranch);
+    const premiumDays = await readPremiumDays(query, period, asOf, onlyBranch);
     const outside = await readOutsideContributions(query, period, onlyBranch, asOf);
     const roleSets = await readRoleSets(query);
     if (!window) {
-        const frozen = await readFrozenShares(query, period);
+        const frozen = await readFrozenShares(query, period, onlyBranch);
         return sharesToWrite(period, settings, overrides, territories, versions, days, premiumDays, frozen, outside, roleSets, onlyBranch);
     }
     await prepareClosedSegments(query, asOf, earliest ?? monthBefore(asOf), protect);
-    const frozen = await readRetainedShares(query, period, window.from, window.until);
+    const frozen = await readRetainedShares(query, period, window.from, window.until, onlyBranch);
     const locked = await readClosedSpans(query);
     return sharesToWrite(period, settings, overrides, territories, versions, days, premiumDays, frozen, outside, roleSets, onlyBranch, window, locked);
 }
@@ -410,9 +499,8 @@ export async function saveBranchSharedPremiumRoles(
     }
     try {
         const lines = await db.transaction(async (query) => {
-            await query("SET LOCAL work_mem = '512MB'");
             await query("SET LOCAL statement_timeout = 0");
-            return writeSharedPremiums(query, period, branchId);
+            return redistributeBranchSharedPremium(query, period, branchId);
         });
         await finishPremiumRecalc(runId, lines);
         return {
@@ -548,7 +636,7 @@ function sharesToWrite(
         });
     }
     for (const [branchId, employeeIds] of employeesByBranch) {
-        if (onlyBranch && branchId !== onlyBranch) {
+        if (onlyBranch && branchId.toLowerCase() !== onlyBranch) {
             continue;
         }
         const territory = territories.get(branchId);
@@ -575,7 +663,7 @@ function sharesToWrite(
         const osnt = premiumsBySegment(segments, osntByBranch.get(branchId) ?? []);
         const warehouse = premiumsBySegment(segments, warehouseByBranch.get(branchId) ?? []);
         const unloading = premiumsBySegment(segments, unloadingByBranch.get(branchId) ?? []);
-        let pool = outside.pools.get(branchId) ?? 0;
+        let pool = outside.pools.get(branchId) ?? outside.pools.get(branchId.toLowerCase()) ?? 0;
         for (const segment of segments) {
             if (participates(segment.ktu, roleOf(branchId, segment.id, segment.title, segment.ktu, overrides, settings))) {
                 continue;
@@ -1025,7 +1113,7 @@ interface VersionRow extends StaffVersion {
     inMonth: boolean;
 }
 
-async function readVersions(query: PremiumQuery, period: string, asOf: string): Promise<VersionRow[]> {
+async function readVersions(query: PremiumQuery, period: string, asOf: string, branchId: string | null = null): Promise<VersionRow[]> {
     return query<VersionRow>(
         `
         SELECT staff.employees_uuid AS id,
@@ -1048,9 +1136,10 @@ async function readVersions(query: PremiumQuery, period: string, asOf: string): 
               SELECT person.employees_uuid
               FROM raw.hr_ktu person
               WHERE person.period = $1::date
+                AND ($3::uuid IS NULL OR person.branch_uuid = $3::uuid)
           )
         `,
-        [period, asOf],
+        [period, asOf, branchId],
     );
 }
 
@@ -1058,7 +1147,7 @@ interface TimesheetRow extends HourDay {
     branchId: string;
 }
 
-async function readTimesheet(query: PremiumQuery, period: string, asOf: string): Promise<TimesheetRow[]> {
+async function readTimesheet(query: PremiumQuery, period: string, asOf: string, branchId: string | null = null): Promise<TimesheetRow[]> {
     const rows = await query<{ id: string; branchId: string; day: string; schedule: number | string | null; timesheet: number | string | null }>(
         `
         SELECT day.employees_uuid AS id,
@@ -1075,10 +1164,11 @@ async function readTimesheet(query: PremiumQuery, period: string, asOf: string):
             FROM raw.grafiki_tabeli sheet
             WHERE sheet.period = $1::timestamp
               AND sheet.date::date <= $2::date
+              AND ($3::uuid IS NULL OR sheet.branch_uuid = $3::uuid)
             GROUP BY sheet.employees_uuid, sheet.branch_uuid, sheet.date::date
         ) day
         `,
-        [period, asOf],
+        [period, asOf, branchId],
     );
     return rows.map((row) => ({
         id: row.id,
@@ -1097,12 +1187,12 @@ interface PremiumDayRow {
     amount: number;
 }
 
-async function readPremiumDays(query: PremiumQuery, period: string, asOf: string): Promise<PremiumDayRow[]> {
-    const rows = await dbRows(query, period, asOf);
+async function readPremiumDays(query: PremiumQuery, period: string, asOf: string, branchId: string | null = null): Promise<PremiumDayRow[]> {
+    const rows = await dbRows(query, period, asOf, branchId);
     return rows;
 }
 
-async function dbRows(query: PremiumQuery, period: string, asOf: string): Promise<PremiumDayRow[]> {
+async function dbRows(query: PremiumQuery, period: string, asOf: string, branchId: string | null): Promise<PremiumDayRow[]> {
     const rows = await query<{ branchId: string; id: string; day: string; indicator: string; amount: number | string }>(
         `
         SELECT day.branch_uuid AS "branchId",
@@ -1115,12 +1205,13 @@ async function dbRows(query: PremiumQuery, period: string, asOf: string): Promis
         JOIN indicators indicator ON indicator.id = basket.indicator_id
         WHERE day.period = $1::date
           AND day.day <= $2::date
+          AND ($3::uuid IS NULL OR day.branch_uuid = $3::uuid)
           AND indicator.name IN (
               'Продажа товара', 'Выдача товара', 'Кассовые операции',
               'ОСНТ', 'Складские операции', 'Разгрузка ТС'
           )
         `,
-        [period, asOf],
+        [period, asOf, branchId],
     );
     return rows.flatMap((row) => {
         const value = amount(row.amount);
@@ -1145,7 +1236,7 @@ interface LockedSpan {
     until: string;
 }
 
-async function readFrozenShares(query: PremiumQuery, period: string): Promise<FrozenShare[]> {
+async function readFrozenShares(query: PremiumQuery, period: string, branchId: string | null = null): Promise<FrozenShare[]> {
     const rows = await query<{ branchId: string; employeeId: string; activeFrom: string; premium: number | string }>(
         `
         SELECT share.branch_uuid AS "branchId",
@@ -1154,6 +1245,7 @@ async function readFrozenShares(query: PremiumQuery, period: string): Promise<Fr
                share.premium::float8 AS premium
         FROM main.shared_premiums share
         WHERE share.period = $1::date
+          AND ($2::uuid IS NULL OR share.branch_uuid = $2::uuid)
           AND EXISTS (
               SELECT 1
               FROM main.premium_accruals accrual
@@ -1164,7 +1256,7 @@ async function readFrozenShares(query: PremiumQuery, period: string): Promise<Fr
                 AND share.active_until >= accrual.active_from
           )
         `,
-        [period],
+        [period, branchId],
     );
     return rows.flatMap((row) => {
         const premium = amount(row.premium);
@@ -1175,7 +1267,7 @@ async function readFrozenShares(query: PremiumQuery, period: string): Promise<Fr
     });
 }
 
-async function readRetainedShares(query: PremiumQuery, period: string, from: string, until: string): Promise<FrozenShare[]> {
+async function readRetainedShares(query: PremiumQuery, period: string, from: string, until: string, branchId: string | null = null): Promise<FrozenShare[]> {
     const rows = await query<{ branchId: string; employeeId: string; activeFrom: string; premium: number | string }>(
         `
         SELECT share.branch_uuid AS "branchId",
@@ -1184,6 +1276,7 @@ async function readRetainedShares(query: PremiumQuery, period: string, from: str
                share.premium::float8 AS premium
         FROM main.shared_premiums share
         WHERE share.period = $1::date
+          AND ($4::uuid IS NULL OR share.branch_uuid = $4::uuid)
           AND (
               share.active_until < $2::date
               OR share.active_from > $3::date
@@ -1206,7 +1299,7 @@ async function readRetainedShares(query: PremiumQuery, period: string, from: str
               )
           )
         `,
-        [period, from, until],
+        [period, from, until, branchId],
     );
     return rows.flatMap((row) => {
         const premium = amount(row.premium);

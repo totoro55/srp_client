@@ -1,7 +1,9 @@
 -- Премия за разгрузку ТС, версия 1. Запрос только читает.
 -- $1 — первое число месяца.
 -- $2 — сотрудник, пусто значит месяц целиком.
--- $3 — филиал, $4 и $5 — отрезок дат. Для записи месяца они пустые.
+-- $3 — филиал премии. Пусто — все филиалы. Для одного филиала объём считается
+-- на нём самом и на площадках, где разгружали его сотрудников, а не по всей компании.
+-- $4 и $5 — отрезок дат. Для записи месяца они пустые.
 -- $6 — начисление с сохранённым unloading_coef. Пусто — текущий коэффициент филиала.
 -- $7 — список филиалов. Пусто — без ограничения списком.
 --
@@ -57,6 +59,24 @@ employee_branches AS (
       AND unloading.author = $2::uuid
       AND unloading.firm_uuid IS NOT NULL
 ),
+premium_branches AS (
+    SELECT $3::uuid AS branch_uuid
+    WHERE $2::uuid IS NULL
+      AND $3::uuid IS NOT NULL
+    UNION
+    SELECT DISTINCT unloading.firm_uuid
+    FROM main.author_days author_day
+    JOIN raw.unloading_car unloading
+      ON unloading.period = $1::timestamp
+     AND unloading.author = author_day.employee_uuid
+     AND unloading.date::date = author_day.day
+     AND unloading.firm_uuid IS NOT NULL
+    WHERE $2::uuid IS NULL
+      AND $3::uuid IS NOT NULL
+      AND author_day.period = $1::date
+      AND author_day.branch_uuid = $3::uuid
+      AND author_day.author_kind <> 'system'
+),
 receipts AS (
     SELECT operation.firm_uuid AS branch_uuid,
            operation.date::date AS day,
@@ -67,8 +87,16 @@ receipts AS (
       AND operation.firm_uuid IS NOT NULL
       AND operation.date IS NOT NULL
       AND (
-          $2::uuid IS NULL
-          OR operation.firm_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          ($2::uuid IS NULL AND $3::uuid IS NULL)
+          OR (
+              $2::uuid IS NOT NULL
+              AND operation.firm_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          )
+          OR (
+              $2::uuid IS NULL
+              AND $3::uuid IS NOT NULL
+              AND operation.firm_uuid IN (SELECT premium_branch.branch_uuid FROM premium_branches premium_branch)
+          )
       )
     GROUP BY operation.firm_uuid, operation.date::date
 ),
@@ -80,8 +108,16 @@ schedule_days AS (
       AND schedule.branch_uuid IS NOT NULL
       AND schedule.date IS NOT NULL
       AND (
-          $2::uuid IS NULL
-          OR schedule.branch_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          ($2::uuid IS NULL AND $3::uuid IS NULL)
+          OR (
+              $2::uuid IS NOT NULL
+              AND schedule.branch_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          )
+          OR (
+              $2::uuid IS NULL
+              AND $3::uuid IS NOT NULL
+              AND schedule.branch_uuid IN (SELECT premium_branch.branch_uuid FROM premium_branches premium_branch)
+          )
       )
 ),
 unloaders AS (
@@ -94,8 +130,16 @@ unloaders AS (
       AND unloading.date IS NOT NULL
       AND unloading.author IS NOT NULL
       AND (
-          $2::uuid IS NULL
-          OR unloading.firm_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          ($2::uuid IS NULL AND $3::uuid IS NULL)
+          OR (
+              $2::uuid IS NOT NULL
+              AND unloading.firm_uuid IN (SELECT employee_branch.branch_uuid FROM employee_branches employee_branch)
+          )
+          OR (
+              $2::uuid IS NULL
+              AND $3::uuid IS NOT NULL
+              AND unloading.firm_uuid IN (SELECT premium_branch.branch_uuid FROM premium_branches premium_branch)
+          )
       )
     GROUP BY unloading.firm_uuid, unloading.date::date, unloading.author
 ),
