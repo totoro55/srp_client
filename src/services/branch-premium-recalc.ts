@@ -13,10 +13,13 @@ import {
 } from "@/services/basket-updates";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
+import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, SalePremiumError, type PremiumRun } from "@/services/sale-premium";
 import { moscowToday } from "@/services/segment-locks";
 import { calculateSharedPremium } from "@/services/shared-premium";
+import { calculateUnloadingPremium } from "@/services/unloading-premium";
+import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -37,6 +40,9 @@ export async function recalculateBranchPremiums(input: {
         { kind: "sale", calculate: () => calculateSalePremium(input.period, false, run) },
         { kind: "release", calculate: () => calculateReleasePremium(input.period, false, run) },
         { kind: "kassa", calculate: () => calculateKassaPremium(input.period, false, run) },
+        { kind: "osnt", calculate: () => calculateOsntPremium(input.period, false, run) },
+        { kind: "warehouse", calculate: () => calculateWarehousePremium(input.period, false, run) },
+        { kind: "unloading", calculate: () => calculateUnloadingPremium(input.period, false, run) },
         { kind: "shared", calculate: () => calculateSharedPremium(input.period, run) },
     ];
     for (const [index, step] of steps.entries()) {
@@ -132,8 +138,11 @@ function selectionSteps(
     const sale = { kind: "sale" as const, calculate: () => calculateSalePremium(period, false, run) };
     const release = { kind: "release" as const, calculate: () => calculateReleasePremium(period, false, run) };
     const kassa = { kind: "kassa" as const, calculate: () => calculateKassaPremium(period, false, run) };
+    const osnt = { kind: "osnt" as const, calculate: () => calculateOsntPremium(period, false, run) };
+    const warehouse = { kind: "warehouse" as const, calculate: () => calculateWarehousePremium(period, false, run) };
+    const unloading = { kind: "unloading" as const, calculate: () => calculateUnloadingPremium(period, false, run) };
     if (target === "baskets") {
-        return [sale, release, kassa];
+        return [sale, release, kassa, osnt, warehouse, unloading];
     }
     if (target === "sale") {
         return [sale];
@@ -143,6 +152,15 @@ function selectionSteps(
     }
     if (target === "kassa") {
         return [kassa];
+    }
+    if (target === "osnt") {
+        return [osnt];
+    }
+    if (target === "warehouse") {
+        return [warehouse];
+    }
+    if (target === "unloading") {
+        return [unloading];
     }
     return [{ kind: "shared", calculate: () => calculateSharedPremium(period, run) }];
 }

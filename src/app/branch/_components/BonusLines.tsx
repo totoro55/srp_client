@@ -15,6 +15,7 @@ import { DisplayBonusDetail } from "./DisplayBonusDetail";
 import { DocumentPremiumDetail } from "./DocumentPremiumDetail";
 import { IssueBonusDetail, PickingBonusDetail } from "./IssueBonusDetail";
 import { KassaBonusDetail } from "./KassaBonusDetail";
+import { OsntBonusDetail } from "./OsntBonusDetail";
 import { ReleaseBonusDetail } from "./ReleaseBonusDetail";
 import { SalesBonusDetail } from "./SalesBonusDetail";
 import { ServiceBonusDetail } from "./ServiceBonusDetail";
@@ -42,8 +43,12 @@ export function BonusLines() {
     const salesIndicator = directory.indicators.find((indicator) => indicator.title === "Продажа товара");
     const releaseIndicator = directory.indicators.find((indicator) => indicator.title === "Выдача товара");
     const kassaIndicator = directory.indicators.find((indicator) => indicator.title === "Кассовые операции");
+    const osntIndicator = directory.indicators.find((indicator) => indicator.title === "ОСНТ");
+    const warehouseIndicator = directory.indicators.find((indicator) => indicator.title === "Складские операции");
+    const unloadingIndicator = directory.indicators.find((indicator) => indicator.title === "Разгрузка ТС");
     const mockBaskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
-    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator].flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
+    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator, osntIndicator, warehouseIndicator, unloadingIndicator]
+        .flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
     const baskets = month?.calculated && mockBaskets.length > 0 ? mockBaskets : liveBaskets;
     const knownPart = part !== null && baskets.some(([basketId]) => basketId === part);
     const tab = knownPart && part ? part : (baskets[0]?.[0] ?? "");
@@ -199,14 +204,16 @@ export function BonusLines() {
                     <ReleaseBonusDetail employeeId={personId} period={period} />
                 ) : tab === kassaIndicator?.id ? (
                     <KassaBonusDetail employeeId={personId} period={period} />
+                ) : tab === osntIndicator?.id ? (
+                    <OsntBonusDetail employeeId={personId} period={period} />
+                ) : tab === warehouseIndicator?.id || tab === "warehouse" ? (
+                    <WarehouseBonusDetail employeeId={personId} period={period} />
+                ) : tab === unloadingIndicator?.id || tab === "unload" ? (
+                    <UnloadBonusDetail employeeId={personId} period={period} />
                 ) : tab === "issue" ? (
                     <IssueBonusDetail employeeId={personId} period={period} />
                 ) : tab === "picking" ? (
                     <PickingBonusDetail employeeId={personId} period={period} />
-                ) : tab === "unload" ? (
-                    <UnloadBonusDetail employeeId={personId} period={period} />
-                ) : tab === "warehouse" ? (
-                    <WarehouseBonusDetail employeeId={personId} period={period} />
                 ) : tab === "display" ? (
                     <DisplayBonusDetail employeeId={personId} period={period} />
                 ) : tab === "services" ? (

@@ -30,6 +30,9 @@ const BASKET_OPTIONS: { id: BasketUpdateKind | "all"; label: string }[] = [
     { id: "sale", label: "Продажа товара" },
     { id: "release", label: "Выдача товара" },
     { id: "kassa", label: "Кассовые операции" },
+    { id: "osnt", label: "ОСНТ" },
+    { id: "warehouse", label: "Складские операции" },
+    { id: "unloading", label: "Разгрузка ТС" },
     { id: "shared", label: "Общая премия" },
     { id: "tariffs", label: "Тарифы продажи" },
 ];

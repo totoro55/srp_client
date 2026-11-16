@@ -86,22 +86,14 @@ function blankPremiums(indicators: readonly CabinetIndicator[]): Record<string, 
 
 function rowPremiums(
     indicators: readonly CabinetIndicator[],
-    salePremium: number | undefined,
-    releasePremium: number | undefined,
-    kassaPremium: number | undefined,
+    byTitle: Record<string, number | undefined>,
 ): Record<string, number | null> {
     const premiums = blankPremiums(indicators);
-    const sales = indicators.find((indicator) => indicator.title === "Продажа товара");
-    const release = indicators.find((indicator) => indicator.title === "Выдача товара");
-    const kassa = indicators.find((indicator) => indicator.title === "Кассовые операции");
-    if (sales && salePremium !== undefined) {
-        premiums[sales.id] = salePremium;
-    }
-    if (release && releasePremium !== undefined) {
-        premiums[release.id] = releasePremium;
-    }
-    if (kassa && kassaPremium !== undefined) {
-        premiums[kassa.id] = kassaPremium;
+    for (const indicator of indicators) {
+        const amount = byTitle[indicator.title];
+        if (amount !== undefined) {
+            premiums[indicator.id] = amount;
+        }
     }
     return premiums;
 }
@@ -357,7 +349,15 @@ export function BranchBonuses() {
         const timesheetHours = employee.timesheetHours;
         const salary = salaryFromTimesheet(employee.hourly, timesheetHours);
         const fixed = fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, timesheetHours);
-        const premiums = rowPremiums(columns.baskets, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]);
+        const key = roleKey(employee);
+        const premiums = rowPremiums(columns.baskets, {
+            "Продажа товара": directory.salePremiums[key],
+            "Выдача товара": directory.releasePremiums[key],
+            "Кассовые операции": directory.kassaPremiums[key],
+            "ОСНТ": directory.osntPremiums[key],
+            "Складские операции": directory.warehousePremiums[key],
+            "Разгрузка ТС": directory.unloadingPremiums[key],
+        });
         const shared = directory.sharedPremiums[roleKey(employee)] ?? 0;
         const earned = earnedPremium([...Object.values(premiums), ...Object.values(services), shared]);
         return [{

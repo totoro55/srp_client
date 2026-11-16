@@ -71,7 +71,10 @@ export function EmployeeBonus() {
     const current = currentPay(salary, premium, earned);
     const forecast = forecastPay(employee.hourly, employee.payLevel, directory.baseBonus, directory.priceGrowth, employee.scheduleHours, employee.timesheetHours, earned);
     const showForecast = !monthHasEnded(period);
-    const groups = employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]);
+    const groups = [
+        ...employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]),
+        { basketId: "shared", title: "Общая премия", amount: sharedPremium, facts: [] },
+    ];
     const lines = directory.foreignDetail || directory.viewerEmployeeId === employee.id.toLowerCase();
 
     return (
@@ -126,12 +129,17 @@ export function EmployeeBonus() {
             {groups.length > 0 ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-3">
                     {groups.map((group) => {
+                        const toCommon = group.basketId === "shared";
+                        const linked = lines || toCommon;
+                        const href = toCommon
+                            ? withBranchQuery("/branch/bonuses/common", branchId, period)
+                            : segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, group.basketId), employee.activeFrom);
                         const card = (
-                            <Card className={cn("h-full", lines && "transition-colors hover:bg-muted/40")}>
+                            <Card className={cn("h-full", linked && "transition-colors hover:bg-muted/40")}>
                                 <CardHeader>
                                     <CardTitle>{group.title}</CardTitle>
                                     <p className="text-lg font-medium tabular-nums">{formatMoney(group.amount)}</p>
-                                    {lines ? (
+                                    {linked ? (
                                         <CardAction className="self-center">
                                             <ArrowRight className="size-7 text-muted-foreground" aria-hidden />
                                         </CardAction>
@@ -151,10 +159,10 @@ export function EmployeeBonus() {
                                 ) : null}
                             </Card>
                         );
-                        return lines ? (
+                        return linked ? (
                             <Link
                                 key={group.basketId}
-                                href={segmentHref(withBranchQuery(`/branch/bonuses/${employee.id}/lines`, branchId, period, group.basketId), employee.activeFrom)}
+                                href={href}
                                 className="block h-full min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                                 {card}

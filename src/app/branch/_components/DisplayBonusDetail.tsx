@@ -13,7 +13,6 @@ import {
     BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
-    BonusDetailTotal,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
@@ -25,6 +24,7 @@ import {
     detailAmountClass,
     detailChevronClass,
     detailGridDual,
+    detailWideCell,
     detailHeaderClass,
     detailModeToggleClass,
     detailModeToggleItemClass,
@@ -132,7 +132,7 @@ export function DisplayBonusDetail({ employeeId, period }: { employeeId: string;
                             ]}
                         />
                     )}
-                    total={<BonusDetailTotal total={detail.total} />}
+                    total={null}
                 />
             )}
             pagination={pager.needsPagination ? (
@@ -144,7 +144,7 @@ export function DisplayBonusDetail({ employeeId, period }: { employeeId: string;
                 />
             ) : null}
         >
-            <BonusDetailTableFrame minWidthClass="min-w-[36rem] sm:min-w-[52rem]">
+            <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[52rem]">
                 <div className={cn(detailGridDual, detailHeaderClass)}>
                     <BonusDetailSortHeader
                         label={mode === "zone" ? "Зона выставления" : "День"}
@@ -152,8 +152,8 @@ export function DisplayBonusDetail({ employeeId, period }: { employeeId: string;
                         sort={sort}
                         onToggle={toggle}
                     />
-                    <BonusDetailSortHeader label="Расчёт за количество" sortKey="quantity" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label="Расчёт за объём" sortKey="volume" sort={sort} onToggle={toggle} />
+                    <BonusDetailSortHeader label="Расчёт за количество" sortKey="quantity" sort={sort} onToggle={toggle} className={detailWideCell} />
+                    <BonusDetailSortHeader label="Расчёт за объём" sortKey="volume" sort={sort} onToggle={toggle} className={detailWideCell} />
                     <BonusDetailSortHeader label="Сумма" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
                     <span />
                 </div>
@@ -190,12 +190,16 @@ function DisplayDayRow({
     return (
         <Collapsible open={open} onOpenChange={onOpenChange} className="border-b last:border-b-0">
             <CollapsibleTrigger className={cn(detailGridDual, detailRowClass, "text-left hover:bg-muted/50")}>
-                <span className="min-w-0 font-medium tabular-nums">{group.day}</span>
-                <div className="min-w-0">
+                <span className="min-w-0">
+                    <span className="block truncate font-medium tabular-nums">{group.day}</span>
+                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{group.quantityCalculation}</span>
+                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{group.volumeCalculation}</span>
+                </span>
+                <div className={detailWideCell}>
                     <p className="truncate text-muted-foreground">{group.quantityCalculation}</p>
                     <p className="tabular-nums">{formatMoney(group.quantityAmount)}</p>
                 </div>
-                <div className="min-w-0">
+                <div className={detailWideCell}>
                     <p className="truncate text-muted-foreground">{group.volumeCalculation}</p>
                     <p className="tabular-nums">{formatMoney(group.volumeAmount)}</p>
                 </div>
@@ -227,12 +231,14 @@ function DisplayCalcRow({
             <div className="min-w-0">
                 <p className="truncate font-medium">{row.title}</p>
                 {!hideDay ? <p className="text-xs text-muted-foreground">{row.day}</p> : null}
+                <p className="truncate text-xs text-muted-foreground sm:hidden">{row.quantityCalculation}</p>
+                <p className="truncate text-xs text-muted-foreground sm:hidden">{row.volumeCalculation}</p>
             </div>
-            <div className="min-w-0">
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{row.quantityCalculation}</p>
                 <p className="tabular-nums">{formatMoney(row.quantityAmount)}</p>
             </div>
-            <div className="min-w-0">
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{row.volumeCalculation}</p>
                 <p className="tabular-nums">{formatMoney(row.volumeAmount)}</p>
             </div>

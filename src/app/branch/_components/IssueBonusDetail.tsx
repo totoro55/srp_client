@@ -13,7 +13,6 @@ import {
     BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
-    BonusDetailTotal,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
@@ -25,6 +24,7 @@ import {
     detailAmountClass,
     detailChevronClass,
     detailGridDual,
+    detailWideCell,
     detailHeaderClass,
     detailModeToggleClass,
     detailModeToggleItemClass,
@@ -186,7 +186,7 @@ function QuantityVolumeBonusDetail({
                             ]}
                         />
                     )}
-                    total={<BonusDetailTotal total={detail.total} />}
+                    total={null}
                 />
             )}
             pagination={pager.needsPagination ? (
@@ -198,7 +198,7 @@ function QuantityVolumeBonusDetail({
                 />
             ) : null}
         >
-            <BonusDetailTableFrame minWidthClass="min-w-[36rem] sm:min-w-[52rem]">
+            <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[52rem]">
                 <div className={cn(detailGridDual, detailHeaderClass)}>
                     <BonusDetailSortHeader
                         label={mode === "category" ? detail.rowLabel : "Документ"}
@@ -206,8 +206,8 @@ function QuantityVolumeBonusDetail({
                         sort={sort}
                         onToggle={toggle}
                     />
-                    <BonusDetailSortHeader label={quantityHeader} sortKey="quantity" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label={volumeHeader} sortKey="volume" sort={sort} onToggle={toggle} />
+                    <BonusDetailSortHeader label={quantityHeader} sortKey="quantity" sort={sort} onToggle={toggle} className={detailWideCell} />
+                    <BonusDetailSortHeader label={volumeHeader} sortKey="volume" sort={sort} onToggle={toggle} className={detailWideCell} />
                     <BonusDetailSortHeader label="Сумма" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
                     <span />
                 </div>
@@ -246,9 +246,14 @@ function IssueDocumentGroup({
     return (
         <Collapsible open={open} onOpenChange={onOpenChange} className="border-b last:border-b-0">
             <CollapsibleTrigger className={cn(detailGridDual, detailRowClass, "text-left hover:bg-muted/50")}>
-                <span className="min-w-0 truncate font-medium">{group.title}</span>
-                <span className="tabular-nums text-muted-foreground">{formatMoney(group.quantityAmount)}</span>
-                <span className="tabular-nums text-muted-foreground">{formatMoney(group.volumeAmount)}</span>
+                <span className="min-w-0">
+                    <span className="block truncate font-medium">{group.title}</span>
+                    <span className="block truncate text-xs text-muted-foreground sm:hidden">
+                        {formatMoney(group.quantityAmount)} · {formatMoney(group.volumeAmount)}
+                    </span>
+                </span>
+                <span className={cn("tabular-nums text-muted-foreground", detailWideCell)}>{formatMoney(group.quantityAmount)}</span>
+                <span className={cn("tabular-nums text-muted-foreground", detailWideCell)}>{formatMoney(group.volumeAmount)}</span>
                 <span className={detailAmountClass}>{formatMoney(group.amount)}</span>
                 <ChevronDown className={cn(detailChevronClass, open && "rotate-180")} />
             </CollapsibleTrigger>
@@ -274,12 +279,16 @@ function IssueCalcRow({
 }) {
     return (
         <div className={cn(detailGridDual, nested ? detailNestedRowClass : detailRowClass)}>
-            <span className="min-w-0 truncate font-medium">{title}</span>
-            <div className="min-w-0">
+            <span className="min-w-0">
+                <span className="block truncate font-medium">{title}</span>
+                <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.quantityCalculation}</span>
+                <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.volumeCalculation}</span>
+            </span>
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{line.quantityCalculation}</p>
                 <p className="tabular-nums">{formatMoney(line.quantityAmount)}</p>
             </div>
-            <div className="min-w-0">
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{line.volumeCalculation}</p>
                 <p className="tabular-nums">{formatMoney(line.volumeAmount)}</p>
             </div>

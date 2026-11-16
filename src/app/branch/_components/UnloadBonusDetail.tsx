@@ -1,113 +1,165 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { DataTableSkeleton } from "@/components/loading-state";
+import { DETAIL_TIMEOUT_MESSAGE, isDetailTimeoutBody } from "@/lib/detail-timeout";
 import { cn } from "@/lib/utils";
 import {
-    BonusDetailPagination,
     BonusDetailSearch,
     BonusDetailShell,
-    BonusDetailSortButton,
-    BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
-    BonusDetailTotal,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
-    useBonusDetailPagination,
-    useBonusDetailSort,
+    useResetWhenChanged,
 } from "./BonusDetailPager";
-import {
-    detailAmountClass,
-    detailGridUnload,
-    detailHeaderClass,
-    detailRowClass,
-} from "./bonus-detail-ui";
-import { formatMoney, unloadOperationDetail } from "./mock";
+import { detailAmountClass, detailHeaderClass, detailRowClass } from "./bonus-detail-ui";
+import { useBranchDirectory } from "./branch-directory";
+import { useBranchLocation } from "./BranchFrame";
+import { formatMoney } from "./mock";
+import { findStaffSegment } from "./staff";
+
+const unloadWideColumns = "sm:grid sm:grid-cols-[6.5rem_minmax(12rem,1.15fr)_minmax(8.5rem,0.7fr)_minmax(10rem,1.2fr)_7.5rem] sm:items-center sm:gap-x-3";
+
+interface UnloadLine {
+    id: string;
+    day: string;
+    participants: number;
+    volume: number;
+    calculation: string;
+    amount: number;
+}
 
 export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; period: string }) {
-    const detail = unloadOperationDetail(employeeId, period);
+    const { branchId } = useBranchLocation();
+    const directory = useBranchDirectory();
+    const searchParams = useSearchParams();
+    const employee = findStaffSegment(directory.employees, employeeId, searchParams.get("from"));
+    const [lines, setLines] = useState<UnloadLine[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    const [timedOut, setTimedOut] = useState(false);
     const [query, setQuery] = useState("");
-    const { sort, toggle } = useBonusDetailSort("amount", "desc");
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const measureRef = useRef<HTMLDivElement | null>(null);
+    const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
+    const [scope, setScope] = useState(scopeKey);
+    if (scope !== scopeKey) {
+        setScope(scopeKey);
+        setLines(null);
+        setFailed(false);
+        setTimedOut(false);
+    }
+    useResetWhenChanged(scopeKey, () => setQuery(""));
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const params = new URLSearchParams({
+            period,
+            branch: branchId,
+            employee: employeeId,
+            from: employee?.activeFrom ?? "",
+            until: employee?.activeUntil ?? "",
+        });
+        fetch(`/api/branch/unloading-premium/detail?${params.toString()}`, { signal: controller.signal })
+            .then(async (response) => {
+                const body = await response.json() as { success?: boolean; data?: { lines?: UnloadLine[] } };
+                if (controller.signal.aborted) {
+                    return;
+                }
+                if (isDetailTimeoutBody(body)) {
+                    setTimedOut(true);
+                    setFailed(false);
+                    setLines(null);
+                    return;
+                }
+                const next = Array.isArray(body.data?.lines) ? body.data.lines : null;
+                if (!response.ok || !body.success || !next) {
+                    setFailed(true);
+                    setLines(null);
+                    return;
+                }
+                setFailed(false);
+                setTimedOut(false);
+                setLines(next);
+            })
+            .catch((error: unknown) => {
+                if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+                    return;
+                }
+                setFailed(true);
+                setLines(null);
+                setTimedOut(false);
+            });
+        return () => controller.abort();
+    }, [branchId, employee?.activeFrom, employee?.activeUntil, employeeId, period]);
 
     const rows = useMemo(() => {
-        if (!detail) return [];
-        const filtered = filterDetailItems(
-            detail.rows,
-            query,
-            (row) => `${row.arrivalDay} ${row.calculation} ${row.participants} ${row.totalVolume}`,
-        );
-        return sortDetailItems(filtered, sort, {
-            date: (row) => parseDetailDate(row.arrivalDay),
-            volume: (row) => row.totalVolume,
-            participants: (row) => row.participants,
-            calculation: (row) => row.calculation,
-            amount: (row) => row.amount,
+        const filtered = filterDetailItems(lines ?? [], query, (line) => `${line.day} ${line.participants} ${line.calculation}`);
+        return sortDetailItems(filtered, { key: "date", dir: "desc" }, {
+            date: (line) => parseDetailDate(line.day),
+            participants: (line) => line.participants,
+            amount: (line) => line.amount,
         });
-    }, [detail, query, sort]);
-
-    const pager = useBonusDetailPagination(rows.length, `${sort.key}-${sort.dir}-${query}`);
-    const pageRows = rows.slice(pager.start, pager.end);
-
-    if (!detail) {
-        return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Нет данных по разгрузке.</p>;
-    }
+    }, [lines, query]);
+    const showSkeleton = lines === null && !failed && !timedOut;
+    const showEmpty = !showSkeleton && !failed && !timedOut && lines !== null && lines.length === 0;
 
     return (
         <BonusDetailShell
-            measureRef={pager.measureRef}
+            measureRef={measureRef}
+            scrollRef={scrollRef}
             toolbar={(
                 <BonusDetailToolbar
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
-                    sort={(
-                        <BonusDetailSortButton
-                            sort={sort}
-                            onToggle={toggle}
-                            options={[
-                                { key: "date", label: "День" },
-                                { key: "volume", label: "Объём" },
-                                { key: "participants", label: "Участники" },
-                                { key: "calculation", label: "Расчёт" },
-                                { key: "amount", label: "Премия" },
-                            ]}
-                        />
-                    )}
-                    total={<BonusDetailTotal total={detail.total} />}
+                    total={null}
                 />
             )}
-            pagination={pager.needsPagination ? (
-                <BonusDetailPagination
-                    page={pager.page}
-                    pageSize={pager.pageSize}
-                    total={rows.length}
-                    onPageChange={pager.setPage}
-                />
-            ) : null}
+            pagination={null}
         >
-            <BonusDetailTableFrame minWidthClass="min-w-[32rem] sm:min-w-[44rem]">
-                <div className={cn(detailGridUnload, detailHeaderClass)}>
-                    <BonusDetailSortHeader label="День прихода ТС" sortKey="date" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label="Общий объём" sortKey="volume" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label="Участников" sortKey="participants" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label="Расчёт" sortKey="calculation" sort={sort} onToggle={toggle} />
-                    <BonusDetailSortHeader label="Премия" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
-                </div>
-                {rows.length === 0 ? (
-                    <p className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
-                ) : (
-                    pageRows.map((row) => (
-                        <div key={row.id} className={cn(detailGridUnload, detailRowClass)}>
-                            <span className="font-medium tabular-nums">{row.arrivalDay}</span>
-                            <span className="tabular-nums">
-                                {row.totalVolume.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} м³
-                            </span>
-                            <span className="tabular-nums">{row.participants}</span>
-                            <span className="min-w-0 truncate text-muted-foreground">{row.calculation}</span>
-                            <span className={detailAmountClass}>{formatMoney(row.amount)}</span>
+            {showSkeleton ? (
+                <DataTableSkeleton columns={5} rows={6} />
+            ) : timedOut ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{DETAIL_TIMEOUT_MESSAGE}</p>
+            ) : failed ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Не удалось прочитать разгрузку.</p>
+            ) : showEmpty ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За этот отрезок разгрузок нет.</p>
+            ) : (
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[52rem]">
+                        <div className={cn(detailHeaderClass, "flex items-center justify-between", unloadWideColumns)}>
+                            <span>Дата</span>
+                            <span className="hidden sm:block">Объём принятого товара</span>
+                            <span className="hidden sm:block">Кол-во участников</span>
+                            <span className="hidden sm:block">Расчёт</span>
+                            <span className={detailAmountClass}>Премия</span>
                         </div>
-                    ))
-                )}
-            </BonusDetailTableFrame>
+                        {rows.length === 0 ? (
+                            <p className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
+                        ) : rows.map((line) => (
+                            <div key={line.id} data-scroll-row="" className={cn(detailRowClass, "flex items-center justify-between gap-2", unloadWideColumns)}>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium tabular-nums">{line.day}</span>
+                                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{formatVolume(line.volume)} · {line.participants} уч.</span>
+                                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.calculation}</span>
+                                </span>
+                                <span className="hidden truncate tabular-nums text-muted-foreground sm:block">{formatVolume(line.volume)}</span>
+                                <span className="hidden tabular-nums sm:block">{line.participants}</span>
+                                <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{line.calculation}</span>
+                                <span className={detailAmountClass}>{formatMoney(line.amount)}</span>
+                            </div>
+                        ))}
+                    </BonusDetailTableFrame>
+                </div>
+            )}
         </BonusDetailShell>
     );
+}
+
+const volumeFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 });
+
+function formatVolume(value: number): string {
+    return `${volumeFormat.format(value)} м³`;
 }

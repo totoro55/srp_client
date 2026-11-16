@@ -43,14 +43,6 @@ function formatCount(count: number): string {
     return new Intl.NumberFormat("ru-RU").format(count);
 }
 
-export function BonusDetailTotal({ total, className }: { total: number; className?: string }) {
-    return (
-        <p className={cn("shrink-0 text-sm text-muted-foreground", className)}>
-            Премия: <span className="font-medium tabular-nums text-foreground">{formatMoney(total)}</span>
-        </p>
-    );
-}
-
 export function BonusDetailSearch({
     value,
     onChange,

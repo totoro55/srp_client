@@ -96,6 +96,7 @@ export function CoefficientTable({
     const [headerOffset, setHeaderOffset] = useState(0);
     const [hover, setHover] = useState<{ row: string | null; column: string } | null>(null);
     const [cellMenu, setCellMenu] = useState<CellMenu | null>(null);
+    const [activeCell, setActiveCell] = useState<string | null>(null);
     const locked = disabled || !editable;
 
     useEffect(() => {
@@ -241,7 +242,6 @@ export function CoefficientTable({
                                     return (
                                         <TableHead
                                             key={`${basket.id}:${coefficient.key}`}
-                                            title={(coefficient.description ?? "").trim() ? `${(coefficient.description ?? "").trim()}. ${coefficientRangeLabel(coefficient)}` : coefficientRangeLabel(coefficient)}
                                             style={{ top: headerOffset, zIndex: 30 }}
                                             className={cn("h-auto w-20 min-w-20 px-1 py-1.5 text-center align-bottom whitespace-normal", cellGrid, group.head, crosshairClass(hover, null, columnKey(basket.id, coefficient.key)))}
                                             onMouseEnter={() => setHover({ row: null, column: columnKey(basket.id, coefficient.key) })}
@@ -278,8 +278,9 @@ export function CoefficientTable({
                                             onMouseEnter={() => setHover({ row: branch.uuid, column: columnKey(basket.id, coefficient.key) })}
                                             onContextMenu={(event) => openCellMenu(event, branch.uuid, basket.id, coefficient.key)}
                                         >
-                                            <Tooltip>
+                                            <Tooltip open={!locked && !disabled && activeCell === id}>
                                                 <TooltipTrigger
+                                                    closeOnClick={false}
                                                     render={
                                                         <input
                                                             id={id}
@@ -305,7 +306,13 @@ export function CoefficientTable({
                                                                 event.preventDefault();
                                                                 event.currentTarget.blur();
                                                             }}
+                                                            onFocus={() => {
+                                                                if (!locked && !disabled) {
+                                                                    setActiveCell(id);
+                                                                }
+                                                            }}
                                                             onBlur={() => {
+                                                                setActiveCell((current) => (current === id ? null : current));
                                                                 onChange?.((current) => {
                                                                     if ((current[id] ?? "").trim() !== "") {
                                                                         return current;

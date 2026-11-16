@@ -2,7 +2,7 @@ import type { RecalcScopeLevel } from "@/lib/recalc-reasons";
 
 const MONTH_KEY = /^(\d{4})-(\d{2})/;
 
-export type PremiumRecalcKind = "sale" | "release" | "kassa" | "shared";
+export type PremiumRecalcKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "shared";
 
 export interface StartedPremiumRecalc {
     period: string;

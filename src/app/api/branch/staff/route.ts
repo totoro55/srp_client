@@ -20,6 +20,9 @@ export interface BranchStaffPayload {
     salePremiums: Record<string, number>;
     releasePremiums: Record<string, number>;
     kassaPremiums: Record<string, number>;
+    osntPremiums: Record<string, number>;
+    warehousePremiums: Record<string, number>;
+    unloadingPremiums: Record<string, number>;
     sharedPremiums: Record<string, number>;
     sharedPremiumRoleIds: string[];
     baseBonus: number | null;

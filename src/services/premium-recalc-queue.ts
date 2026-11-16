@@ -13,19 +13,25 @@ import {
 } from "@/services/basket-updates";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
+import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, type PremiumRun } from "@/services/sale-premium";
 import { calculateSharedPremium } from "@/services/shared-premium";
+import { calculateUnloadingPremium } from "@/services/unloading-premium";
+import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERIOD = /^\d{4}-\d{2}-01$/;
-const ORDER: PremiumRecalcKind[] = ["sale", "release", "kassa", "shared"];
+const ORDER: PremiumRecalcKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "shared"];
 const RETRY_MS = 5_000;
 
 const KIND_BY_INDICATOR: Record<string, Exclude<PremiumRecalcKind, "shared">> = {
     "Продажа товара": "sale",
     "Выдача товара": "release",
     "Кассовые операции": "kassa",
+    "ОСНТ": "osnt",
+    "Складские операции": "warehouse",
+    "Разгрузка ТС": "unloading",
 };
 
 export function premiumKindOf(indicatorName: string): Exclude<PremiumRecalcKind, "shared"> | null {
@@ -322,6 +328,15 @@ function calculate(
     }
     if (kind === "kassa") {
         return calculateKassaPremium(period, false, run);
+    }
+    if (kind === "osnt") {
+        return calculateOsntPremium(period, false, run);
+    }
+    if (kind === "warehouse") {
+        return calculateWarehousePremium(period, false, run);
+    }
+    if (kind === "unloading") {
+        return calculateUnloadingPremium(period, false, run);
     }
     return calculateSharedPremium(period, run);
 }

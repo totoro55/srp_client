@@ -307,6 +307,9 @@ function Staff({
                     salePremiums?: Record<string, number>;
                     releasePremiums?: Record<string, number>;
                     kassaPremiums?: Record<string, number>;
+                    osntPremiums?: Record<string, number>;
+                    warehousePremiums?: Record<string, number>;
+                    unloadingPremiums?: Record<string, number>;
                     shares?: Record<string, number>;
                 };
                 error?: { message?: string };
@@ -327,6 +330,9 @@ function Staff({
                     salePremiums: json.data.salePremiums,
                     releasePremiums: json.data.releasePremiums,
                     kassaPremiums: json.data.kassaPremiums,
+                    osntPremiums: json.data.osntPremiums ?? {},
+                    warehousePremiums: json.data.warehousePremiums ?? {},
+                    unloadingPremiums: json.data.unloadingPremiums ?? {},
                     sharedPremiums: json.data.shares,
                 });
             }

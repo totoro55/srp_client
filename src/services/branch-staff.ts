@@ -3,9 +3,12 @@ import { db } from "@/services/db";
 import { CABINET_HOME_SQL, CABINET_SCOPE_SQL, branchListScopes } from "@/services/premium-access";
 import { priceGrowthAllowanceFor } from "@/services/price-growth";
 import { readBranchKassaPremiumDays } from "@/services/kassa-premium";
+import { readBranchOsntPremiumDays } from "@/services/osnt-premium";
 import { readBranchReleasePremiumDays } from "@/services/release-premium";
 import { readBranchSalePremiumDays } from "@/services/sale-premium";
 import { readBranchSharedPremiums } from "@/services/shared-premium";
+import { readBranchUnloadingPremiumDays } from "@/services/unloading-premium";
+import { readBranchWarehousePremiumDays } from "@/services/warehouse-premium";
 import { premiumsBySegment, staffSegments, type BranchStaffRow, type HourDay, type StaffVersion } from "@/services/staff-segments";
 
 export interface BranchOption {
@@ -35,7 +38,21 @@ export async function readBranchStaff(
     access: AccessView,
     period: string,
     branchId: string | null,
-): Promise<{ branches: BranchOption[]; employees: BranchStaffRow[]; indicators: ConnectedBasketIndicator[]; salePremiums: Record<string, number>; releasePremiums: Record<string, number>; kassaPremiums: Record<string, number>; sharedPremiums: Record<string, number>; baseBonus: number | null; priceGrowth: number; rosterPeriod: string | null }> {
+): Promise<{
+    branches: BranchOption[];
+    employees: BranchStaffRow[];
+    indicators: ConnectedBasketIndicator[];
+    salePremiums: Record<string, number>;
+    releasePremiums: Record<string, number>;
+    kassaPremiums: Record<string, number>;
+    osntPremiums: Record<string, number>;
+    warehousePremiums: Record<string, number>;
+    unloadingPremiums: Record<string, number>;
+    sharedPremiums: Record<string, number>;
+    baseBonus: number | null;
+    priceGrowth: number;
+    rosterPeriod: string | null;
+}> {
     const branches = await db.query<BranchOption>(
         `
         SELECT branch.uuid::text AS id,
@@ -67,7 +84,21 @@ export async function readBranchStaff(
         ? branches.find((branch) => branch.id.toLowerCase() === branchId.toLowerCase())
         : undefined;
     if (!selected) {
-        return { branches, employees: [], indicators: [], salePremiums: {}, releasePremiums: {}, kassaPremiums: {}, sharedPremiums: {}, baseBonus: null, priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0, rosterPeriod: null };
+        return {
+            branches,
+            employees: [],
+            indicators: [],
+            salePremiums: {},
+            releasePremiums: {},
+            kassaPremiums: {},
+            osntPremiums: {},
+            warehousePremiums: {},
+            unloadingPremiums: {},
+            sharedPremiums: {},
+            baseBonus: null,
+            priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,
+            rosterPeriod: null,
+        };
     }
     const rosterRows = await db.query<{ period: string | null }>(
         `
@@ -80,11 +111,25 @@ export async function readBranchStaff(
     );
     const rosterPeriod = rosterRows[0]?.period ?? null;
     if (!rosterPeriod) {
-        return { branches, employees: [], indicators: await readConnectedIndicators(period, selected.id), salePremiums: {}, releasePremiums: {}, kassaPremiums: {}, sharedPremiums: {}, baseBonus: await readBaseBonus(period, selected.id), priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0, rosterPeriod: null };
+        return {
+            branches,
+            employees: [],
+            indicators: await readConnectedIndicators(period, selected.id),
+            salePremiums: {},
+            releasePremiums: {},
+            kassaPremiums: {},
+            osntPremiums: {},
+            warehousePremiums: {},
+            unloadingPremiums: {},
+            sharedPremiums: {},
+            baseBonus: await readBaseBonus(period, selected.id),
+            priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,
+            rosterPeriod: null,
+        };
     }
 
     const carried = rosterPeriod !== period;
-    const [versions, days, premiumDays, releaseDays, kassaDays, sharedPremiums] = await Promise.all([
+    const [versions, days, premiumDays, releaseDays, kassaDays, osntDays, warehouseDays, unloadingDays, sharedPremiums] = await Promise.all([
         db.query<StaffVersion>(
             `
             -- Состав последнего загруженного месяца, не позже выбранного.
@@ -135,6 +180,9 @@ export async function readBranchStaff(
         carried ? Promise.resolve([]) : readBranchSalePremiumDays(period, selected.id),
         carried ? Promise.resolve([]) : readBranchReleasePremiumDays(period, selected.id),
         carried ? Promise.resolve([]) : readBranchKassaPremiumDays(period, selected.id),
+        carried ? Promise.resolve([]) : readBranchOsntPremiumDays(period, selected.id),
+        carried ? Promise.resolve([]) : readBranchWarehousePremiumDays(period, selected.id),
+        carried ? Promise.resolve([]) : readBranchUnloadingPremiumDays(period, selected.id),
         carried ? Promise.resolve({}) : readBranchSharedPremiums(period, selected.id),
     ]);
     const employees = staffSegments(versions, carried ? [] : days, selected.id.toLowerCase(), rosterPeriod);
@@ -146,6 +194,9 @@ export async function readBranchStaff(
         salePremiums: premiumsBySegment(employees, carried ? [] : premiumDays),
         releasePremiums: premiumsBySegment(employees, carried ? [] : releaseDays),
         kassaPremiums: premiumsBySegment(employees, carried ? [] : kassaDays),
+        osntPremiums: premiumsBySegment(employees, carried ? [] : osntDays),
+        warehousePremiums: premiumsBySegment(employees, carried ? [] : warehouseDays),
+        unloadingPremiums: premiumsBySegment(employees, carried ? [] : unloadingDays),
         sharedPremiums: carried ? {} : sharedPremiums,
         baseBonus: selected ? await readBaseBonus(period, selected.id) : null,
         priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,

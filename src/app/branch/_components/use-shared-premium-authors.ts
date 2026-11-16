@@ -10,6 +10,9 @@ export interface SharedPremiumAuthor {
     sale: number;
     release: number;
     kassa: number;
+    osnt: number;
+    warehouse: number;
+    unloading: number;
     activeFrom: string;
 }
 

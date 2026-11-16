@@ -71,7 +71,7 @@ function flag(value: unknown): boolean | null {
     return typeof value === "boolean" ? value : null;
 }
 
-const TARGETS: MonthRecalcTarget[] = ["baskets", "sale", "release", "kassa", "shared"];
+const TARGETS: MonthRecalcTarget[] = ["baskets", "sale", "release", "kassa", "osnt", "warehouse", "unloading", "shared"];
 
 function parseTarget(value: unknown): MonthRecalcTarget | null {
     return typeof value === "string" && TARGETS.includes(value as MonthRecalcTarget) ? value as MonthRecalcTarget : null;

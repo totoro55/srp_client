@@ -90,6 +90,9 @@ interface AuthorInsert {
     sale: number;
     release: number;
     kassa: number;
+    osnt: number;
+    warehouse: number;
+    unloading: number;
 }
 
 interface OutsideAuthor {
@@ -99,6 +102,9 @@ interface OutsideAuthor {
     sale: number;
     release: number;
     kassa: number;
+    osnt: number;
+    warehouse: number;
+    unloading: number;
 }
 
 export async function writeSharedPremiums(
@@ -229,6 +235,9 @@ export interface SharedPremiumAuthorRow {
     sale: number;
     release: number;
     kassa: number;
+    osnt: number;
+    warehouse: number;
+    unloading: number;
     activeFrom: string;
 }
 
@@ -257,6 +266,9 @@ export async function readSharedPremiumAuthors(
         sale: number | string;
         release: number | string;
         kassa: number | string;
+        osnt: number | string;
+        warehouse: number | string;
+        unloading: number | string;
         name: string;
         title: string;
     }>(
@@ -267,6 +279,9 @@ export async function readSharedPremiumAuthors(
                author.sale::float8 AS sale,
                author.release::float8 AS release,
                author.kassa::float8 AS kassa,
+               author.osnt::float8 AS osnt,
+               author.warehouse::float8 AS warehouse,
+               author.unloading::float8 AS unloading,
                COALESCE(
                    NULLIF(btrim(person.name), ''),
                    NULLIF(btrim(promoter.name_employees), ''),
@@ -306,7 +321,10 @@ export async function readSharedPremiumAuthors(
         const sale = amount(row.sale);
         const release = amount(row.release);
         const kassa = amount(row.kassa);
-        if (sale === null || release === null || kassa === null) {
+        const osnt = amount(row.osnt);
+        const warehouse = amount(row.warehouse);
+        const unloading = amount(row.unloading);
+        if (sale === null || release === null || kassa === null || osnt === null || warehouse === null || unloading === null) {
             return [];
         }
         const kind = authorKind(row.kind);
@@ -322,9 +340,15 @@ export async function readSharedPremiumAuthors(
             sale,
             release,
             kassa,
+            osnt,
+            warehouse,
+            unloading,
             activeFrom: row.activeFrom,
         }];
-    }).sort((left, right) => (right.sale + right.release + right.kassa) - (left.sale + left.release + left.kassa) || left.name.localeCompare(right.name, "ru"));
+    }).sort((left, right) => (
+        (right.sale + right.release + right.kassa + right.osnt + right.warehouse + right.unloading)
+        - (left.sale + left.release + left.kassa + left.osnt + left.warehouse + left.unloading)
+    ) || left.name.localeCompare(right.name, "ru"));
 }
 
 export async function readBranchSharedPremiumRoleIds(branchId: string): Promise<string[]> {
@@ -469,12 +493,21 @@ function sharesToWrite(
     const saleByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const releaseByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const kassaByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
+    const osntByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
+    const warehouseByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
+    const unloadingByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     for (const day of premiumDays) {
         const target = day.indicator === "Выдача товара"
             ? releaseByBranch
             : day.indicator === "Кассовые операции"
                 ? kassaByBranch
-                : saleByBranch;
+                : day.indicator === "ОСНТ"
+                    ? osntByBranch
+                    : day.indicator === "Складские операции"
+                        ? warehouseByBranch
+                        : day.indicator === "Разгрузка ТС"
+                            ? unloadingByBranch
+                            : saleByBranch;
         const list = target.get(day.branchId) ?? [];
         list.push({ id: day.id, day: day.day, amount: day.amount });
         target.set(day.branchId, list);
@@ -491,7 +524,14 @@ function sharesToWrite(
         if (onlyBranch && outsideAuthor.branchId !== onlyBranch) {
             continue;
         }
-        if (outsideAuthor.sale === 0 && outsideAuthor.release === 0 && outsideAuthor.kassa === 0) {
+        if (
+            outsideAuthor.sale === 0
+            && outsideAuthor.release === 0
+            && outsideAuthor.kassa === 0
+            && outsideAuthor.osnt === 0
+            && outsideAuthor.warehouse === 0
+            && outsideAuthor.unloading === 0
+        ) {
             continue;
         }
         authors.push({
@@ -502,6 +542,9 @@ function sharesToWrite(
             sale: outsideAuthor.sale,
             release: outsideAuthor.release,
             kassa: outsideAuthor.kassa,
+            osnt: outsideAuthor.osnt,
+            warehouse: outsideAuthor.warehouse,
+            unloading: outsideAuthor.unloading,
         });
     }
     for (const [branchId, employeeIds] of employeesByBranch) {
@@ -529,6 +572,9 @@ function sharesToWrite(
         const sale = premiumsBySegment(segments, saleByBranch.get(branchId) ?? []);
         const release = premiumsBySegment(segments, releaseByBranch.get(branchId) ?? []);
         const kassa = premiumsBySegment(segments, kassaByBranch.get(branchId) ?? []);
+        const osnt = premiumsBySegment(segments, osntByBranch.get(branchId) ?? []);
+        const warehouse = premiumsBySegment(segments, warehouseByBranch.get(branchId) ?? []);
+        const unloading = premiumsBySegment(segments, unloadingByBranch.get(branchId) ?? []);
         let pool = outside.pools.get(branchId) ?? 0;
         for (const segment of segments) {
             if (participates(segment.ktu, roleOf(branchId, segment.id, segment.title, segment.ktu, overrides, settings))) {
@@ -537,8 +583,18 @@ function sharesToWrite(
             const saleAmount = sale[segment.rowKey] ?? 0;
             const releaseAmount = release[segment.rowKey] ?? 0;
             const kassaAmount = kassa[segment.rowKey] ?? 0;
-            pool += saleAmount + releaseAmount + kassaAmount;
-            if (saleAmount !== 0 || releaseAmount !== 0 || kassaAmount !== 0) {
+            const osntAmount = osnt[segment.rowKey] ?? 0;
+            const warehouseAmount = warehouse[segment.rowKey] ?? 0;
+            const unloadingAmount = unloading[segment.rowKey] ?? 0;
+            pool += saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount;
+            if (
+                saleAmount !== 0
+                || releaseAmount !== 0
+                || kassaAmount !== 0
+                || osntAmount !== 0
+                || warehouseAmount !== 0
+                || unloadingAmount !== 0
+            ) {
                 authors.push({
                     branch: branchId,
                     employee: segment.id,
@@ -547,6 +603,9 @@ function sharesToWrite(
                     sale: saleAmount,
                     release: releaseAmount,
                     kassa: kassaAmount,
+                    osnt: osntAmount,
+                    warehouse: warehouseAmount,
+                    unloading: unloadingAmount,
                 });
             }
         }
@@ -677,7 +736,8 @@ async function replaceAuthors(
         await query(
             `
             INSERT INTO main.shared_premium_authors (
-                period, branch_uuid, employee_uuid, author_kind, active_from, sale, release, kassa
+                period, branch_uuid, employee_uuid, author_kind, active_from,
+                sale, release, kassa, osnt, warehouse, unloading
             )
             SELECT $1::date,
                    item.branch::uuid,
@@ -686,9 +746,14 @@ async function replaceAuthors(
                    item.active_from::date,
                    item.sale::numeric,
                    item.release::numeric,
-                   item.kassa::numeric
-            FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
-                AS item(branch, employee, kind, active_from, sale, release, kassa)
+                   item.kassa::numeric,
+                   item.osnt::numeric,
+                   item.warehouse::numeric,
+                   item.unloading::numeric
+            FROM unnest(
+                $2::text[], $3::text[], $4::text[], $5::text[],
+                $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[]
+            ) AS item(branch, employee, kind, active_from, sale, release, kassa, osnt, warehouse, unloading)
             `,
             [
                 period,
@@ -699,6 +764,9 @@ async function replaceAuthors(
                 chunk.map((item) => item.sale.toFixed(2)),
                 chunk.map((item) => item.release.toFixed(2)),
                 chunk.map((item) => item.kassa.toFixed(2)),
+                chunk.map((item) => item.osnt.toFixed(2)),
+                chunk.map((item) => item.warehouse.toFixed(2)),
+                chunk.map((item) => item.unloading.toFixed(2)),
             ],
         );
     }
@@ -770,14 +838,7 @@ ${selectSql}
                 continue;
             }
             const key = `${row.branch}:${row.employee}:${row.kind}`;
-            const current = byAuthor.get(key) ?? {
-                branchId: row.branch,
-                employeeId: row.employee,
-                kind: row.kind,
-                sale: 0,
-                release: 0,
-                kassa: 0,
-            };
+            const current = byAuthor.get(key) ?? emptyOutside(row.branch, row.employee, row.kind);
             if (saleFile) {
                 current.sale += premium;
             } else {
@@ -786,22 +847,95 @@ ${selectSql}
             byAuthor.set(key, current);
         }
     }
-    const kassaSql = await readPremiumSql("kassa-premium-v1.sql");
-    if (!kassaSql.includes("operation.period = $1::timestamp")) {
-        throw new SalePremiumError("Не найден период кассовой операции в запросе премии");
+    await addOutsideBasket(query, byAuthor, period, branchId, asOf, "kassa-premium-v1.sql", "kassa", (sql) => {
+        if (!sql.includes("operation.period = $1::timestamp")) {
+            throw new SalePremiumError("Не найден период кассовой операции в запросе премии");
+        }
+        return sql.replaceAll(
+            "operation.period = $1::timestamp",
+            `operation.period = $1::timestamp AND operation.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        );
+    });
+    await addOutsideBasket(query, byAuthor, period, branchId, asOf, "osnt-premium-v1.sql", "osnt", (sql) => {
+        if (!sql.includes("operation.period = $1::timestamp")) {
+            throw new SalePremiumError("Не найден период ОСНТ в запросе премии");
+        }
+        return sql.replaceAll(
+            "operation.period = $1::timestamp",
+            `operation.period = $1::timestamp AND operation.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        );
+    });
+    await addOutsideBasket(query, byAuthor, period, branchId, asOf, "warehouse-premium-v1.sql", "warehouse", (sql) => {
+        if (!sql.includes("operation.period = $1::timestamp")) {
+            throw new SalePremiumError("Не найден период складской операции в запросе премии");
+        }
+        return sql.replaceAll(
+            "operation.period = $1::timestamp",
+            `operation.period = $1::timestamp AND operation.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        );
+    });
+    await addOutsideBasket(query, byAuthor, period, branchId, asOf, "unloading-premium-v1.sql", "unloading", (sql) => {
+        const marker = "WHERE ($2::uuid IS NULL OR unloaders.employee_uuid = $2::uuid)";
+        if (!sql.includes(marker)) {
+            throw new SalePremiumError("Не найден фильтр автора разгрузки в запросе премии");
+        }
+        return sql.replaceAll(
+            marker,
+            `WHERE unloaders.employee_uuid IN (SELECT outside_author.id FROM outside_authors outside_author)
+      AND ($2::uuid IS NULL OR unloaders.employee_uuid = $2::uuid)`,
+        );
+    });
+    await query(`SET LOCAL enable_seqscan = on`);
+    const authors = [...byAuthor.values()];
+    const pools = new Map<string, number>();
+    for (const author of authors) {
+        pools.set(
+            author.branchId,
+            (pools.get(author.branchId) ?? 0)
+                + author.sale
+                + author.release
+                + author.kassa
+                + author.osnt
+                + author.warehouse
+                + author.unloading,
+        );
     }
-    const kassaSelect = kassaSql.replaceAll(
-        "operation.period = $1::timestamp",
-        `operation.period = $1::timestamp AND operation.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
-    );
-    const kassaRows = await query<{ branch: string; employee: string; kind: string; premium: number | string }>(
+    return { pools, authors };
+}
+
+function emptyOutside(branchId: string, employeeId: string, kind: "promoter" | "system"): OutsideAuthor {
+    return {
+        branchId,
+        employeeId,
+        kind,
+        sale: 0,
+        release: 0,
+        kassa: 0,
+        osnt: 0,
+        warehouse: 0,
+        unloading: 0,
+    };
+}
+
+async function addOutsideBasket(
+    query: PremiumQuery,
+    byAuthor: Map<string, OutsideAuthor>,
+    period: string,
+    branchId: string | null,
+    asOf: string,
+    file: string,
+    field: "kassa" | "osnt" | "warehouse" | "unloading",
+    rewrite: (sql: string) => string,
+): Promise<void> {
+    const selectSql = rewrite(await readPremiumSql(file));
+    const rows = await query<{ branch: string; employee: string; kind: string; premium: number | string }>(
         `
         SELECT line.branch_uuid AS branch,
                line.employee_uuid AS employee,
                line.author_kind AS kind,
                COALESCE(SUM(line.premium), 0)::float8 AS premium
         FROM (
-${kassaSelect}
+${selectSql}
         ) line
         WHERE line.author_kind IN ('promoter', 'system')
           AND COALESCE(line.document_date::date, $1::date) <= $5::date
@@ -809,30 +943,16 @@ ${kassaSelect}
         `,
         [period, null, branchId, null, asOf, null, null],
     );
-    for (const row of kassaRows) {
+    for (const row of rows) {
         const premium = amount(row.premium);
         if (!row.branch || !row.employee || premium === null || premium === 0 || (row.kind !== "promoter" && row.kind !== "system")) {
             continue;
         }
         const key = `${row.branch}:${row.employee}:${row.kind}`;
-        const current = byAuthor.get(key) ?? {
-            branchId: row.branch,
-            employeeId: row.employee,
-            kind: row.kind,
-            sale: 0,
-            release: 0,
-            kassa: 0,
-        };
-        current.kassa += premium;
+        const current = byAuthor.get(key) ?? emptyOutside(row.branch, row.employee, row.kind);
+        current[field] += premium;
         byAuthor.set(key, current);
     }
-    await query(`SET LOCAL enable_seqscan = on`);
-    const authors = [...byAuthor.values()];
-    const pools = new Map<string, number>();
-    for (const author of authors) {
-        pools.set(author.branchId, (pools.get(author.branchId) ?? 0) + author.sale + author.release + author.kassa);
-    }
-    return { pools, authors };
 }
 
 async function readSettings(query: PremiumQuery): Promise<MotivationSettings> {
@@ -995,7 +1115,10 @@ async function dbRows(query: PremiumQuery, period: string, asOf: string): Promis
         JOIN indicators indicator ON indicator.id = basket.indicator_id
         WHERE day.period = $1::date
           AND day.day <= $2::date
-          AND indicator.name IN ('Продажа товара', 'Выдача товара', 'Кассовые операции')
+          AND indicator.name IN (
+              'Продажа товара', 'Выдача товара', 'Кассовые операции',
+              'ОСНТ', 'Складские операции', 'Разгрузка ТС'
+          )
         `,
         [period, asOf],
     );

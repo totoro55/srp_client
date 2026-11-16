@@ -160,5 +160,5 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
 }
 
 function calculation(line: KassaLine): string {
-    return `${factorFormat.format(line.minutes)} × ${factorFormat.format(line.tariff)}`;
+    return `${factorFormat.format(line.minutes)} мин. × ${factorFormat.format(line.tariff)} ₽`;
 }

@@ -13,7 +13,6 @@ import {
     BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
-    BonusDetailTotal,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
@@ -26,6 +25,7 @@ import {
     detailChevronClass,
     detailGridDual,
     detailGridSingle,
+    detailWideCell,
     detailHeaderClass,
     detailModeToggleClass,
     detailModeToggleItemClass,
@@ -150,7 +150,7 @@ export function ServiceBonusDetail({
                             ]}
                         />
                     )}
-                    total={<BonusDetailTotal total={detail.total} />}
+                    total={null}
                 />
             )}
             pagination={pager.needsPagination ? (
@@ -162,7 +162,7 @@ export function ServiceBonusDetail({
                 />
             ) : null}
         >
-            <BonusDetailTableFrame minWidthClass={withProvision ? "min-w-[36rem] sm:min-w-[52rem]" : "min-w-[30rem] sm:min-w-[42rem]"}>
+            <BonusDetailTableFrame minWidthClass={withProvision ? "min-w-0 sm:min-w-[52rem]" : "min-w-0 sm:min-w-[42rem]"}>
                 <div className={cn(grid, detailHeaderClass)}>
                     <BonusDetailSortHeader
                         label={mode === "service" ? detail.rowLabel : "Документ"}
@@ -172,11 +172,11 @@ export function ServiceBonusDetail({
                     />
                     {withProvision ? (
                         <>
-                            <BonusDetailSortHeader label="Расчёт за продажу" sortKey="sale" sort={sort} onToggle={toggle} />
-                            <BonusDetailSortHeader label="Расчёт за оказание" sortKey="provision" sort={sort} onToggle={toggle} />
+                            <BonusDetailSortHeader label="Расчёт за продажу" sortKey="sale" sort={sort} onToggle={toggle} className={detailWideCell} />
+                            <BonusDetailSortHeader label="Расчёт за оказание" sortKey="provision" sort={sort} onToggle={toggle} className={detailWideCell} />
                         </>
                     ) : (
-                        <BonusDetailSortHeader label="Расчёт за продажу" sortKey="sale" sort={sort} onToggle={toggle} />
+                        <BonusDetailSortHeader label="Расчёт за продажу" sortKey="sale" sort={sort} onToggle={toggle} className={detailWideCell} />
                     )}
                     <BonusDetailSortHeader label="Сумма" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
                     <span />
@@ -220,14 +220,21 @@ function ServiceDocumentGroup({
     return (
         <Collapsible open={open} onOpenChange={onOpenChange} className="border-b last:border-b-0">
             <CollapsibleTrigger className={cn(grid, detailRowClass, "text-left hover:bg-muted/50")}>
-                <span className="min-w-0 truncate font-medium">{group.title}</span>
+                <span className="min-w-0">
+                    <span className="block truncate font-medium">{group.title}</span>
+                    <span className="block truncate text-xs text-muted-foreground sm:hidden">
+                        {withProvision
+                            ? `${formatMoney(group.saleAmount)} · ${formatMoney(group.provisionAmount)}`
+                            : (open ? "Скрыть строки" : `${group.lines.length} ${linesWord(group.lines.length)}`)}
+                    </span>
+                </span>
                 {withProvision ? (
                     <>
-                        <span className="tabular-nums text-muted-foreground">{formatMoney(group.saleAmount)}</span>
-                        <span className="tabular-nums text-muted-foreground">{formatMoney(group.provisionAmount)}</span>
+                        <span className={cn("tabular-nums text-muted-foreground", detailWideCell)}>{formatMoney(group.saleAmount)}</span>
+                        <span className={cn("tabular-nums text-muted-foreground", detailWideCell)}>{formatMoney(group.provisionAmount)}</span>
                     </>
                 ) : (
-                    <span className="truncate text-muted-foreground">
+                    <span className={cn("truncate text-muted-foreground", detailWideCell)}>
                         {open ? "Скрыть строки" : `${group.lines.length} ${linesWord(group.lines.length)}`}
                     </span>
                 )}
@@ -260,8 +267,11 @@ function ServiceCalcRow({
     if (!withProvision) {
         return (
             <div className={cn(detailGridSingle, rowClass)}>
-                <span className="min-w-0 truncate font-medium">{title}</span>
-                <span className="min-w-0 truncate text-muted-foreground">{line.saleCalculation}</span>
+                <span className="min-w-0">
+                    <span className="block truncate font-medium">{title}</span>
+                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.saleCalculation}</span>
+                </span>
+                <span className={cn("min-w-0 truncate text-muted-foreground", detailWideCell)}>{line.saleCalculation}</span>
                 <span className={detailAmountClass}>{formatMoney(line.amount)}</span>
                 <span />
             </div>
@@ -270,12 +280,16 @@ function ServiceCalcRow({
 
     return (
         <div className={cn(detailGridDual, rowClass)}>
-            <span className="min-w-0 truncate font-medium">{title}</span>
-            <div className="min-w-0">
+            <span className="min-w-0">
+                <span className="block truncate font-medium">{title}</span>
+                <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.saleCalculation}</span>
+                <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.provisionCalculation}</span>
+            </span>
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{line.saleCalculation}</p>
                 <p className="tabular-nums">{formatMoney(line.saleAmount)}</p>
             </div>
-            <div className="min-w-0">
+            <div className={detailWideCell}>
                 <p className="truncate text-muted-foreground">{line.provisionCalculation}</p>
                 <p className="tabular-nums">{formatMoney(line.provisionAmount)}</p>
             </div>

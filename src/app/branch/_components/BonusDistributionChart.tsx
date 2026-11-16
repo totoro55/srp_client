@@ -26,6 +26,7 @@ const BASKET_COLORS: Record<string, string> = {
     delivery: "oklch(0.67 0.16 55)",
     sim: "oklch(0.64 0.15 180)",
     credits: "oklch(0.63 0.19 25)",
+    shared: "oklch(0.62 0.22 330)",
 };
 
 const FALLBACK_COLORS = [

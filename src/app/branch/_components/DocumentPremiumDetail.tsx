@@ -10,7 +10,6 @@ import {
     BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
-    BonusDetailTotal,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
@@ -23,6 +22,7 @@ import {
     detailGridWarranty,
     detailHeaderClass,
     detailRowClass,
+    detailWideCell,
 } from "./bonus-detail-ui";
 import { documentPremiumDetail, formatMoney, type DocumentPremiumKind } from "./mock";
 
@@ -91,7 +91,7 @@ export function DocumentPremiumDetail({
                                 ]}
                         />
                     )}
-                    total={<BonusDetailTotal total={detail.total} />}
+                    total={null}
                 />
             )}
             pagination={pager.needsPagination ? (
@@ -104,11 +104,11 @@ export function DocumentPremiumDetail({
             ) : null}
         >
             {withExtras ? (
-                <BonusDetailTableFrame minWidthClass="min-w-[34rem] sm:min-w-[48rem]">
+                <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[48rem]">
                     <div className={cn(detailGridWarranty, detailHeaderClass)}>
                         <BonusDetailSortHeader label="Документ" sortKey="date" sort={sort} onToggle={toggle} />
-                        <BonusDetailSortHeader label="Товар" sortKey="product" sort={sort} onToggle={toggle} />
-                        <BonusDetailSortHeader label="Расчёт" sortKey="calculation" sort={sort} onToggle={toggle} />
+                        <BonusDetailSortHeader label="Товар" sortKey="product" sort={sort} onToggle={toggle} className={detailWideCell} />
+                        <BonusDetailSortHeader label="Расчёт" sortKey="calculation" sort={sort} onToggle={toggle} className={detailWideCell} />
                         <BonusDetailSortHeader label="Премия" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
                     </div>
                     {rows.length === 0 ? (
@@ -116,9 +116,13 @@ export function DocumentPremiumDetail({
                     ) : (
                         pageRows.map((row) => (
                             <div key={row.id} className={cn(detailGridWarranty, detailRowClass)}>
-                                <span className="min-w-0 truncate font-medium">{row.documentTitle}</span>
-                                <span className="min-w-0 truncate text-muted-foreground">{row.productTitle}</span>
-                                <span className="min-w-0 truncate text-muted-foreground">{row.calculation}</span>
+                                <span className="min-w-0">
+                                    <span className="block truncate font-medium">{row.documentTitle}</span>
+                                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{row.productTitle}</span>
+                                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{row.calculation}</span>
+                                </span>
+                                <span className={cn("truncate text-muted-foreground", detailWideCell)}>{row.productTitle}</span>
+                                <span className={cn("truncate text-muted-foreground", detailWideCell)}>{row.calculation}</span>
                                 <span className={detailAmountClass}>{formatMoney(row.amount)}</span>
                             </div>
                         ))

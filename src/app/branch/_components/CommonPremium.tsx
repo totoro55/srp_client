@@ -24,10 +24,16 @@ export function CommonPremium() {
     const sale = directory.indicators.find((indicator) => indicator.title === "Продажа товара");
     const release = directory.indicators.find((indicator) => indicator.title === "Выдача товара");
     const kassa = directory.indicators.find((indicator) => indicator.title === "Кассовые операции");
+    const osnt = directory.indicators.find((indicator) => indicator.title === "ОСНТ");
+    const warehouse = directory.indicators.find((indicator) => indicator.title === "Складские операции");
+    const unloading = directory.indicators.find((indicator) => indicator.title === "Разгрузка ТС");
     const saleAmount = authors.reduce((sum, author) => sum + author.sale, 0);
     const releaseAmount = authors.reduce((sum, author) => sum + author.release, 0);
     const kassaAmount = authors.reduce((sum, author) => sum + author.kassa, 0);
-    const pool = Math.round((saleAmount + releaseAmount + kassaAmount) * 100) / 100;
+    const osntAmount = authors.reduce((sum, author) => sum + author.osnt, 0);
+    const warehouseAmount = authors.reduce((sum, author) => sum + author.warehouse, 0);
+    const unloadingAmount = authors.reduce((sum, author) => sum + author.unloading, 0);
+    const pool = Math.round((saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount) * 100) / 100;
     const hours = directory.employees.reduce((sum, employee) => {
         const roleId = slice.savedRoles[roleKey(employee)] ?? null;
         if (!inCalculation(employee, roleId)) {
@@ -44,6 +50,15 @@ export function CommonPremium() {
     }
     if (kassa && kassaAmount > 0) {
         groups.push({ basketId: kassa.id, title: kassa.title, amount: kassaAmount, facts: [] });
+    }
+    if (osnt && osntAmount > 0) {
+        groups.push({ basketId: osnt.id, title: osnt.title, amount: osntAmount, facts: [] });
+    }
+    if (warehouse && warehouseAmount > 0) {
+        groups.push({ basketId: warehouse.id, title: warehouse.title, amount: warehouseAmount, facts: [] });
+    }
+    if (unloading && unloadingAmount > 0) {
+        groups.push({ basketId: unloading.id, title: unloading.title, amount: unloadingAmount, facts: [] });
     }
 
     if ((directory.loading && directory.employees.length === 0) || authorsState.loading) {
@@ -62,7 +77,7 @@ export function CommonPremium() {
                 <CardHeader>
                     <CardTitle>Общая премия</CardTitle>
                     <p className="text-sm text-muted-foreground">
-                        Учитывает продажи, выдачу и кассовые операции сотрудников вне расчета сдельной оплаты, промоутеров, автокассы и терминала самообслуживания. Общая премия распределяется между всеми сотрудниками, участвующими в сдельной оплате труда, пропорционально отработанному времени.
+                        Учитывает продажи, выдачу, кассу, ОСНТ, склад и разгрузку сотрудников вне расчета сдельной оплаты, промоутеров, автокассы и терминала самообслуживания. Общая премия распределяется между всеми сотрудниками, участвующими в сдельной оплате труда, пропорционально отработанному времени.
                     </p>
                 </CardHeader>
                 <CardContent>
@@ -88,7 +103,7 @@ export function CommonPremium() {
                     authors={authors.map((author) => ({
                         id: `${author.id}:${author.activeFrom}`,
                         name: author.name,
-                        amount: author.sale + author.release + author.kassa,
+                        amount: authorTotal(author),
                     }))}
                 />
             </div>
@@ -103,7 +118,7 @@ export function CommonPremium() {
                             <CardHeader>
                                 <CardTitle>{author.name}</CardTitle>
                                 <p className="text-sm text-muted-foreground">{author.title}</p>
-                                <p className="text-lg font-medium tabular-nums">{formatMoney(author.sale + author.release + author.kassa)}</p>
+                                <p className="text-lg font-medium tabular-nums">{formatMoney(authorTotal(author))}</p>
                             </CardHeader>
                             <CardContent className="flex flex-col gap-2">
                                 {sale && author.sale > 0 ? (
@@ -127,6 +142,27 @@ export function CommonPremium() {
                                         amount={author.kassa}
                                     />
                                 ) : null}
+                                {osnt && author.osnt > 0 ? (
+                                    <AuthorLine
+                                        href={authorHref(author.id, author.kind === "staff" ? author.activeFrom : null, branchId, period, osnt.id)}
+                                        label={osnt.title}
+                                        amount={author.osnt}
+                                    />
+                                ) : null}
+                                {warehouse && author.warehouse > 0 ? (
+                                    <AuthorLine
+                                        href={authorHref(author.id, author.kind === "staff" ? author.activeFrom : null, branchId, period, warehouse.id)}
+                                        label={warehouse.title}
+                                        amount={author.warehouse}
+                                    />
+                                ) : null}
+                                {unloading && author.unloading > 0 ? (
+                                    <AuthorLine
+                                        href={authorHref(author.id, author.kind === "staff" ? author.activeFrom : null, branchId, period, unloading.id)}
+                                        label={unloading.title}
+                                        amount={author.unloading}
+                                    />
+                                ) : null}
                             </CardContent>
                         </Card>
                     ))}
@@ -134,6 +170,10 @@ export function CommonPremium() {
             )}
         </div>
     );
+}
+
+function authorTotal(author: { sale: number; release: number; kassa: number; osnt: number; warehouse: number; unloading: number }): number {
+    return author.sale + author.release + author.kassa + author.osnt + author.warehouse + author.unloading;
 }
 
 function authorHref(id: string, activeFrom: string | null, branchId: string, period: string, part: string): string {

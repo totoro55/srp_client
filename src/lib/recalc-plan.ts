@@ -131,5 +131,12 @@ function startedOnMoscowToday(iso: string): boolean {
 }
 
 function isRecalcKind(kind: unknown): kind is BasketUpdateKind {
-    return kind === "sale" || kind === "release" || kind === "kassa" || kind === "shared" || kind === "tariffs";
+    return kind === "sale"
+        || kind === "release"
+        || kind === "kassa"
+        || kind === "osnt"
+        || kind === "warehouse"
+        || kind === "unloading"
+        || kind === "shared"
+        || kind === "tariffs";
 }

@@ -29,6 +29,30 @@ export const BASKET_SCRIPTS: readonly BasketScript[] = [
         file: "kassa-premium-v1.sql",
         summary: "Минуты операции умножаются на ставку kassa_oper и коэффициент филиала kassa_coef.",
     },
+    {
+        id: "osnt.documents",
+        title: "Документы ОСНТ",
+        indicator: "ОСНТ",
+        parameters: ["quantity"],
+        file: "osnt-premium-v1.sql",
+        summary: "Число документов operation умножается на ставку quantity и коэффициент филиала osnt_coef.",
+    },
+    {
+        id: "warehouse.quantity-volume",
+        title: "Количество и объём склада",
+        indicator: "Складские операции",
+        parameters: ["quantity", "volume"],
+        file: "warehouse-premium-v1.sql",
+        summary: "Ставка quantity умножается на количество, ставка volume — на объём. Обе умножаются на коэффициент филиала warehouse_coef.",
+    },
+    {
+        id: "unloading.volume",
+        title: "Объём разгрузки",
+        indicator: "Разгрузка ТС",
+        parameters: ["volume"],
+        file: "unloading-premium-v1.sql",
+        summary: "Доля объёма приёмки на участника умножается на ставку volume и коэффициент филиала unloading_coef.",
+    },
 ];
 
 export function basketScriptsFor(indicator: string): BasketScript[] {

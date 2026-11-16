@@ -801,6 +801,15 @@ function kindName(kind: BasketUpdateKind): string {
     if (kind === "kassa") {
         return "Касса";
     }
+    if (kind === "osnt") {
+        return "ОСНТ";
+    }
+    if (kind === "warehouse") {
+        return "Склад";
+    }
+    if (kind === "unloading") {
+        return "Разгрузка";
+    }
     if (kind === "tariffs") {
         return "Тарифы";
     }

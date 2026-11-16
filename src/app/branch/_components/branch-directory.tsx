@@ -26,6 +26,9 @@ interface BranchDirectoryValue {
     salePremiums: Record<string, number>;
     releasePremiums: Record<string, number>;
     kassaPremiums: Record<string, number>;
+    osntPremiums: Record<string, number>;
+    warehousePremiums: Record<string, number>;
+    unloadingPremiums: Record<string, number>;
     sharedPremiums: Record<string, number>;
     sharedPremiumRoleIds: string[];
     baseBonus: number | null;
@@ -46,6 +49,9 @@ interface BranchDirectoryValue {
         salePremiums: Record<string, number>;
         releasePremiums: Record<string, number>;
         kassaPremiums: Record<string, number>;
+        osntPremiums: Record<string, number>;
+        warehousePremiums: Record<string, number>;
+        unloadingPremiums: Record<string, number>;
         sharedPremiums: Record<string, number>;
     }) => void;
 }
@@ -80,6 +86,9 @@ interface StaffResponse {
         salePremiums?: Record<string, number>;
         releasePremiums?: Record<string, number>;
         kassaPremiums?: Record<string, number>;
+        osntPremiums?: Record<string, number>;
+        warehousePremiums?: Record<string, number>;
+        unloadingPremiums?: Record<string, number>;
         sharedPremiums?: Record<string, number>;
         sharedPremiumRoleIds?: string[];
         baseBonus: number | null;
@@ -117,6 +126,9 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         salePremiums: {},
         releasePremiums: {},
         kassaPremiums: {},
+        osntPremiums: {},
+        warehousePremiums: {},
+        unloadingPremiums: {},
         sharedPremiums: {},
         sharedPremiumRoleIds: [],
         baseBonus: null,
@@ -142,6 +154,9 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         salePremiums: Record<string, number>;
         releasePremiums: Record<string, number>;
         kassaPremiums: Record<string, number>;
+        osntPremiums: Record<string, number>;
+        warehousePremiums: Record<string, number>;
+        unloadingPremiums: Record<string, number>;
         sharedPremiums: Record<string, number>;
     }) => {
         setValue((current) => ({ ...current, ...premiums }));
@@ -193,6 +208,9 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     salePremiums: readPremiums(body.data.salePremiums),
                     releasePremiums: readPremiums(body.data.releasePremiums),
                     kassaPremiums: readPremiums(body.data.kassaPremiums),
+                    osntPremiums: readPremiums(body.data.osntPremiums),
+                    warehousePremiums: readPremiums(body.data.warehousePremiums),
+                    unloadingPremiums: readPremiums(body.data.unloadingPremiums),
                     sharedPremiums: readPremiums(body.data.sharedPremiums),
                     sharedPremiumRoleIds: readRoleIds(body.data.sharedPremiumRoleIds),
                     baseBonus: body.data.baseBonus,
@@ -248,6 +266,9 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     salePremiums: current.salePremiums,
                     releasePremiums: current.releasePremiums,
                     kassaPremiums: current.kassaPremiums,
+                    osntPremiums: current.osntPremiums,
+                    warehousePremiums: current.warehousePremiums,
+                    unloadingPremiums: current.unloadingPremiums,
                     sharedPremiums: current.sharedPremiums,
                     sharedPremiumRoleIds: current.sharedPremiumRoleIds,
                     baseBonus: current.baseBonus,
