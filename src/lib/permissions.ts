@@ -205,6 +205,12 @@ export const PERMISSION_CATALOG = [
         description: "Ручной пересчёт продажи, выдачи, кассы и общей премии",
     },
     {
+        code: "recalc:cancel",
+        group: "Мониторинг",
+        title: "Отмена пересчётов",
+        description: "Остановка идущего пересчёта в журнале",
+    },
+    {
         code: "recalc-schedule:write",
         group: "Мониторинг",
         title: "Запись времени пересчётов",

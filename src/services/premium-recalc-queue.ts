@@ -2,7 +2,15 @@ import { formatScopeLabel, type RecalcScopeLevel } from "@/lib/recalc-reasons";
 import { premiumMonthHasStarted, type PremiumRecalcKind, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
-import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, PremiumRecalcBusyError } from "@/services/basket-updates";
+import { recalcTimeoutMs } from "@/lib/recalc-timeout";
+import {
+    assertPremiumRecalcRunning,
+    beginPremiumRecalc,
+    failPremiumRecalc,
+    finishPremiumRecalc,
+    PremiumRecalcBusyError,
+    PremiumRecalcCancelledError,
+} from "@/services/basket-updates";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
@@ -248,9 +256,13 @@ async function runJob(job: Job): Promise<void> {
             throw error;
         }
         try {
-            const lines = await calculate(kind, job.period, branches);
+            const lines = await calculate(kind, job.period, branches, scopeLevel);
+            await assertPremiumRecalcRunning(runId);
             await finishPremiumRecalc(runId, lines, { announce: index === kinds.length - 1 });
         } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
             await failPremiumRecalc(runId, error, job.route || "очередь пересчёта");
             throw error;
         }
@@ -292,8 +304,16 @@ async function territoryBranches(territoryId: string, period: string): Promise<s
     return rows.map((row) => row.uuid);
 }
 
-function calculate(kind: PremiumRecalcKind, period: string, branches: string[] | null): Promise<number> {
-    const run: PremiumRun = branches === null ? {} : { branches };
+function calculate(
+    kind: PremiumRecalcKind,
+    period: string,
+    branches: string[] | null,
+    scopeLevel: RecalcScopeLevel,
+): Promise<number> {
+    const run: PremiumRun = {
+        ...(branches === null ? {} : { branches }),
+        timeoutMs: recalcTimeoutMs(scopeLevel),
+    };
     if (kind === "sale") {
         return calculateSalePremium(period, false, run);
     }

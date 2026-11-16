@@ -39,6 +39,7 @@ const STATUS_OPTIONS: { id: RecalcRunStatus | "all"; label: string }[] = [
     { id: "running", label: "Идёт" },
     { id: "success", label: "Готово" },
     { id: "failed", label: "Ошибка" },
+    { id: "cancelled", label: "Отменён" },
 ];
 
 export function RewriteJournal({

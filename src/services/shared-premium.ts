@@ -181,7 +181,7 @@ export async function calculateSharedPremium(period: string, run?: PremiumRun): 
     const asOf = run?.asOf ?? moscowToday();
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
-        await query("SET LOCAL statement_timeout = 0");
+        await query(run?.timeoutMs ? `SET LOCAL statement_timeout = ${Math.trunc(run.timeoutMs)}` : "SET LOCAL statement_timeout = 0");
         return writeSharedPremiums(query, period, run?.branch, { ...run, asOf });
     });
 }

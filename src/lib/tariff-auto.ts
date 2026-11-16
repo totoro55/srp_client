@@ -33,19 +33,17 @@ export function automaticTariffPeriod(now = new Date()): string {
 }
 
 /**
- * День и время уже наступили в этом месяце по Москве.
- * До выбранного дня запуск не выполняется. После него расчёт дожидается статистики до конца месяца.
+ * Авторасчёт тарифов — один раз в месяц: только в заданный день по Москве, после заданного времени.
+ * В другие дни месяца запуск не выполняется.
+ * Повтор в том же дне после успешного прохода блокирует запись sale_tariff_schedule_days.
  */
 export function saleTariffRunDue(day: number | null, time: string, now = new Date()): boolean {
     if (day === null || time === "") {
         return false;
     }
     const clock = moscowClock(now);
-    if (clock.day < day) {
+    if (clock.day !== day) {
         return false;
-    }
-    if (clock.day > day) {
-        return true;
     }
     const [hour, minute] = time.split(":").map(Number);
     return clock.hour * 60 + clock.minute >= hour * 60 + minute;

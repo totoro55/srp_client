@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createErrorResponse } from "@/lib/api-error";
 import { parseJournalDateRange, parseJournalQuery } from "@/lib/journal-query";
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
-import { parseJournalBasket, parseJournalStatus, readRewriteJournal, type BasketRecalcRun } from "@/services/basket-updates";
+import { expireStalePremiumRecalcs, parseJournalBasket, parseJournalStatus, readRewriteJournal, type BasketRecalcRun } from "@/services/basket-updates";
 import type { ApiResponse } from "@/types/api";
 
 export interface JournalPagePayload {
@@ -13,6 +13,7 @@ export interface JournalPagePayload {
 export async function GET(request: Request): Promise<NextResponse<ApiResponse<JournalPagePayload>>> {
     try {
         await requirePermission("monitoring:read");
+        await expireStalePremiumRecalcs();
         const url = new URL(request.url);
         const beforeRaw = url.searchParams.get("before");
         const before = beforeRaw !== null && /^\d+$/.test(beforeRaw) ? Number(beforeRaw) : null;

@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<Exclude<RecalcConsoleStatus, "idle">, string> = {
     running: "Журнал пересчёта, идёт",
     pending: "Журнал пересчёта, в очереди",
     failed: "Журнал пересчёта, ошибка",
+    cancelled: "Журнал пересчёта, отменён",
     done: "Журнал пересчёта, готово",
 };
 
@@ -213,7 +214,7 @@ function StatusMark({ status }: { status: RecalcConsoleStatus }) {
     if (status === "pending") {
         return <CircleIcon aria-hidden="true" className={`${className} text-muted-foreground`} />;
     }
-    if (status === "failed") {
+    if (status === "failed" || status === "cancelled") {
         return <CircleXIcon aria-hidden="true" className={`${className} text-destructive`} />;
     }
     return <CircleCheckIcon aria-hidden="true" className={`${className} text-primary`} />;

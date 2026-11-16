@@ -125,11 +125,22 @@ function classify(error: unknown, postgres: PostgresFacts | null): RecalcErrorTy
     const name = nameOf(error);
     const code = postgres?.code ?? codeOf(error) ?? "";
     const message = `${textOf(error)} ${postgres?.message ?? ""}`.toLowerCase();
-    if (name === "QueryTimeoutError" || code === "TIMEOUT" || code === "57014" || message.includes("statement timeout") || message.includes("canceling statement")) {
+    if (
+        name === "QueryTimeoutError"
+        || name === "PremiumRecalcTimeoutError"
+        || code === "TIMEOUT"
+        || code === "57014"
+        || message.includes("statement timeout")
+        || message.includes("canceling statement")
+        || message.includes("по таймауту")
+    ) {
         return "timeout";
     }
     if (name === "PremiumRecalcBusyError" || statusOf(error) === 409) {
         return "busy";
+    }
+    if (name === "PremiumRecalcCancelledError" || message.includes("пересчёт отменён")) {
+        return "check";
     }
     if (code.startsWith("08") || code === "57P01" || code === "57P02" || code === "57P03" || message.includes("econnrefused") || message.includes("connection terminated") || message.includes("connect econn")) {
         return "connection";

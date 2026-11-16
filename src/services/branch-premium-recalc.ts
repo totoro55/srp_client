@@ -1,8 +1,16 @@
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
 import { formatRecalcConditions, protectReasons, recalcWindowError, wholeMonth, type RecalcWindow } from "@/lib/recalc-window";
+import { recalcTimeoutMs } from "@/lib/recalc-timeout";
 import { replaceAuthorDays } from "@/services/author-days";
 import { getAppSettings } from "@/services/app-settings";
-import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, type BasketUpdateKind } from "@/services/basket-updates";
+import {
+    assertPremiumRecalcRunning,
+    beginPremiumRecalc,
+    failPremiumRecalc,
+    finishPremiumRecalc,
+    PremiumRecalcCancelledError,
+    type BasketUpdateKind,
+} from "@/services/basket-updates";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
@@ -23,7 +31,8 @@ export async function recalculateBranchPremiums(input: {
     if (!UUID.test(input.branchId)) {
         throw new SalePremiumError("Укажите филиал");
     }
-    const run: PremiumRun = { branch: input.branchId.toLowerCase() };
+    const timeoutMs = recalcTimeoutMs("branch");
+    const run: PremiumRun = { branch: input.branchId.toLowerCase(), timeoutMs };
     const steps: { kind: BasketUpdateKind; calculate: () => Promise<number> }[] = [
         { kind: "sale", calculate: () => calculateSalePremium(input.period, false, run) },
         { kind: "release", calculate: () => calculateReleasePremium(input.period, false, run) },
@@ -42,8 +51,12 @@ export async function recalculateBranchPremiums(input: {
         });
         try {
             const lines = await step.calculate();
+            await assertPremiumRecalcRunning(runId);
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
             await failPremiumRecalc(runId, error, input.route);
             throw error;
         }
@@ -73,11 +86,13 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
     }
     const protect = protectReasons(input);
     const conditions = formatRecalcConditions(input);
-    const run: PremiumRun = { from: input.from, until: input.until, protect };
+    const singleBasket = input.target !== "baskets" && input.target !== "shared";
+    const timeoutMs = recalcTimeoutMs("division", { singleBasket });
+    const run: PremiumRun = { from: input.from, until: input.until, protect, timeoutMs };
     if (input.target !== "shared" && wholeMonth(input)) {
         await db.transaction(async (query) => {
             await query("SET LOCAL work_mem = '512MB'");
-            await query("SET LOCAL statement_timeout = 0");
+            await query(`SET LOCAL statement_timeout = ${timeoutMs}`);
             await replaceAuthorDays(query, input.period, moscowToday());
         });
     }
@@ -97,8 +112,12 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
         });
         try {
             const lines = await step.calculate();
+            await assertPremiumRecalcRunning(runId);
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
             await failPremiumRecalc(runId, error, input.route);
             throw error;
         }

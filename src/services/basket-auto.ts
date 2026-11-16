@@ -1,4 +1,5 @@
 import { monthLastDay } from "@/lib/recalc-window";
+import { expireStalePremiumRecalcs } from "@/services/basket-updates";
 import { recalculateMonthSelection } from "@/services/branch-premium-recalc";
 import { db } from "@/services/db";
 import { automaticBasketPeriod, basketRunDue, readAutoSchedules } from "@/services/recalc-schedule";
@@ -7,6 +8,7 @@ import { moscowToday } from "@/services/segment-locks";
 const TICK_MS = 60_000;
 
 export async function runDueBasketPremiums(now = new Date()): Promise<void> {
+    await expireStalePremiumRecalcs();
     const schedule = await readAutoSchedules();
     if (!basketRunDue(schedule.baskets.time, now)) {
         return;

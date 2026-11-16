@@ -96,7 +96,7 @@ export function syncRecalcPlan(events: PlanEvent[]): RecalcPlan | null {
         }
         return plan.actor === "" || event.actor.toLowerCase() === plan.actor.toLowerCase();
     });
-    const blocked = fresh.some((event) => event.status === "failed");
+    const blocked = fresh.some((event) => event.status === "failed" || event.status === "cancelled");
     const kinds = blocked ? [] : plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind));
     if (!blocked && kinds.length === plan.kinds.length) {
         return plan;

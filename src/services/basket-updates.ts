@@ -1,6 +1,7 @@
 import { escapeJournalLike, journalSearchTokens } from "@/lib/journal-query";
 import { describeRecalcError, parseRecalcErrorDetail, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { formatScopeLabel, recalcReasonPhrase, recalcTriggersMatching, type RecalcScopeLevel } from "@/lib/recalc-reasons";
+import { recalcTimeoutMs } from "@/lib/recalc-timeout";
 import { decideAccess } from "@/server/authz/match-access";
 import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
@@ -8,7 +9,7 @@ import { db } from "@/services/db";
 import { notifyRecalc } from "@/services/notifications";
 
 export type BasketUpdateKind = "sale" | "release" | "kassa" | "shared" | "tariffs";
-export type RecalcRunStatus = "running" | "success" | "failed";
+export type RecalcRunStatus = "running" | "success" | "failed" | "cancelled";
 export type { RecalcScopeLevel };
 
 export class PremiumRecalcBusyError extends Error {
@@ -17,6 +18,20 @@ export class PremiumRecalcBusyError extends Error {
     constructor() {
         super("Пересчёт этого снимка уже идёт");
         this.name = "PremiumRecalcBusyError";
+    }
+}
+
+export class PremiumRecalcCancelledError extends Error {
+    constructor(message = "Пересчёт отменён") {
+        super(message);
+        this.name = "PremiumRecalcCancelledError";
+    }
+}
+
+export class PremiumRecalcTimeoutError extends Error {
+    constructor(message = "Пересчёт остановлен по таймауту") {
+        super(message);
+        this.name = "PremiumRecalcTimeoutError";
     }
 }
 
@@ -291,7 +306,7 @@ function sharedMonths(
 
 const JOURNAL_PAGE = 40;
 const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "shared", "tariffs"];
-const JOURNAL_STATUSES: RecalcRunStatus[] = ["running", "success", "failed"];
+const JOURNAL_STATUSES: RecalcRunStatus[] = ["running", "success", "failed", "cancelled"];
 
 export function parseJournalBasket(value: string | null | undefined): BasketUpdateKind | null {
     return JOURNAL_KINDS.includes(value as BasketUpdateKind) ? value as BasketUpdateKind : null;
@@ -548,6 +563,83 @@ export async function failPremiumRecalc(id: number, error: unknown, route?: stri
     }
 }
 
+export async function cancelPremiumRecalc(id: number, actor: string): Promise<boolean> {
+    const described = describeRecalcError(new PremiumRecalcCancelledError(`Пересчёт отменён: ${actor}`), "отмена");
+    const rows = await db.query<RunNoticeRow>(CANCEL_RETURNING, [id, described.summary, JSON.stringify(described.detail)]);
+    if (!rows[0]) {
+        return false;
+    }
+    await cancelLongActiveQueries();
+    await announceFinished(rows[0], "cancelled", described.summary);
+    return true;
+}
+
+/** Закрывает зависшие running-строки и снимает блокировку уникального индекса. */
+export async function expireStalePremiumRecalcs(): Promise<number> {
+    const rows = await db.query<{ id: number; scope_level: RecalcScopeLevel; created_at: Date }>(
+        `
+        SELECT id, scope_level, created_at
+        FROM premium_recalc_runs
+        WHERE status = 'running'
+        `,
+    );
+    let closed = 0;
+    for (const row of rows) {
+        const limitMs = recalcTimeoutMs(row.scope_level);
+        if (Date.now() - row.created_at.getTime() < limitMs) {
+            continue;
+        }
+        const minutes = Math.round(limitMs / 60_000);
+        const described = describeRecalcError(
+            new PremiumRecalcTimeoutError(`Пересчёт остановлен по таймауту ${minutes} мин`),
+            "таймаут",
+        );
+        const updated = await db.query<RunNoticeRow>(CANCEL_RETURNING, [row.id, described.summary, JSON.stringify(described.detail)]);
+        if (updated[0]) {
+            closed += 1;
+            await announceFinished(updated[0], "cancelled", described.summary);
+        }
+    }
+    if (closed > 0) {
+        await cancelLongActiveQueries();
+    }
+    return closed;
+}
+
+export async function assertPremiumRecalcRunning(id: number): Promise<void> {
+    const rows = await db.query<{ status: RecalcRunStatus }>(
+        `SELECT status FROM premium_recalc_runs WHERE id = $1`,
+        [id],
+    );
+    const status = rows[0]?.status;
+    if (status === "running") {
+        return;
+    }
+    if (status === "cancelled") {
+        throw new PremiumRecalcCancelledError();
+    }
+    throw new PremiumRecalcCancelledError("Пересчёт уже завершён");
+}
+
+async function cancelLongActiveQueries(): Promise<void> {
+    try {
+        await db.query(
+            `
+            SELECT pg_cancel_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND pid <> pg_backend_pid()
+              AND state = 'active'
+              AND query_start < NOW() - INTERVAL '10 minutes'
+              AND query NOT ILIKE '%pg_stat_activity%'
+              AND query NOT ILIKE '%pg_cancel_backend%'
+            `,
+        );
+    } catch (error) {
+        console.error("Не удалось прервать долгие запросы пересчёта", error);
+    }
+}
+
 export function systemTrigger(value: unknown): string {
     if (typeof value !== "string") {
         return "";
@@ -594,6 +686,17 @@ const FINISH_RETURNING = `
 const FAIL_RETURNING = `
     UPDATE premium_recalc_runs
     SET status = 'failed',
+        error_message = $2,
+        error_detail = $3::jsonb,
+        finished_at = NOW()
+    WHERE id = $1
+      AND status = 'running'
+    RETURNING ${NOTICE_COLUMNS}
+`;
+
+const CANCEL_RETURNING = `
+    UPDATE premium_recalc_runs
+    SET status = 'cancelled',
         error_message = $2,
         error_detail = $3::jsonb,
         finished_at = NOW()
@@ -745,7 +848,7 @@ function readIds(value: unknown): string[] {
     return value.replace(/^\{|\}$/g, "").split(",").map((item) => item.replaceAll("\"", "").trim().toLowerCase()).filter((id) => UUID.test(id));
 }
 
-async function announceFinished(row: RunNoticeRow, outcome: "success" | "failed", error: string): Promise<void> {
+async function announceFinished(row: RunNoticeRow, outcome: "success" | "failed" | "cancelled", error: string): Promise<void> {
     if (row.origin !== "manual") {
         return;
     }
@@ -756,9 +859,9 @@ async function announceFinished(row: RunNoticeRow, outcome: "success" | "failed"
         const month = formatMonth(row.period);
         const tariffs = row.basket_kind === "tariffs";
         const lead = tariffs
-            ? outcome === "success" ? "Тарифы продажи записаны" : "Тарифы продажи не записаны"
-            : outcome === "success" ? "Пересчёт премии завершён" : "Пересчёт премии остановился";
-        const detail = outcome === "failed" && error !== "" ? ` ${error}` : "";
+            ? outcome === "success" ? "Тарифы продажи записаны" : outcome === "cancelled" ? "Тарифы продажи отменены" : "Тарифы продажи не записаны"
+            : outcome === "success" ? "Пересчёт премии завершён" : outcome === "cancelled" ? "Пересчёт премии отменён" : "Пересчёт премии остановился";
+        const detail = (outcome === "failed" || outcome === "cancelled") && error !== "" ? ` ${error}` : "";
         await notifyRecalc({
             actor: row.actor,
             runId: row.id,

@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon } from "lucide-react";
+import { CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ButtonSpinner } from "@/components/loading-state";
+import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
 import { syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
+import { notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -17,11 +21,13 @@ import {
     TraceTitle,
 } from "@/components/ui/trace";
 import type { BasketRecalcRun, BasketUpdateKind, JournalActor } from "@/services/basket-updates";
+import type { ApiResponse } from "@/types/api";
 
 const PROCESS_GAP_MS = 2 * 60 * 1000;
 
 interface JournalOperation {
     key: string;
+    runId: number | null;
     kind: BasketUpdateKind;
     period: string;
     status: BasketRecalcRun["status"] | "pending";
@@ -48,7 +54,7 @@ interface JournalProcess {
     operations: JournalOperation[];
 }
 
-export type RecalcConsoleStatus = "idle" | "running" | "pending" | "failed" | "done";
+export type RecalcConsoleStatus = "idle" | "running" | "pending" | "failed" | "cancelled" | "done";
 
 const countFormat = new Intl.NumberFormat("ru-RU");
 const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" });
@@ -69,6 +75,9 @@ export function recalcConsoleStatus(events: BasketRecalcRun[], plan: RecalcPlan 
     }
     if (latest.operations.some((operation) => operation.status === "failed")) {
         return "failed";
+    }
+    if (latest.operations.some((operation) => operation.status === "cancelled")) {
+        return "cancelled";
     }
     return "done";
 }
@@ -216,12 +225,12 @@ function RowSummary({ process }: { process: JournalProcess }) {
 
 function OperationCells({ operation, showScope }: { operation: JournalOperation; showScope: boolean }) {
     const time = operationTime(operation);
-    const failed = operation.status === "failed";
+    const alert = operation.status === "failed" || operation.status === "cancelled";
     return (
         <>
-            <span className={cn("whitespace-nowrap", failed && "text-destructive")}>{kindName(operation.kind)}</span>
-            <span className={cn("whitespace-nowrap", failed && "text-destructive")}>{statusLabel(operation.status)}</span>
-            <span className={cn("min-w-0", failed && "text-destructive")}>
+            <span className={cn("whitespace-nowrap", alert && "text-destructive")}>{kindName(operation.kind)}</span>
+            <span className={cn("whitespace-nowrap", alert && "text-destructive")}>{statusLabel(operation.status)}</span>
+            <span className={cn("min-w-0", alert && "text-destructive")}>
                 {time !== null ? <span className="tabular-nums">{time}</span> : null}
                 {operation.status === "running" && operation.startedAt !== null ? <Elapsed startedAt={operation.startedAt} /> : null}
                 {showScope && operation.scope !== "" ? <span className="mt-0.5 block">{operation.scope}</span> : null}
@@ -274,13 +283,60 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
                     <Elapsed startedAt={operation.startedAt} />
                 </p>
             ) : null}
+            {operation.status === "running" ? <CancelRecalcButton runId={operation.runId} /> : null}
             {operation.status === "success" && finished !== null && spent !== null ? (
                 <p>{`Конец в ${timeFormat.format(finished)}, заняло ${spent}${rows === null ? "" : `, ${rows}`}.`}</p>
             ) : null}
-            {operation.status === "failed" && finished !== null && spent !== null ? (
+            {(operation.status === "failed" || operation.status === "cancelled") && finished !== null && spent !== null ? (
                 <p>{`Остановилась в ${timeFormat.format(finished)}, прошло ${spent}.`}</p>
             ) : null}
-            {operation.status === "failed" ? <ErrorReport operation={operation} /> : null}
+            {operation.status === "failed" || operation.status === "cancelled" ? <ErrorReport operation={operation} /> : null}
+        </div>
+    );
+}
+
+function CancelRecalcButton({ runId }: { runId: number | null }) {
+    const access = useAccess();
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    if (!access.has("recalc:cancel") || runId === null) {
+        return null;
+    }
+    return (
+        <div className="flex flex-col gap-1">
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                    void (async () => {
+                        setPending(true);
+                        setError(null);
+                        try {
+                            const response = await fetch("/api/recalc/cancel", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: runId }),
+                            });
+                            const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
+                            if (!json.success) {
+                                setError(json.error.message);
+                                return;
+                            }
+                            notifySuccess("Пересчёт отменён");
+                        } catch {
+                            setError("Не удалось отменить пересчёт");
+                        } finally {
+                            setPending(false);
+                        }
+                    })();
+                }}
+            >
+                {pending ? <ButtonSpinner /> : <SquareIcon />}
+                Отменить
+            </Button>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
     );
 }
@@ -307,6 +363,9 @@ function groupStatus(process: JournalProcess): JournalOperation["status"] | "don
     if (process.operations.some((operation) => operation.status === "failed")) {
         return "failed";
     }
+    if (process.operations.some((operation) => operation.status === "cancelled")) {
+        return "cancelled";
+    }
     if (process.operations.some((operation) => operation.status === "pending")) {
         return "pending";
     }
@@ -319,6 +378,9 @@ function statusLabel(status: JournalOperation["status"]): string {
     }
     if (status === "failed") {
         return "ошибка";
+    }
+    if (status === "cancelled") {
+        return "отменён";
     }
     if (status === "pending") {
         return "в очереди";
@@ -342,7 +404,7 @@ function traceStatus(status: JournalOperation["status"] | "done"): "running" | "
     if (status === "running") {
         return "running";
     }
-    if (status === "failed") {
+    if (status === "failed" || status === "cancelled") {
         return "error";
     }
     if (status === "pending") {
@@ -359,7 +421,7 @@ function statusIcon(status: JournalOperation["status"] | "done", several: boolea
     if (status === "running") {
         return <LoaderCircleIcon className="animate-spin" />;
     }
-    if (status === "failed") {
+    if (status === "failed" || status === "cancelled") {
         return <CircleXIcon />;
     }
     if (status === "pending") {
@@ -397,6 +459,9 @@ function stepTitle(operation: JournalOperation): string {
     }
     if (operation.status === "failed") {
         return operation.kind === "tariffs" ? `${name} не записаны` : `${name} не записана`;
+    }
+    if (operation.status === "cancelled") {
+        return operation.kind === "tariffs" ? `${name} отменены` : `${name} отменён`;
     }
     return name;
 }
@@ -466,7 +531,7 @@ function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): 
         }
         return plan.actor === "" || event.actor.toLowerCase() === plan.actor.toLowerCase();
     });
-    if (fresh.some((event) => event.status === "failed")) {
+    if (fresh.some((event) => event.status === "failed" || event.status === "cancelled")) {
         return [];
     }
     const person = plan.actor === ""
@@ -474,6 +539,7 @@ function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): 
         : events.find((event) => event.actor.toLowerCase() === plan.actor.toLowerCase())?.actorPerson ?? null;
     return plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind)).map((kind) => ({
         key: `queue-${plan.period}-${kind}`,
+        runId: null,
         kind,
         period: plan.period,
         status: "pending" as const,
@@ -495,6 +561,7 @@ function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): 
 function toOperation(event: BasketRecalcRun): JournalOperation {
     return {
         key: `run-${event.id}`,
+        runId: event.id,
         kind: event.kind,
         period: event.period,
         status: event.status,
@@ -657,6 +724,7 @@ function rrsQueueExample(now = Date.now()): JournalProcess[] {
     const branches = "филиалы «Меридиан ТП» и «Молодёжный»";
     const operation = (input: Pick<JournalOperation, "key" | "kind" | "status" | "scope" | "detail" | "startedAt">): JournalOperation => ({
         key: input.key,
+        runId: null,
         kind: input.kind,
         period,
         status: input.status,

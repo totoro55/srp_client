@@ -27,7 +27,7 @@ export async function calculateKassaPremium(period: string, refreshSchedule = tr
     const selectSql = await kassaSelectSql();
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
-        await query("SET LOCAL statement_timeout = 0");
+        await query(run?.timeoutMs ? `SET LOCAL statement_timeout = ${Math.trunc(run.timeoutMs)}` : "SET LOCAL statement_timeout = 0");
         if (refreshSchedule) {
             await replaceAuthorDays(query, period, asOf);
         }

@@ -168,6 +168,8 @@ export interface PremiumRun {
     branches?: string[];
     /** Пусто — закрыты увольнение, перевод и смена должности. Пустой список пересчитывает все три. */
     protect?: readonly StaffLockReason[];
+    /** Лимит statement_timeout для этого пересчёта, мс. */
+    timeoutMs?: number;
 }
 
 export function premiumAsOf(run?: PremiumRun): string {
@@ -284,7 +286,7 @@ export async function calculateSalePremium(period: string, refreshSchedule = tru
     ]);
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
-        await query("SET LOCAL statement_timeout = 0");
+        await query(run?.timeoutMs ? `SET LOCAL statement_timeout = ${Math.trunc(run.timeoutMs)}` : "SET LOCAL statement_timeout = 0");
         if (refreshSchedule) {
             await replaceAuthorDays(query, period, asOf);
         }

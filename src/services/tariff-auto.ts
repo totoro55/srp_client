@@ -6,8 +6,10 @@ import type { AccessView } from "@/server/authz/resolve-access";
 import { RrsRuleError, listRrsTerritories } from "@/services/basket-connections";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
+import { expireStalePremiumRecalcs } from "@/services/basket-updates";
 import { notifyRecalc } from "@/services/notifications";
 import { readAutoSchedules } from "@/services/recalc-schedule";
+import { moscowToday } from "@/services/segment-locks";
 import {
     calculateAndSaveSaleTariffs,
     closeSaleTariffJournal,
@@ -112,6 +114,7 @@ export async function runSaleTariffs(period: string): Promise<SaleTariffRunRepor
 }
 
 export async function runDueSaleTariffs(now = new Date()): Promise<void> {
+    await expireStalePremiumRecalcs();
     if (saleTariffsManualActive()) {
         return;
     }
@@ -119,7 +122,53 @@ export async function runDueSaleTariffs(now = new Date()): Promise<void> {
     if (!saleTariffRunDue(schedule.saleTariffs.day, schedule.saleTariffs.time, now)) {
         return;
     }
-    await runSaleTariffs(automaticTariffPeriod(now));
+    const day = moscowToday(now);
+    const done = await db.query<{ status: string }>(
+        "SELECT status FROM sale_tariff_schedule_days WHERE run_on = $1::date",
+        [day],
+    );
+    if (done[0]?.status === "success") {
+        return;
+    }
+    const period = automaticTariffPeriod(now);
+    try {
+        const report = await runSaleTariffs(period);
+        const detail = [
+            `территорий ${report.savedTerritories}`,
+            `строк ${report.savedRows}`,
+            `ошибок ${report.failed}`,
+            `пропусков ${report.skipped}`,
+        ].join(", ");
+        await rememberSaleTariffScheduleDay(day, period, report.failed > 0 ? "failed" : "success", detail);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "Не удалось выполнить авторасчёт тарифов";
+        try {
+            await rememberSaleTariffScheduleDay(day, period, "failed", message);
+        } catch (rememberError) {
+            console.error("Авторасчёт тарифов не записал итог дня", rememberError);
+        }
+        throw error;
+    }
+}
+
+async function rememberSaleTariffScheduleDay(
+    day: string,
+    period: string,
+    status: "success" | "failed",
+    detail: string,
+): Promise<void> {
+    await db.query(
+        `
+        INSERT INTO sale_tariff_schedule_days (run_on, period, status, detail)
+        VALUES ($1::date, $2::date, $3, $4)
+        ON CONFLICT (run_on) DO UPDATE
+        SET period = EXCLUDED.period,
+            status = EXCLUDED.status,
+            detail = EXCLUDED.detail,
+            updated_at = NOW()
+        `,
+        [day, period, status, detail.replace(/\s+/g, " ").trim().slice(0, 500)],
+    );
 }
 
 const SCHEDULE_ROUTE = "авторасчёт тарифов";
