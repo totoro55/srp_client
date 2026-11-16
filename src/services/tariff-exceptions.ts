@@ -15,7 +15,7 @@ import { enqueuePremiumScopes } from "@/services/premium-recalc-queue";
 const TARIFF_JOURNAL_ROUTE = "/api/rrs/cards/[territoryUuid]/tariff-recalc";
 const NO_SALE_CONNECTION = "Корзина продаж не подключена";
 const NO_TARIFF_AXIS = "У версии не выбран вид расчёта тарифов";
-const NO_SALE_STATISTICS = "Нет статистики этого месяца";
+const NO_SALE_STATISTICS = "Нет статистики";
 
 export function enqueueSaleTariffPremium(
     actor: string,
@@ -54,7 +54,29 @@ const AXIS_TABLE = {
 /** Пустая, отрицательная или нулевая цена и количество в расчёт тарифа не входят. */
 const USABLE_STAT = `stats.avg_price IS NOT NULL AND stats.sum_quantity IS NOT NULL AND stats.avg_price > 0 AND stats.sum_quantity > 0`;
 
-async function loadSalesStats(territoryUuid: string, period: string, axis: TariffAxis): Promise<TariffExceptionPage["stats"]> {
+async function latestStatisticsPeriod(territoryUuid: string, axis: TariffAxis): Promise<string | null> {
+    const source = AXIS_TABLE[axis];
+    const rows = await db.query<{ period: string | null }>(
+        `
+        SELECT to_char(MAX(stats.period), 'YYYY-MM-DD') AS period
+        FROM ${source.stats} stats
+        WHERE stats.territory_uuid = $1
+          AND ${USABLE_STAT}
+        `,
+        [territoryUuid],
+    );
+    return rows[0]?.period ?? null;
+}
+
+async function loadSalesStats(
+    territoryUuid: string,
+    tariffPeriod: string,
+    axis: TariffAxis,
+): Promise<{ period: string | null; stats: TariffExceptionPage["stats"] }> {
+    const statisticsPeriod = await latestStatisticsPeriod(territoryUuid, axis);
+    if (!statisticsPeriod) {
+        return { period: null, stats: [] };
+    }
     const source = AXIS_TABLE[axis];
     const rows = await db.query<{ code: string; title: string; parent: string | null; parent2: string | null; parent3: string | null; avgPrice: string | null; quantity: string | null; baseMode: string | null; main: string | null; im: string | null; b2b: string | null }>(
         `
@@ -73,28 +95,31 @@ async function loadSalesStats(territoryUuid: string, period: string, axis: Tarif
         JOIN ${source.directory} directory ON directory.uuid = stats.${source.codeColumn}
         LEFT JOIN ${source.tariffs} tariffs
             ON tariffs.territory_uuid = stats.territory_uuid
-           AND tariffs.period = stats.period
+           AND tariffs.period = $3::date
            AND tariffs.code = directory.uuid
         WHERE stats.territory_uuid = $1
           AND stats.period = $2::date
           AND ${USABLE_STAT}
         ORDER BY stats.sum_quantity DESC NULLS LAST, directory.name
         `,
-        [territoryUuid, period],
+        [territoryUuid, statisticsPeriod, tariffPeriod],
     );
-    return rows.map((row) => ({
-        code: row.code,
-        title: row.title,
-        parent: blankToNull(row.parent),
-        parent2: blankToNull(row.parent2),
-        parent3: blankToNull(row.parent3),
-        avgPrice: formatRate(row.avgPrice),
-        quantity: formatRate(row.quantity),
-        baseMode: isTariffBaseMode(row.baseMode) ? row.baseMode : null,
-        main: formatRate(row.main),
-        im: formatRate(row.im),
-        b2b: formatRate(row.b2b),
-    }));
+    return {
+        period: statisticsPeriod,
+        stats: rows.map((row) => ({
+            code: row.code,
+            title: row.title,
+            parent: blankToNull(row.parent),
+            parent2: blankToNull(row.parent2),
+            parent3: blankToNull(row.parent3),
+            avgPrice: formatRate(row.avgPrice),
+            quantity: formatRate(row.quantity),
+            baseMode: isTariffBaseMode(row.baseMode) ? row.baseMode : null,
+            main: formatRate(row.main),
+            im: formatRate(row.im),
+            b2b: formatRate(row.b2b),
+        })),
+    };
 }
 
 interface SliceRow {
@@ -122,7 +147,8 @@ export async function getTariffExceptions(
     const slices = await loadSlices(territoryUuid, card.period);
     const current = axis === null ? [] : slices.filter((row) => row.axis === axis && !row.removed);
     const other = slices.filter((row) => row.axis !== axis && !row.removed && isTariffAxis(row.axis));
-    const inStats = axis === null ? new Set<string>() : await statsCodes(territoryUuid, card.period, axis, current.map((row) => row.code));
+    const loaded = axis === null ? { period: null, stats: [] } : await loadSalesStats(territoryUuid, card.period, axis);
+    const inStats = new Set(loaded.stats.map((stat) => stat.code));
     return {
         territory: card.territory,
         period: card.period,
@@ -132,7 +158,8 @@ export async function getTariffExceptions(
         editPolicy: card.editPolicy,
         connection,
         exceptions: current.map((row) => toLine(row, inStats.has(row.code))),
-        stats: axis === null ? [] : await loadSalesStats(territoryUuid, card.period, axis),
+        stats: loaded.stats,
+        statisticsPeriod: loaded.period,
         otherAxis: other[0] && isTariffAxis(other[0].axis) ? other[0].axis : null,
         otherAxisTitles: other.map((row) => row.title),
         weights: axis === null ? null : await loadAlgorithmWeights(access, territoryUuid, axis),
@@ -166,16 +193,24 @@ export async function searchTariffSegments(
                    SELECT 1
                    FROM ${source.stats} stats
                    WHERE stats.territory_uuid = $1
-                     AND stats.period = $2::date
+                     AND stats.period = (
+                         SELECT MAX(latest.period)
+                         FROM ${source.stats} latest
+                         WHERE latest.territory_uuid = $1
+                           AND latest.avg_price IS NOT NULL
+                           AND latest.sum_quantity IS NOT NULL
+                           AND latest.avg_price > 0
+                           AND latest.sum_quantity > 0
+                     )
                      AND stats.${source.codeColumn} = directory.uuid
                      AND ${USABLE_STAT}
                ) AS "inStats"
         FROM ${source.directory} directory
-        WHERE directory.name ILIKE $3 ESCAPE '\\' OR directory.uuid::text ILIKE $4 ESCAPE '\\'
+        WHERE directory.name ILIKE $2 ESCAPE '\\' OR directory.uuid::text ILIKE $3 ESCAPE '\\'
         ORDER BY "inStats" DESC, directory.name
         LIMIT 20
         `,
-        [territoryUuid, period, `%${escapeLike(query)}%`, `${query.toLowerCase()}%`],
+        [territoryUuid, `%${escapeLike(query)}%`, `${query.toLowerCase()}%`],
     );
     return rows;
 }
@@ -213,7 +248,7 @@ export async function saveTariffExceptions(
     const versionId = page.connection.versionId;
     const expected = new Set(page.stats.map((stat) => stat.code));
     if (rows.length !== expected.size || rows.some((row) => !expected.has(row.code))) {
-        throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой этого месяца");
+        throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой");
     }
     const items = exceptionItems(rows);
     const titles = await titlesOf(axis, rows.map((row) => row.code));
@@ -398,7 +433,10 @@ async function loadTariffBounds(territoryUuid: string, period: string, versionId
         `
         SELECT ${columns}
         FROM basket_data."${version.dataTable}"
-        WHERE territory_uuid = $1 AND period = $2::date
+        WHERE territory_uuid = $1
+          AND period <= $2::date
+        ORDER BY period DESC
+        LIMIT 1
         `,
         [territoryUuid, period],
     );
@@ -524,25 +562,6 @@ async function loadSlices(territoryUuid: string, period: string, query: Sql = db
     );
 }
 
-async function statsCodes(territoryUuid: string, period: string, axis: TariffAxis, codes: string[]): Promise<Set<string>> {
-    if (codes.length === 0) {
-        return new Set();
-    }
-    const source = AXIS_TABLE[axis];
-    const rows = await db.query<{ code: string }>(
-        `
-        SELECT stats.${source.codeColumn}::text AS code
-        FROM ${source.stats} stats
-        WHERE stats.territory_uuid = $1
-          AND stats.period = $2::date
-          AND stats.${source.codeColumn} = ANY($3::uuid[])
-          AND ${USABLE_STAT}
-        `,
-        [territoryUuid, period, codes],
-    );
-    return new Set(rows.map((row) => row.code));
-}
-
 export async function getEnabledTariffExceptions(
     access: AccessView,
     territoryUuid: string,
@@ -552,11 +571,12 @@ export async function getEnabledTariffExceptions(
     const period = requestedPeriod ?? card.period;
     const connection = await loadSalesConnection(territoryUuid, period);
     const axis = connection?.axis ?? null;
-    const [rows, directory, stats] = await Promise.all([
+    const [rows, directory, loaded] = await Promise.all([
         listEnabledTariffExceptions(period, [territoryUuid]),
-        axis ? listAxisDirectory(territoryUuid, period, axis) : Promise.resolve([]),
-        axis ? loadSalesStats(territoryUuid, period, axis) : Promise.resolve([]),
+        axis ? listAxisDirectory(territoryUuid, axis) : Promise.resolve([]),
+        axis ? loadSalesStats(territoryUuid, period, axis) : Promise.resolve({ period: null, stats: [] }),
     ]);
+    const stats = loaded.stats;
     const weights = axis ? await loadAlgorithmWeights(access, territoryUuid, axis) : null;
     const bounds = axis && connection ? await loadTariffBounds(territoryUuid, period, connection.versionId) : emptyTariffBounds();
     return {
@@ -598,7 +618,7 @@ export async function saveExceptionRules(
     const expected = new Set(page.stats.map((stat) => stat.code));
     for (const item of items) {
         if (!expected.has(item.code)) {
-            throw new RrsRuleError(400, "Исключение относится к категории вне статистики этого месяца");
+            throw new RrsRuleError(400, "Исключение относится к категории вне статистики");
         }
         if (!item.automatic && (item.main === null || item.im === null || item.b2b === null)) {
             throw new RrsRuleError(400, "Заполните ставки ручного исключения");
@@ -644,7 +664,7 @@ export async function saveRecalculatedTariffs(
     assertTariffReference(page.weights?.referenceSelectable ?? false, page.reference, chosen);
     const rows = calculatePeriodTariffs(page, chosen);
     if (rows.length === 0) {
-        throw new RrsRuleError(400, "В статистике этого месяца нет категорий для расчёта");
+        throw new RrsRuleError(400, "Для этой территории статистики нет");
     }
     if (rows.some((row) => !tariffRowComplete(row))) {
         throw new RrsRuleError(400, EMPTY_TARIFF_SAVE_MESSAGE);
@@ -691,7 +711,7 @@ const SYSTEM_ACCESS: AccessView = {
     previewChoices: [],
 };
 
-/** Тот же расчёт, что ручное сохранение пересчёта. Исключения вне статистики месяца не применяются и не удаляются. Премию не ставит: её посчитает расписание корзин. */
+/** Тот же расчёт, что ручное сохранение. Берёт последнюю статистику территории. Исключения вне неё не применяются и не удаляются. Премию не ставит: её посчитает расписание корзин. */
 export async function calculateAndSaveSaleTariffs(territoryUuid: string, period: string): Promise<SaleTariffAutoResult> {
     const settings = await getAppSettings();
     const policy = buildRrsEditPolicy(settings.rrsEditCutoffDay);
@@ -707,8 +727,9 @@ export async function calculateAndSaveSaleTariffs(territoryUuid: string, period:
         return { ...emptyTariffResult("skipped", NO_TARIFF_AXIS), versionNo: connection.versionNo, versionName: connection.versionName };
     }
     const version = { versionNo: connection.versionNo, versionName: connection.versionName, axis };
-    const stats = await loadSalesStats(territoryUuid, period, axis);
-    if (stats.length === 0) {
+    const loaded = await loadSalesStats(territoryUuid, period, axis);
+    const stats = loaded.stats;
+    if (!loaded.period) {
         return { ...emptyTariffResult("skipped", NO_SALE_STATISTICS), ...version };
     }
     const present = new Set(stats.map((stat) => stat.code));
@@ -865,7 +886,8 @@ export async function previewConnectionTariffs(
     const keepExceptions = saved?.versionId === versionId && saved.axis === axis;
     const slices = axis && keepExceptions ? await loadSlices(territoryUuid, period) : [];
     const current = axis === null ? [] : slices.filter((row) => row.axis === axis && !row.removed);
-    const inStats = axis === null ? new Set<string>() : await statsCodes(territoryUuid, period, axis, current.map((row) => row.code));
+    const loaded = axis === null ? { period: null, stats: [] } : await loadSalesStats(territoryUuid, period, axis);
+    const inStats = new Set(loaded.stats.map((stat) => stat.code));
     const savedPeriods = await db.query<{ period: string }>(
         `SELECT to_char(period, 'YYYY-MM-DD') AS period FROM basket_connections WHERE territory_uuid = $1 GROUP BY period ORDER BY period DESC`,
         [territoryUuid],
@@ -885,7 +907,8 @@ export async function previewConnectionTariffs(
             axis,
         },
         exceptions: current.map((row) => toLine(row, inStats.has(row.code))),
-        stats: axis === null ? [] : await loadSalesStats(territoryUuid, period, axis),
+        stats: loaded.stats,
+        statisticsPeriod: loaded.period,
         otherAxis: null,
         otherAxisTitles: [],
         weights: axis === null ? null : await loadAlgorithmWeights(access, territoryUuid, axis),
@@ -917,10 +940,11 @@ export async function writeWizardTariffs(
         return;
     }
     const axis = connection.axis;
-    const stats = await loadSalesStats(territoryUuid, period, axis);
-    if (stats.length === 0) {
+    const loaded = await loadSalesStats(territoryUuid, period, axis);
+    const stats = loaded.stats;
+    if (!loaded.period) {
         if (tariffs && tariffs.rows.length > 0) {
-            throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой этого месяца");
+            throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой");
         }
         return;
     }
@@ -932,7 +956,7 @@ export async function writeWizardTariffs(
     assertTariffReference(weights?.referenceSelectable ?? false, stored, tariffs.reference);
     const expected = new Set(stats.map((stat) => stat.code));
     if (tariffs.rows.length !== expected.size || tariffs.rows.some((row) => !expected.has(row.code))) {
-        throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой этого месяца");
+        throw new RrsRuleError(400, "Список тарифов не совпадает со статистикой");
     }
     if (tariffs.rows.some((row) => !Number.isFinite(row.main) || !Number.isFinite(row.im) || !Number.isFinite(row.b2b))) {
         throw new RrsRuleError(400, "Нельзя сохранить тарифы, пока хотя бы одно поле пустое");
@@ -1325,7 +1349,15 @@ async function listEnabledTariffExceptions(period: string, territoryUuids: strin
                           FROM basket_category_stats stats
                           WHERE stats.territory_uuid = exception.territory_uuid
                             AND stats.category_uuid = exception.code
-                            AND stats.period = $1::date
+                            AND stats.period = (
+                                SELECT MAX(latest.period)
+                                FROM basket_category_stats latest
+                                WHERE latest.territory_uuid = exception.territory_uuid
+                                  AND latest.avg_price IS NOT NULL
+                                  AND latest.sum_quantity IS NOT NULL
+                                  AND latest.avg_price > 0
+                                  AND latest.sum_quantity > 0
+                            )
                             AND ${USABLE_STAT}
                       )
                   )
@@ -1336,7 +1368,15 @@ async function listEnabledTariffExceptions(period: string, territoryUuids: strin
                           FROM basket_kind_stats stats
                           WHERE stats.territory_uuid = exception.territory_uuid
                             AND stats.kind_uuid = exception.code
-                            AND stats.period = $1::date
+                            AND stats.period = (
+                                SELECT MAX(latest.period)
+                                FROM basket_kind_stats latest
+                                WHERE latest.territory_uuid = exception.territory_uuid
+                                  AND latest.avg_price IS NOT NULL
+                                  AND latest.sum_quantity IS NOT NULL
+                                  AND latest.avg_price > 0
+                                  AND latest.sum_quantity > 0
+                            )
                             AND ${USABLE_STAT}
                       )
                   )
@@ -1376,7 +1416,11 @@ function folderPath(parent3: string | null, parent2: string | null, parent1: str
     return [parent3, parent2, parent1].filter((item): item is string => item !== null && item !== "");
 }
 
-async function listAxisDirectory(territoryUuid: string, period: string, axis: TariffAxis): Promise<TariffCategoryFolder[]> {
+async function listAxisDirectory(territoryUuid: string, axis: TariffAxis): Promise<TariffCategoryFolder[]> {
+    const statisticsPeriod = await latestStatisticsPeriod(territoryUuid, axis);
+    if (!statisticsPeriod) {
+        return [];
+    }
     const source = AXIS_TABLE[axis];
     const rows = await db.query<{ code: string; title: string; parent3: string | null; parent2: string | null; parent1: string | null }>(
         `
@@ -1393,7 +1437,7 @@ async function listAxisDirectory(territoryUuid: string, period: string, axis: Ta
         WHERE ${USABLE_STAT}
         ORDER BY directory.name
         `,
-        [territoryUuid, period],
+        [territoryUuid, statisticsPeriod],
     );
     return rows.map((row) => ({
         code: row.code,

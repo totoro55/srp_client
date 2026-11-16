@@ -264,7 +264,7 @@ async function runManualSaleTariffs(actor: string, period: string, targets: Sale
             }
             const error = result.error ?? new RrsRuleError(400, result.detail || "Тарифы не записаны");
             await closeSaleTariffJournal(runId, { error, route: MANUAL_ROUTE, announce: false });
-            if (result.detail === "Нет статистики этого месяца") {
+            if (result.detail === "Нет статистики") {
                 noStatistics += 1;
             } else {
                 failed += 1;

@@ -259,6 +259,9 @@ export function TariffExceptions({ embedded }: {
 
     const currentWithoutData = Boolean(page && page.stats.length === 0 && page.period.slice(0, 7) === page.editPolicy.currentMonth);
     const blankPeriod = Boolean(page && page.stats.length === 0 && !currentWithoutData);
+    const statisticsError = !loading && page?.connection?.axis && !page.statisticsPeriod
+        ? "Для этой территории статистики нет."
+        : null;
 
     const referenceSelectable = Boolean(page?.weights?.referenceSelectable);
     const shownReference = reference;
@@ -400,7 +403,7 @@ export function TariffExceptions({ embedded }: {
                         />
                         {blankPeriod ? null : (
                         <div className="ml-auto flex flex-wrap items-center gap-2">
-                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => { flushEditRef.current?.(); weightFlushRef.current?.(); setConfirmSave(true); }}>
+                            <Button type="button" size="sm" title={incomplete ? EMPTY_TARIFF_SAVE_MESSAGE : undefined} disabled={saving || incomplete || Boolean(statisticsError) || (!page.editable && !currentWithoutData)} onMouseDown={() => { flushEditRef.current?.(); weightFlushRef.current?.(); }} onClick={() => { flushEditRef.current?.(); weightFlushRef.current?.(); setConfirmSave(true); }}>
                                 {saving ? <ButtonSpinner /> : <Save />}
                                 Сохранить
                             </Button>
@@ -416,20 +419,20 @@ export function TariffExceptions({ embedded }: {
                     </>
                 ) : null}
             />}
-            <FormAlert message={error} />
+            <FormAlert message={error ?? statisticsError} />
             {embeddedMode && !loading && page ? (
                 <p className="text-sm text-muted-foreground">
                     {!page.connection?.axis
                         ? "У подключённой версии нет вида расчёта тарифов. Карточку можно завершить без тарифов."
                         : page.stats.length === 0
-                            ? "За этот месяц нет строк статистики. Карточку можно завершить без тарифов."
+                            ? "Для этой территории статистики нет. Карточку можно завершить без тарифов."
                             : "Ставки, опора и исключения сохранятся вместе с карточкой."}
                 </p>
             ) : null}
             {loading ? <TariffPageSkeleton /> : null}
             {!loading && page && !blankPeriod ? (
                 <section className="flex flex-col gap-4">
-                    <ConnectionNote connection={page.connection} />
+                    <ConnectionNote connection={page.connection} statisticsPeriod={page.statisticsPeriod} />
                     {page.connection?.axis ? (
                         <CalculationSettings
                             title={algorithmTitle}
@@ -445,7 +448,7 @@ export function TariffExceptions({ embedded }: {
                             onReference={setReference}
                         />
                     ) : null}
-                    {page.connection?.axis ? (
+                    {page.connection?.axis && (page.stats.length > 0 || embeddedMode) ? (
                         <StatsTable
                             stats={page.stats}
                             lines={lines}
@@ -520,7 +523,7 @@ function StatsTable({
                 <p className="text-sm text-muted-foreground">{visible.length} из {stats.length}</p>
             </div>
             {stats.length === 0 ? (
-                <p className="text-sm text-muted-foreground">За этот месяц статистики продаж по выбранному виду расчета нет.</p>
+                <p className="text-sm text-muted-foreground">Для этой территории статистики нет.</p>
             ) : (
                 <PinnedTable
                     minWidthClass="min-w-[1128px]"
@@ -1005,18 +1008,30 @@ function TariffPageSkeleton() {
     );
 }
 
-function ConnectionNote({ connection }: { connection: TariffExceptionPage["connection"] }) {
+function ConnectionNote({
+    connection,
+    statisticsPeriod,
+}: {
+    connection: TariffExceptionPage["connection"];
+    statisticsPeriod: string | null;
+}) {
     if (!connection) {
         return <p className="text-sm">Корзина продаж не подключена.</p>;
     }
     if (!connection.axis) {
         return <p className="text-sm">{`Версия ${connection.versionNo} «${connection.versionName}». Вид расчёта не выбран.`}</p>;
     }
+    const statistics = statisticsPeriod ? ` Статистика ${formatStatisticsFrom(statisticsPeriod)}.` : "";
     return (
         <p className="text-sm">
-            {`Версия ${connection.versionNo} «${connection.versionName}». ${tariffAxisTitle(connection.axis)}.`}
+            {`Версия ${connection.versionNo} «${connection.versionName}». ${tariffAxisTitle(connection.axis)}.${statistics}`}
         </p>
     );
+}
+
+function formatStatisticsFrom(period: string): string {
+    const [, month, day] = period.split("-");
+    return `от ${day}.${month}`;
 }
 
 function CalculationSettings({

@@ -89,6 +89,8 @@ export interface TariffExceptionPage {
     connection: TariffExceptionConnection | null;
     exceptions: TariffExceptionLine[];
     stats: TariffSaleStat[];
+    /** Период строк статистики, по которым посчитаны тарифы. Пусто, если у территории статистики нет. */
+    statisticsPeriod: string | null;
     otherAxis: TariffAxis | null;
     otherAxisTitles: string[];
     weights: TariffExceptionWeights | null;
