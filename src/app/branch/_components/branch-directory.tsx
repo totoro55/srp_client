@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { currentBranchPeriod, isBranchId, isBranchPeriod } from "./mock";
+import { currentBranchPeriod, isBranchId, isBranchPeriod, type BrigadeSetup } from "./mock";
 import { useBranchStore } from "./branch-store";
 import { cabinetMovement, staffKtu, type StaffEmployee } from "./staff";
 
@@ -82,6 +82,7 @@ interface StaffResponse {
             leftOn: string | null;
         }[];
         roleOverrides?: Record<string, string | null>;
+        brigades?: BrigadeSetup;
         indicators?: { id: string; title: string }[];
         salePremiums?: Record<string, number>;
         releasePremiums?: Record<string, number>;
@@ -197,6 +198,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                 const holdForPlacement = onAssignment && !branchIsWorked && !branchIsPreferred;
                 if (matched && !holdForPlacement) {
                     store.hydrateRoles(branchId, period, roleOverrides);
+                    store.hydrateBrigades(branchId, period, readBrigades(body.data.brigades));
                 }
                 setValue({
                     loading: holdForPlacement || (!matched && body.data.branches.length > 0),
@@ -332,6 +334,23 @@ function readBranchSettings(value: { roles?: boolean; brigades?: boolean; shared
         brigades: value?.brigades === true,
         shared: value?.shared === true,
     };
+}
+
+function readBrigades(value: BrigadeSetup | undefined): BrigadeSetup {
+    if (!value || (value.mode !== "off" && value.mode !== "all" && value.mode !== "groups") || !Array.isArray(value.groups)) {
+        return { mode: "off", groups: [] };
+    }
+    const groups = value.groups.flatMap((group) => {
+        if (!group || typeof group.id !== "string" || typeof group.name !== "string" || !Array.isArray(group.memberIds)) {
+            return [];
+        }
+        return [{
+            id: group.id,
+            name: group.name,
+            memberIds: group.memberIds.filter((id) => typeof id === "string"),
+        }];
+    });
+    return { mode: value.mode, groups };
 }
 
 function readRoleIds(value: string[] | undefined): string[] {

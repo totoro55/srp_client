@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUpDown, ChevronDown, ListFilter, RotateCcw, Search, X } from "lucide-react";
 import { cn } from "cn";
@@ -78,6 +78,8 @@ interface BonusRow {
     services: Record<ServiceIndicatorId, number | null>;
     total: number | null;
     brigade: string | null;
+    brigadeKey: string;
+    brigadeRank: number;
 }
 
 function blankPremiums(indicators: readonly CabinetIndicator[]): Record<string, number | null> {
@@ -332,11 +334,11 @@ export function BranchBonuses() {
     const [roles, setRoles] = useState<string[]>([]);
     const [brigades, setBrigades] = useState<string[]>([]);
     const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>([...DEFAULT_HIDDEN_MOVEMENTS]);
-    const [sort, setSort] = useState<BonusSort>({ key: "role", direction: "desc" });
+    const [sort, setSort] = useState<BonusSort | null>(null);
     const [hover, setHover] = useState<CellHover | null>(null);
     const tableFrame = useRef<HTMLDivElement>(null);
     const slice = store.slice(branchId, period, directory.employees, settings);
-    const brigadeOn = slice.savedBrigades.mode !== "off";
+    const brigadeOn = slice.savedBrigades.mode === "groups";
     const showForecast = !monthHasEnded(period);
     const columns = cabinetColumns(directory.indicators);
     const services = blankServices();
@@ -376,14 +378,15 @@ export function BranchBonuses() {
             premiums,
             total: shared,
             brigade: brigadeName(employee.id, slice.savedBrigades, true),
+            ...brigadePlace(employee.id, slice.savedBrigades.groups),
         } satisfies BonusRow];
     });
     const roleOptions = uniqueSorted(rows.map((row) => row.role));
     const brigadeOptions = uniqueSorted(rows.flatMap((row) => row.brigade ? [row.brigade] : []));
     const sortable = new Set(sortColumns(brigadeOn, columns, showForecast).map((item) => item.key));
-    const activeSort = sort.key === "brigade" && !brigadeOn
-        ? { key: "role" as const, direction: "desc" as const }
-        : sortable.has(sort.key) ? sort : { key: "role" as const, direction: "desc" as const };
+    const explicitSort = sort && sort.key === "brigade" && !brigadeOn
+        ? null
+        : sort && sortable.has(sort.key) ? sort : null;
     const needle = query.trim().toLowerCase();
     const filtered = rows.filter((row) => {
         if (roles.length > 0 && !roles.includes(row.role)) {
@@ -403,7 +406,26 @@ export function BranchBonuses() {
         const haystack = `${row.employee.name} ${row.employee.title} ${row.role} ${row.brigade ?? ""} ${movement} ${movementAlias}`.toLowerCase();
         return haystack.includes(needle);
     });
-    const visible = filtered.slice().sort((left, right) => compareRows(left, right, activeSort, showForecast));
+    const roleCounts = countKeys(filtered, (row) => row.role);
+    const brigadeCounts = brigadeOn ? countKeys(filtered, (row) => row.brigadeKey) : null;
+    const roleCountsByBrigade = brigadeOn ? countRolesByBrigade(filtered) : null;
+    const visible = filtered.slice().sort((left, right) => explicitSort
+        ? compareRows(left, right, explicitSort, showForecast)
+        : compareDefault(left, right, {
+            brigadeOn,
+            roleCounts,
+            brigadeCounts,
+            roleCountsByBrigade,
+        }));
+    const roleCount = new Set(visible.map((row) => row.role)).size;
+    const grouping = brigadeOn && (explicitSort === null || explicitSort.key === "brigade")
+        ? "brigade"
+        : explicitSort === null && roleCount > 1
+            ? "role"
+            : null;
+    const places = grouping
+        ? groupPlaces(visible, (row) => grouping === "brigade" ? row.brigadeKey : row.role)
+        : visible.map(() => null);
     const currentPays = visible.flatMap((row) => row.pay.currentPay === null ? [] : [row.pay.currentPay]);
     const forecastPays = visible.flatMap((row) => row.pay.forecastPay === null ? [] : [row.pay.forecastPay]);
     const movementFilterChanged = !sameMovements(hiddenMovements, DEFAULT_HIDDEN_MOVEMENTS);
@@ -495,7 +517,7 @@ export function BranchBonuses() {
                             <RotateCcw />
                         </Button>
                         <div className="sm:hidden">
-                            <SortMenu sort={activeSort} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} />
+                            <SortMenu sort={explicitSort} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} />
                         </div>
                     </div>
                 </div>
@@ -514,22 +536,32 @@ export function BranchBonuses() {
             <div className="overflow-visible rounded-lg border sm:hidden">
                 {visible.length === 0 ? (
                     <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyText}</p>
-                ) : visible.map((row) => (
-                    <BonusListItem
-                        key={roleKey(row.employee)}
-                        row={row}
-                        brigadeOn={brigadeOn}
-                        branchId={branchId}
-                        period={period}
-                        href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
-                        lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
-                        poolHref={poolHref}
-                        baskets={columns.baskets}
-                        currentHeat={row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay))}
-                        forecastHeat={showForecast && row.pay.forecastPay !== null ? payHeat(payRatio(forecastPays, row.pay.forecastPay)) : undefined}
-                        showForecast={showForecast}
-                    />
-                ))}
+                ) : groupRuns(visible, places).map((run) => {
+                    const cards = run.rows.map((row) => (
+                        <BonusListItem
+                            key={roleKey(row.employee)}
+                            row={row}
+                            brigadeOn={brigadeOn}
+                            branchId={branchId}
+                            period={period}
+                            href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
+                            lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
+                            poolHref={poolHref}
+                            baskets={columns.baskets}
+                            currentHeat={row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay))}
+                            forecastHeat={showForecast && row.pay.forecastPay !== null ? payHeat(payRatio(forecastPays, row.pay.forecastPay)) : undefined}
+                            showForecast={showForecast}
+                        />
+                    ));
+                    if (!run.framed) {
+                        return cards;
+                    }
+                    return (
+                        <div key={roleKey(run.rows[0].employee)} className="m-1 overflow-hidden rounded-md border border-primary/35">
+                            {cards}
+                        </div>
+                    );
+                })}
             </div>
             <div
                 ref={tableFrame}
@@ -555,21 +587,21 @@ export function BranchBonuses() {
             <Table containerClassName="min-h-0 max-w-full flex-1" className="w-max cursor-default border-separate border-spacing-0 text-xs">
                 <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                        <SortHead label="Сотрудник" column="name" sort={activeSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Роль" column="role" sort={activeSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={activeSort} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
-                        <SortHead label="Часов по графику" column="schedule" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Часов по табелю" column="timesheet" sort={activeSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Оклад" column="salary" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Фиксированная премия" column="fixed" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Текущая ЗП" column="current" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        {showForecast ? <SortHead label="Прогноз ЗП" column="forecast" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
-                        <SortHead label="Общая премия" column="total" sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Сотрудник" column="name" sort={explicitSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Роль" column="role" sort={explicitSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={explicitSort} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
+                        <SortHead label="Часов по графику" column="schedule" sort={explicitSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Часов по табелю" column="timesheet" sort={explicitSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Оклад" column="salary" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Фиксированная премия" column="fixed" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Текущая ЗП" column="current" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        {showForecast ? <SortHead label="Прогноз ЗП" column="forecast" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
+                        <SortHead label="Общая премия" column="total" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
                         {columns.baskets.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
                         ))}
                         {SERVICE_INDICATORS.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={activeSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
                         ))}
                     </TableRow>
                 </TableHeader>
@@ -580,7 +612,7 @@ export function BranchBonuses() {
                                 {emptyText}
                             </TableCell>
                         </TableRow>
-                    ) : visible.map((row) => {
+                    ) : visible.map((row, index) => {
                         const href = segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom);
                         const lines = canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail);
                         const currentHeat = row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay));
@@ -588,13 +620,15 @@ export function BranchBonuses() {
                         const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
                         const rowId = roleKey(row.employee);
                         const movement = row.employee.movement;
-                        const valued = (column: BonusColumn, value?: number | null) => cn(dataClass(column, columns, value ?? undefined), movementValueClass(movement));
+                        const place = places[index];
+                        const valued = (column: BonusColumn, value?: number | null) => cn(dataClass(column, columns, value ?? undefined), movementValueClass(movement), frameClass(place, "body"));
                         return (
-                            <TableRow key={rowId} className="hover:bg-transparent">
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn, columns, showForecast)} pin="name" className={cn(dataClass("name", columns), movementNameClass(movement))} onOpen={() => router.push(href)} onHover={setHover}>
+                            <Fragment key={rowId}>
+                            <TableRow className="hover:bg-transparent">
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn, columns, showForecast)} pin="name" className={cn(dataClass("name", columns), movementNameClass(movement), frameClass(place, "name"))} onOpen={() => router.push(href)} onHover={setHover}>
                                     <EmployeeNameLine name={row.employee.name} movement={movement} movementOn={row.employee.movementOn} partial={row.employee.partial} from={row.employee.activeFrom} until={row.employee.activeUntil} fit />
                                 </AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn, columns, showForecast)} pin="role" className={cn(dataClass("role", columns), movementNameClass(movement))} onHover={setHover}>
+                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn, columns, showForecast)} pin="role" className={cn(dataClass("role", columns), movementNameClass(movement), frameClass(place, "body"))} onHover={setHover}>
                                     <RoleLabel role={row.role} plain={movement !== undefined} />
                                 </AimedCell>
                                 {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn, columns, showForecast)} className={valued("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
@@ -624,7 +658,7 @@ export function BranchBonuses() {
                                         hover={hover}
                                         row={rowId}
                                         column={columnIndex(indicator.id, brigadeOn, columns, showForecast)}
-                                        className={valued(indicator.id, row.services[indicator.id])}
+                                        className={cn(valued(indicator.id, row.services[indicator.id]), indicator.id === SERVICE_LAST && frameClass(place, "end"))}
                                         onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
                                         onHover={setHover}
                                     >
@@ -632,6 +666,12 @@ export function BranchBonuses() {
                                     </AimedCell>
                                 ))}
                             </TableRow>
+                            {place === "end" && index < visible.length - 1 ? (
+                                <TableRow aria-hidden className="hover:bg-transparent">
+                                    <TableCell colSpan={columnCount} className="h-2 border-0 bg-muted p-0" />
+                                </TableRow>
+                            ) : null}
+                            </Fragment>
                         );
                     })}
                 </TableBody>
@@ -658,11 +698,15 @@ function RoleLabel({ role, plain = false }: { role: string; plain?: boolean }) {
     return <span className={cn("inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 font-medium", tone)}>{role}</span>;
 }
 
-function nextSort(current: BonusSort, column: BonusColumn): BonusSort {
-    if (current.key === column) {
-        return { key: column, direction: current.direction === "asc" ? "desc" : "asc" };
+function nextSort(current: BonusSort | null, column: BonusColumn): BonusSort | null {
+    const first: SortDirection = TEXT_COLUMNS.has(column) ? "asc" : "desc";
+    if (current?.key !== column) {
+        return { key: column, direction: first };
     }
-    return { key: column, direction: TEXT_COLUMNS.has(column) ? "asc" : "desc" };
+    if (current.direction === first) {
+        return { key: column, direction: first === "asc" ? "desc" : "asc" };
+    }
+    return null;
 }
 
 function sortColumns(brigadeOn: boolean, columns: CabinetColumns, showForecast: boolean): { key: BonusColumn; label: string }[] {
@@ -754,9 +798,16 @@ function BonusListItem({
                         </span>
                         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm">
                             <RoleLabel role={row.role} plain={movement !== undefined} />
+                            {brigadeOn && row.brigade ? (
+                                <span className={cn(
+                                    "inline-flex max-w-full truncate rounded-md px-1.5 py-0.5 font-medium",
+                                    movement !== undefined ? "bg-transparent text-inherit" : "bg-muted text-foreground",
+                                )}>
+                                    {row.brigade}
+                                </span>
+                            ) : null}
                         </span>
                     </span>
-                    {brigadeOn && row.brigade ? <span className={cn("mt-0.5 block text-sm", valueTone ?? "text-muted-foreground")}>{row.brigade}</span> : null}
                     <span className="mt-0.5 block text-sm text-muted-foreground">
                         график{" "}
                         <span className={cn("tabular-nums", valueTone)}>{formatHours(row.pay.scheduleHours)}</span>
@@ -903,22 +954,30 @@ function FilterOptions({
     );
 }
 
-function SortMenu({ sort, brigadeOn, columns, showForecast, onSort }: { sort: BonusSort; brigadeOn: boolean; columns: CabinetColumns; showForecast: boolean; onSort: (sort: BonusSort) => void }) {
+function SortMenu({ sort, brigadeOn, columns, showForecast, onSort }: { sort: BonusSort | null; brigadeOn: boolean; columns: CabinetColumns; showForecast: boolean; onSort: (sort: BonusSort | null) => void }) {
     const options = sortColumns(brigadeOn, columns, showForecast);
-    const current = options.find((column) => column.key === sort.key) ?? options[0];
-    const mark = sort.direction === "asc" ? "↑" : "↓";
+    const current = options.find((column) => column.key === sort?.key);
+    const mark = sort?.direction === "asc" ? "↑" : "↓";
+    const groupedLabel = brigadeOn ? "Бригады и роли" : "Роли";
     return (
         <Popover>
             <PopoverTrigger
                 render={
-                    <Button type="button" variant="outline" size="icon" aria-label={`Сортировка: ${current.label} ${mark}`} className="size-9">
+                    <Button type="button" variant="outline" size="icon" aria-label={current ? `Сортировка: ${current.label} ${mark}` : `Сортировка: ${groupedLabel}`} className="size-9">
                         <ArrowUpDown />
                     </Button>
                 }
             />
             <PopoverContent align="end" className="max-h-80 w-64 gap-0 overflow-y-auto p-1">
+                <button
+                    type="button"
+                    className={cn("flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted", sort === null && "bg-muted")}
+                    onClick={() => onSort(null)}
+                >
+                    <span>{groupedLabel}</span>
+                </button>
                 {options.map((column) => {
-                    const active = sort.key === column.key;
+                    const active = sort?.key === column.key;
                     return (
                         <button
                             key={column.key}
@@ -1043,8 +1102,8 @@ function SortHead({
 }: {
     label: string;
     column: BonusColumn;
-    sort: BonusSort;
-    onSort: (sort: BonusSort) => void;
+    sort: BonusSort | null;
+    onSort: (sort: BonusSort | null) => void;
     fit?: "hour" | "money";
     pin?: string;
     widthClass?: string;
@@ -1054,16 +1113,16 @@ function SortHead({
     showForecast: boolean;
     onHover: (hover: CellHover) => void;
 }) {
-    const active = sort.key === column;
+    const active = sort?.key === column;
     const next = nextSort(sort, column);
-    const mark = sort.direction === "asc" ? "↑" : "↓";
+    const mark = sort?.direction === "asc" ? "↑" : "↓";
     const width = fit === "hour" ? HOUR_COL : fit === "money" ? MONEY_COL : widthClass;
     const index = columnIndex(column, brigadeOn, columns, showForecast);
     const headPin = column === "name" ? "name-head" : column === "role" ? "role-head" : undefined;
     return (
         <TableHead
             data-aim={`${HEAD_ROW}:${index}`}
-            aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+            aria-sort={active ? (sort?.direction === "asc" ? "ascending" : "descending") : "none"}
             tabIndex={0}
             className={cn(CELL, endsGroup(column, columns) && EDGE, "h-auto cursor-pointer border-t text-center whitespace-normal hover:text-foreground", width, pin, headTone(column, columns), aimClass(hover, HEAD_ROW, index, headPin))}
             onMouseEnter={() => onHover({ row: HEAD_ROW, column: index })}
@@ -1081,6 +1140,149 @@ function SortHead({
             </span>
         </TableHead>
     );
+}
+
+type GroupPlace = "start" | "mid" | "end";
+
+function brigadePlace(employeeId: string, groups: readonly { id: string; memberIds: string[] }[]): { brigadeKey: string; brigadeRank: number } {
+    const index = groups.findIndex((group) => group.memberIds.includes(employeeId));
+    if (index < 0) {
+        return { brigadeKey: "outside", brigadeRank: groups.length };
+    }
+    return { brigadeKey: groups[index].id, brigadeRank: index };
+}
+
+function frameClass(place: GroupPlace | null, part: "name" | "body" | "end"): string {
+    if (!place) {
+        return "";
+    }
+    const cap = cn(
+        place === "start" && "border-t border-t-primary/35",
+        place === "end" && "border-b border-b-primary/35",
+    );
+    if (part === "name") {
+        return cn("border-l border-l-primary/35", cap);
+    }
+    if (part === "end") {
+        return cn("border-r border-r-primary/35", cap);
+    }
+    return cap;
+}
+
+function groupPlaces(rows: readonly BonusRow[], keyOf: (row: BonusRow) => string): (GroupPlace | null)[] {
+    const keys = rows.map(keyOf);
+    return keys.map((key, index) => {
+        const previous = index > 0 && keys[index - 1] === key;
+        const next = index < keys.length - 1 && keys[index + 1] === key;
+        if (!previous && next) {
+            return "start";
+        }
+        if (previous && next) {
+            return "mid";
+        }
+        if (previous && !next) {
+            return "end";
+        }
+        return null;
+    });
+}
+
+function groupRuns(rows: readonly BonusRow[], places: readonly (GroupPlace | null)[]): { rows: BonusRow[]; framed: boolean }[] {
+    const runs: { rows: BonusRow[]; framed: boolean }[] = [];
+    let index = 0;
+    while (index < rows.length) {
+        if (places[index] !== "start") {
+            runs.push({ rows: [rows[index]], framed: false });
+            index += 1;
+            continue;
+        }
+        const start = index;
+        while (index < rows.length && places[index] !== "end") {
+            index += 1;
+        }
+        const end = Math.min(index, rows.length - 1);
+        runs.push({ rows: rows.slice(start, end + 1), framed: true });
+        index = end + 1;
+    }
+    return runs;
+}
+
+function countKeys(rows: readonly BonusRow[], keyOf: (row: BonusRow) => string): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+        const key = keyOf(row);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+}
+
+function countRolesByBrigade(rows: readonly BonusRow[]): Map<string, Map<string, number>> {
+    const byBrigade = new Map<string, Map<string, number>>();
+    for (const row of rows) {
+        let roles = byBrigade.get(row.brigadeKey);
+        if (!roles) {
+            roles = new Map();
+            byBrigade.set(row.brigadeKey, roles);
+        }
+        roles.set(row.role, (roles.get(row.role) ?? 0) + 1);
+    }
+    return byBrigade;
+}
+
+function compareRolesBySize(left: string, right: string, counts: ReadonlyMap<string, number>): number {
+    const leftCount = counts.get(left) ?? 0;
+    const rightCount = counts.get(right) ?? 0;
+    if (leftCount !== rightCount) {
+        return rightCount - leftCount;
+    }
+    if (left === "УСМ" && right !== "УСМ") {
+        return -1;
+    }
+    if (right === "УСМ" && left !== "УСМ") {
+        return 1;
+    }
+    return left.localeCompare(right, "ru");
+}
+
+function compareDefault(
+    left: BonusRow,
+    right: BonusRow,
+    options: {
+        brigadeOn: boolean;
+        roleCounts: ReadonlyMap<string, number>;
+        brigadeCounts: ReadonlyMap<string, number> | null;
+        roleCountsByBrigade: ReadonlyMap<string, ReadonlyMap<string, number>> | null;
+    },
+): number {
+    if (options.brigadeOn && options.brigadeCounts) {
+        const leftBrigade = options.brigadeCounts.get(left.brigadeKey) ?? 0;
+        const rightBrigade = options.brigadeCounts.get(right.brigadeKey) ?? 0;
+        if (leftBrigade !== rightBrigade) {
+            return rightBrigade - leftBrigade;
+        }
+        if (left.brigadeKey !== right.brigadeKey) {
+            const byName = (left.brigade ?? "").localeCompare(right.brigade ?? "", "ru");
+            if (byName !== 0) {
+                return byName;
+            }
+            return left.brigadeRank - right.brigadeRank;
+        }
+        const within = options.roleCountsByBrigade?.get(left.brigadeKey) ?? options.roleCounts;
+        const byRole = compareRolesBySize(left.role, right.role, within);
+        if (byRole !== 0) {
+            return byRole;
+        }
+    } else {
+        const byRole = compareRolesBySize(left.role, right.role, options.roleCounts);
+        if (byRole !== 0) {
+            return byRole;
+        }
+    }
+    const byPay = directedCompare(left, right, "current", "desc");
+    if (byPay !== 0) {
+        return byPay;
+    }
+    return left.employee.name.localeCompare(right.employee.name, "ru");
 }
 
 function compareRows(left: BonusRow, right: BonusRow, sort: BonusSort, showForecast: boolean): number {

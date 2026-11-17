@@ -32,6 +32,7 @@ import {
     detailNestedRowClass,
     detailRowClass,
 } from "./bonus-detail-ui";
+import { BrigadeMemberFilter, useBrigadeMemberFilter } from "./BrigadeDetailFilter";
 import { useBranchDirectory } from "./branch-directory";
 import { useBranchLocation } from "./BranchFrame";
 import { findStaffSegment } from "./staff";
@@ -47,6 +48,8 @@ type GroupMode = "category" | "document";
 interface LiveSalesDetail {
     rowLabel: string;
     lines: SalesDetailLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 const salesWideColumns = "sm:grid sm:grid-cols-[minmax(12rem,1.5fr)_8.5rem_minmax(11rem,1fr)_7.5rem_1.5rem] sm:items-center sm:gap-x-3";
@@ -82,6 +85,7 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
     const [mode, setMode] = useState<GroupMode>("category");
     const [openIds, setOpenIds] = useState<string[]>([]);
     const [query, setQuery] = useState("");
+    const brigade = useBrigadeMemberFilter(loaded?.members);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const mock = salesOperationDetail(employeeId, period);
     const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
@@ -178,7 +182,8 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
         if (!live || !loaded) {
             return [];
         }
-        const groups = groupPremiumLines(loaded.lines, mode, {
+        const lines = loaded.lines.filter((line) => brigade.allows(line.employeeId));
+        const groups = groupPremiumLines(lines, mode, {
             categoryTitle: (line) => line.categoryTitle,
             documentId: (line) => line.documentId,
             documentTitle: (line) => line.documentTitle,
@@ -186,9 +191,9 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
         return filterDetailItems(
             groups,
             query,
-            (group) => `${group.title} ${group.lines.map((line) => `${line.productName ?? ""} ${line.categoryTitle} ${line.documentTitle} ${line.channel} ${line.calculation}`).join(" ")}`,
+            (group) => `${group.title} ${group.lines.map((line) => `${line.employeeName ?? ""} ${line.productName ?? ""} ${line.categoryTitle} ${line.documentTitle} ${line.channel} ${line.calculation}`).join(" ")}`,
         );
-    }, [live, loaded, mode, query]);
+    }, [brigade, live, loaded, mode, query]);
     const pageGroups = live ? liveGroups : mockGroups;
     const rowLabel = live && loaded ? loaded.rowLabel : mock?.rowLabel ?? "Категория";
     const showSkeleton = !live && pending;
@@ -203,25 +208,33 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
             toolbar={(
                 <BonusDetailToolbar
                     controls={(
-                        <ToggleGroup
-                            variant="outline"
-                            size="sm"
-                            spacing={0}
-                            value={[mode]}
-                            onValueChange={(values) => {
-                                const next = values[0];
-                                if (next === "category" || next === "document") {
-                                    setMode(next);
-                                }
-                            }}
-                            aria-label="Группировка продаж"
-                            className={detailModeToggleClass}
-                        >
-                            <ToggleGroupItem value="category" className={detailModeToggleItemClass}>{categoryModeLabel}</ToggleGroupItem>
-                            <ToggleGroupItem value="document" className={detailModeToggleItemClass}>По документам</ToggleGroupItem>
-                        </ToggleGroup>
+                        <div className="flex min-w-0 items-center gap-2">
+                            <ToggleGroup
+                                variant="outline"
+                                size="sm"
+                                spacing={0}
+                                value={[mode]}
+                                onValueChange={(values) => {
+                                    const next = values[0];
+                                    if (next === "category" || next === "document") {
+                                        setMode(next);
+                                    }
+                                }}
+                                aria-label="Группировка продаж"
+                                className={detailModeToggleClass}
+                            >
+                                <ToggleGroupItem value="category" className={detailModeToggleItemClass}>{categoryModeLabel}</ToggleGroupItem>
+                                <ToggleGroupItem value="document" className={detailModeToggleItemClass}>По документам</ToggleGroupItem>
+                            </ToggleGroup>
+                            {brigade.active ? (
+                                <BrigadeMemberFilter className="hidden md:inline-flex" members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                            ) : null}
+                        </div>
                     )}
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
+                    sort={brigade.active ? (
+                        <BrigadeMemberFilter members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     total={null}
                 />
             )}
@@ -315,6 +328,7 @@ function SalesLineRow({ line }: { line: SalesDetailLine }) {
                 >
                     {primary}
                 </DetailHint>
+                {line.employeeName ? <span className="block truncate text-xs text-muted-foreground">{line.employeeName}</span> : null}
                 {category || documentTitle ? (
                     <div className="mt-0.5 flex min-w-0 flex-col gap-0.5 sm:hidden">
                         {category ? <span className="truncate text-xs text-muted-foreground">{category}</span> : null}

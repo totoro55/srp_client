@@ -454,14 +454,16 @@ function stepTitle(operation: JournalOperation): string {
             ? "общей премии"
             : operation.kind === "tariffs"
                 ? "тарифов продажи"
-                : kindName(operation.kind).toLowerCase();
+                : operation.kind === "brigade"
+                    ? "долей бригады"
+                    : kindName(operation.kind).toLowerCase();
         return `Пересчёт ${label} за ${formatMonth(operation.period)}`;
     }
     if (operation.status === "failed") {
-        return operation.kind === "tariffs" ? `${name} не записаны` : `${name} не записана`;
+        return operation.kind === "tariffs" || operation.kind === "brigade" ? `${name} не записаны` : `${name} не записана`;
     }
     if (operation.status === "cancelled") {
-        return operation.kind === "tariffs" ? `${name} отменены` : `${name} отменён`;
+        return operation.kind === "tariffs" || operation.kind === "brigade" ? `${name} отменены` : `${name} отменён`;
     }
     return name;
 }
@@ -812,6 +814,9 @@ function kindName(kind: BasketUpdateKind): string {
     }
     if (kind === "tariffs") {
         return "Тарифы";
+    }
+    if (kind === "brigade") {
+        return "Доли бригады";
     }
     return "Общая премия";
 }

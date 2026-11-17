@@ -34,14 +34,35 @@ import {
     inCalculation,
     roleCaption,
     type BrigadeMode,
+    type BrigadeSetup,
 } from "./mock";
 import { latestStaffSegments, roleKey, type StaffEmployee } from "./staff";
 
 const brigadeLaneClass = "flex w-full shrink-0 flex-col lg:h-full lg:min-h-0 lg:max-[1919px]:w-[calc((100%-2.25rem-1px)/4)] min-[1920px]:w-[calc((100%-3rem-1px)/5)]";
 const brigadeBodyClass = "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-foreground/25";
 const RECALC_DELAY_SECONDS = 15;
-const PARTICIPATION_NOTICE = "Изменено участие сотрудников в расчёте: признак «В расчёте» меняется между значениями «Нет» и «Да». Будут пересчитаны премии корзин этого филиала и общая премия сотрудников за выбранный месяц. Продолжение станет доступно через 15 секунд. Назначения других месяцев не меняются.";
-const SHARED_ROLE_NOTICE = "Изменён перечень ролей, между которыми распределяется общая премия. Общая премия сотрудников филиала будет пересчитана. Продолжение станет доступно через 15 секунд. Если месяц закрыт, перечень сохранится без пересчёта.";
+
+function waitSentence(seconds: number): string {
+    return seconds > 0 ? ` Продолжение станет доступно через ${seconds} секунд.` : "";
+}
+
+function participationNotice(seconds: number, skip: boolean): string {
+    const skipSentence = skip
+        ? " «Сохранить без пересчёта» записывает роли и оставляет премию до следующего пересчёта."
+        : "";
+    return `Изменено участие сотрудников в расчёте: признак «В расчёте» меняется между значениями «Нет» и «Да». Будут пересчитаны премии корзин этого филиала и общая премия сотрудников за выбранный месяц.${waitSentence(seconds)}${skipSentence} Назначения других месяцев не меняются.`;
+}
+
+function sharedRoleNotice(seconds: number): string {
+    return `Изменён перечень ролей, между которыми распределяется общая премия. Общая премия сотрудников филиала будет пересчитана.${waitSentence(seconds)} Если месяц закрыт, перечень сохранится без пересчёта.`;
+}
+
+function brigadeNotice(seconds: number, skip: boolean): string {
+    const skipSentence = skip
+        ? " «Сохранить без пересчёта» записывает состав и оставляет уже посчитанные доли."
+        : "";
+    return `Состав бригад сохранится, доли продажи, выдачи, кассы, ОСНТ, склада и разгрузки будут пересчитаны.${waitSentence(seconds)}${skipSentence} Оклад, фикс, услуги и общая премия не меняются.`;
+}
 
 export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
@@ -122,9 +143,11 @@ function SharedPremiumRoles({
     disabled: boolean;
 }) {
     const directory = useBranchDirectory();
+    const access = useAccess();
     const session = useSession();
     const actor = session.data?.user?.username ?? "";
     const roles = useMotivationRoles().roles;
+    const confirmDelaySeconds = access.fullAccess ? 0 : RECALC_DELAY_SECONDS;
     const savedKey = `${directory.loadedBranchId}:${directory.sharedPremiumRoleIds.join(",")}`;
     const [seenKey, setSeenKey] = useState(savedKey);
     const [selected, setSelected] = useState(directory.sharedPremiumRoleIds);
@@ -194,10 +217,10 @@ function SharedPremiumRoles({
             <ConfirmDialog
                 open={noticeOpen}
                 title="Пересчёт премии сотрудников"
-                description={SHARED_ROLE_NOTICE}
+                description={sharedRoleNotice(confirmDelaySeconds)}
                 confirmLabel="Продолжить"
                 confirmVariant="default"
-                confirmDelaySeconds={RECALC_DELAY_SECONDS}
+                confirmDelaySeconds={confirmDelaySeconds}
                 onConfirm={() => {
                     const scopeLabel = branchScopeLabel(directory.branches, branchId);
                     openRecalcConsole({
@@ -275,10 +298,13 @@ function Staff({
     inMotivation: boolean;
 }) {
     const directory = useBranchDirectory();
+    const access = useAccess();
     const session = useSession();
     const actor = session.data?.user?.username ?? "";
     const store = useBranchStore();
     const settings = useMotivationRoles();
+    const confirmDelaySeconds = access.fullAccess ? 0 : RECALC_DELAY_SECONDS;
+    const canSkipRecalc = access.has("branch.skip-recalc:write");
     const employees = directory.employees;
     const slice = store.slice(branchId, period, employees, settings);
     const [saving, setSaving] = useState(false);
@@ -290,13 +316,18 @@ function Staff({
         return inCalculation(employee, slice.savedRoles[key] ?? null) !== inCalculation(employee, slice.draftRoles[key] ?? null);
     });
 
-    async function save(): Promise<boolean> {
+    async function save(skipRecalc = false): Promise<boolean> {
         setSaving(true);
         try {
             const response = await fetch("/api/branch/roles", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ branchId, period, overrides: store.roleDraft(branchId, period) }),
+                body: JSON.stringify({
+                    branchId,
+                    period,
+                    overrides: store.roleDraft(branchId, period),
+                    ...(skipRecalc ? { skipRecalc: true } : {}),
+                }),
             });
             const json = await response.json() as {
                 success?: boolean;
@@ -379,10 +410,11 @@ function Staff({
             <ConfirmDialog
                 open={noticeOpen}
                 title="Пересчёт премии сотрудников"
-                description={PARTICIPATION_NOTICE}
+                description={participationNotice(confirmDelaySeconds, canSkipRecalc)}
                 confirmLabel="Продолжить"
                 confirmVariant="default"
-                confirmDelaySeconds={RECALC_DELAY_SECONDS}
+                confirmDelaySeconds={confirmDelaySeconds}
+                extraLabel={canSkipRecalc ? "Сохранить без пересчёта" : undefined}
                 onConfirm={() => {
                     const scopeLabel = branchScopeLabel(directory.branches, branchId);
                     openRecalcConsole({
@@ -395,11 +427,15 @@ function Staff({
                         title: `${scopeLabel}, смена ролей`,
                     });
                     setNoticeOpen(false);
-                    void save().then((saved) => {
+                    void save(false).then((saved) => {
                         if (!saved) {
                             clearRecalcPlan();
                         }
                     });
+                }}
+                onExtra={() => {
+                    setNoticeOpen(false);
+                    void save(true);
                 }}
                 onOpenChange={setNoticeOpen}
             />
@@ -581,7 +617,7 @@ function StaffRoleHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Сброс</h3>
                 <p className="text-muted-foreground">
-                    Кнопка «Сбросить до автоматических» с выбранного месяца возвращает роли по правилу. Более ранние месяцы остаются как были. Изменение применяется после сохранения. Кнопка «Отменить» восстанавливает назначения, действовавшие до сохранения.
+                    Кнопка «Сбросить до автоматических» с выбранного месяца возвращает роли по правилу. Более ранние месяцы остаются как были. Изменение применяется после сохранения. Кнопка «Отменить» восстанавливает назначения, действовавшие до сохранения. Если меняется участие в расчёте, сохранение спрашивает подтверждение и запускает пересчёт. «Сохранить без пересчёта» есть у роли с таким правом: роли записываются, премия остаётся до следующего пересчёта. Это удобно при массовой правке сотрудников. Администратор подтверждает сразу, остальные ждут 15 секунд.
                 </p>
             </section>
         </div>
@@ -628,8 +664,13 @@ function Brigades({
     inMotivation: boolean;
 }) {
     const directory = useBranchDirectory();
+    const access = useAccess();
+    const session = useSession();
+    const actor = session.data?.user?.username ?? "";
     const store = useBranchStore();
     const settings = useMotivationRoles();
+    const confirmDelaySeconds = access.fullAccess ? 0 : RECALC_DELAY_SECONDS;
+    const canSkipRecalc = access.has("branch.skip-recalc:write");
     const employees = latestStaffSegments(directory.employees);
     const slice = store.slice(branchId, period, directory.employees, settings);
     const [saving, setSaving] = useState(false);
@@ -638,18 +679,82 @@ function Brigades({
     const [dragId, setDragId] = useState<string | null>(null);
     const [overId, setOverId] = useState<string | null>(null);
     const [deleteId, setDeleteId] = useState<string | null>(null);
+    const [noticeOpen, setNoticeOpen] = useState(false);
     const setup = slice.draftBrigades;
     const order = compareEmployees(slice.draftRoles, settings);
     const sortEmployees = (list: StaffEmployee[]) => [...list].sort(order);
     const eligible = sortEmployees(employees.filter((employee) => inCalculation(employee, slice.draftRoles[roleKey(employee)] ?? null)));
     const outside = sortEmployees(employees.filter((employee) => !inCalculation(employee, slice.draftRoles[roleKey(employee)] ?? null)));
 
-    async function save() {
+    async function save(skipRecalc: boolean) {
         setSaving(true);
+        const scopeLabel = branchScopeLabel(directory.branches, branchId);
+        if (!skipRecalc) {
+            openRecalcConsole({
+                period,
+                kinds: ["brigade"],
+                reason: "branch.brigades",
+                actor,
+                scopeLevel: "branch",
+                scopeLabel,
+                title: `${scopeLabel}, бригады`,
+            });
+        }
         try {
-            await pause();
-            store.saveBrigades(branchId, period);
+            const response = await fetch("/api/branch/brigades", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    branchId,
+                    period,
+                    brigades: slice.draftBrigades,
+                    ...(skipRecalc ? { skipRecalc: true } : {}),
+                }),
+            });
+            const json = await response.json() as {
+                success?: boolean;
+                data?: {
+                    brigades?: BrigadeSetup;
+                    recalculated?: boolean;
+                    recalcMessage?: string | null;
+                    salePremiums?: Record<string, number>;
+                    releasePremiums?: Record<string, number>;
+                    kassaPremiums?: Record<string, number>;
+                    osntPremiums?: Record<string, number>;
+                    warehousePremiums?: Record<string, number>;
+                    unloadingPremiums?: Record<string, number>;
+                    shares?: Record<string, number>;
+                };
+                error?: { message?: string };
+            };
+            if (!response.ok || !json.success || !json.data?.brigades) {
+                clearRecalcPlan();
+                notifyError(json.error?.message || "Не удалось сохранить бригады");
+                return;
+            }
+            store.commitBrigades(branchId, period, json.data.brigades);
+            if (json.data.recalculated && json.data.salePremiums && json.data.releasePremiums && json.data.kassaPremiums && json.data.shares) {
+                directory.replacePremiums({
+                    salePremiums: json.data.salePremiums,
+                    releasePremiums: json.data.releasePremiums,
+                    kassaPremiums: json.data.kassaPremiums,
+                    osntPremiums: json.data.osntPremiums ?? {},
+                    warehousePremiums: json.data.warehousePremiums ?? {},
+                    unloadingPremiums: json.data.unloadingPremiums ?? {},
+                    sharedPremiums: json.data.shares,
+                });
+            }
+            if (json.data.recalcMessage) {
+                if (!json.data.recalculated) {
+                    clearRecalcPlan();
+                }
+                notifyError(json.data.recalcMessage);
+                return;
+            }
             notifySuccess("Бригады сохранены");
+        } catch {
+            clearRecalcPlan();
+            notifyError("Не удалось сохранить бригады");
         } finally {
             setSaving(false);
         }
@@ -710,8 +815,26 @@ function Brigades({
     return (
         <div className="flex flex-col gap-3">
             {!inMotivation ? <Notice>Филиал в этом месяце не участвует в мотивации.</Notice> : null}
+            <ConfirmDialog
+                open={noticeOpen}
+                title="Пересчёт долей бригады"
+                description={brigadeNotice(confirmDelaySeconds, canSkipRecalc)}
+                confirmLabel="Сохранить"
+                confirmVariant="default"
+                confirmDelaySeconds={confirmDelaySeconds}
+                extraLabel={canSkipRecalc ? "Сохранить без пересчёта" : undefined}
+                onConfirm={() => {
+                    setNoticeOpen(false);
+                    void save(false);
+                }}
+                onExtra={() => {
+                    setNoticeOpen(false);
+                    void save(true);
+                }}
+                onOpenChange={setNoticeOpen}
+            />
             <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" disabled={saving || closed || !slice.brigadesDirty} onClick={() => void save()}>
+                <Button type="button" size="sm" disabled={saving || closed || !slice.brigadesDirty} onClick={() => setNoticeOpen(true)}>
                     {saving ? <ButtonSpinner /> : <Save />}
                     Сохранить
                 </Button>
@@ -1221,17 +1344,17 @@ function BrigadeHelp() {
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Расчёт</h3>
+                <p className="text-muted-foreground">
+                    Премия корзины всех, кто в бригаде и в расчёте, складывается. Сумма делится на их часы по табелю и умножается на часы сотрудника. Так считаются продажа, выдача, касса, ОСНТ, склад и разгрузка. Оклад, фиксированная премия, услуги и общая премия остаются личными. Сотрудник вне группы свою премию не отдаёт. Нулевые часы отдают премию в котёл, доля такого сотрудника — ноль. Увольнение, перевод и смена должности оставляют уже записанную долю: она вычитается из котла, остаток делится между остальными.
+                </p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Сохранение</h3>
                 <p className="text-muted-foreground">
-                    Изменение режима, наименований и состава применяется кнопкой «Сохранить». До сохранения в расчёте используются ранее сохранённые сведения.
+                    Изменение режима, наименований и состава применяется кнопкой «Сохранить». До сохранения в расчёте используются ранее сохранённые сведения. Подтверждение запускает пересчёт и открывает журнал: строка «Доли бригады» идёт, пока новые доли не записаны. «Сохранить без пересчёта» есть у роли с таким правом: состав записывается, доли остаются до следующего пересчёта корзин. Это удобно при массовой правке сотрудников. Администратор подтверждает сразу, остальные ждут 15 секунд.
                 </p>
             </section>
         </div>
     );
-}
-
-function pause(): Promise<void> {
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, 250);
-    });
 }

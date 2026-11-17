@@ -23,7 +23,9 @@ interface ConfirmDialogProps {
     showCancel?: boolean;
     isPending?: boolean;
     confirmDelaySeconds?: number;
+    extraLabel?: string;
     onConfirm: () => void | Promise<void>;
+    onExtra?: () => void | Promise<void>;
     onOpenChange: (open: boolean) => void;
 }
 
@@ -37,7 +39,9 @@ export function ConfirmDialog({
     showCancel = true,
     isPending = false,
     confirmDelaySeconds = 0,
+    extraLabel,
     onConfirm,
+    onExtra,
     onOpenChange,
 }: ConfirmDialogProps) {
     const [remaining, setRemaining] = useState(confirmDelaySeconds);
@@ -81,6 +85,21 @@ export function ConfirmDialog({
                     {showCancel && (
                         <AlertDialogCancel disabled={isPending}>{cancelLabel}</AlertDialogCancel>
                     )}
+                    {extraLabel && onExtra ? (
+                        <AlertDialogAction
+                            variant="outline"
+                            disabled={isPending || waiting}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                if (waiting) {
+                                    return;
+                                }
+                                void onExtra();
+                            }}
+                        >
+                            {extraLabel}
+                        </AlertDialogAction>
+                    ) : null}
                     <AlertDialogAction
                         variant={confirmVariant}
                         disabled={isPending || waiting}

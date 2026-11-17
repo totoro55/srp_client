@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { can } from "@/lib/access";
 import { createErrorResponse } from "@/lib/api-error";
 import { staffParticipationChanged } from "@/lib/motivation-roles";
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-edit-window";
@@ -35,7 +36,11 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         if (!access || !holdsBranchSetting(access, "branch.roles:write")) {
             throw new AdminAuthError(access ? 403 : 401);
         }
-        const body = await request.json() as { branchId?: unknown; period?: unknown; overrides?: unknown };
+        const body = await request.json() as { branchId?: unknown; period?: unknown; overrides?: unknown; skipRecalc?: unknown };
+        const skipRecalc = body.skipRecalc === true;
+        if (skipRecalc && !can(access, "branch.skip-recalc:write")) {
+            return createErrorResponse("FORBIDDEN", "Нет права сохранить без пересчёта", 403);
+        }
         const branchId = typeof body.branchId === "string" ? body.branchId : "";
         const period = typeof body.period === "string" ? body.period : null;
         if (!BRANCH_UUID.test(branchId) || !isStaffPeriod(period)) {
@@ -66,7 +71,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         await saveBranchRoleOverrides(branchId, period, overrides);
         let recalculated = false;
         let recalcMessage: string | null = null;
-        if (participationChanged) {
+        if (participationChanged && !skipRecalc) {
             try {
                 await recalculateBranchPremiums({
                     period,

@@ -16,6 +16,7 @@ import {
     useResetWhenChanged,
 } from "./BonusDetailPager";
 import { detailAmountClass, detailHeaderClass, detailRowClass } from "./bonus-detail-ui";
+import { BrigadeMemberFilter, useBrigadeMemberFilter } from "./BrigadeDetailFilter";
 import { useBranchDirectory } from "./branch-directory";
 import { useBranchLocation } from "./BranchFrame";
 import { formatMoney } from "./mock";
@@ -27,6 +28,8 @@ interface KassaLine {
     minutes: number;
     tariff: number;
     amount: number;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 const factorFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 });
@@ -43,6 +46,8 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
     const [failed, setFailed] = useState(false);
     const [timedOut, setTimedOut] = useState(false);
     const [query, setQuery] = useState("");
+    const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+    const brigade = useBrigadeMemberFilter(members);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const measureRef = useRef<HTMLDivElement | null>(null);
     const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
@@ -50,6 +55,7 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
     if (scope !== scopeKey) {
         setScope(scopeKey);
         setLines(null);
+        setMembers([]);
         setPending(true);
         setFailed(false);
         setTimedOut(false);
@@ -67,7 +73,7 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
         });
         fetch(`/api/branch/kassa-premium/detail?${params.toString()}`, { signal: controller.signal })
             .then(async (response) => {
-                const body = await response.json() as { success?: boolean; data?: { lines?: KassaLine[] } };
+                const body = await response.json() as { success?: boolean; data?: { lines?: KassaLine[]; members?: { id: string; name: string }[] } };
                 if (controller.signal.aborted) {
                     return;
                 }
@@ -86,6 +92,7 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
                 setFailed(false);
                 setTimedOut(false);
                 setLines(next);
+                setMembers(Array.isArray(body.data?.members) ? body.data.members : []);
             })
             .catch((error: unknown) => {
                 if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
@@ -104,11 +111,11 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
     }, [branchId, employee?.activeFrom, employee?.activeUntil, employeeId, period]);
 
     const rows = useMemo(() => {
-        const filtered = filterDetailItems(lines ?? [], query, (line) => `${line.day} ${calculation(line)}`);
+        const filtered = filterDetailItems((lines ?? []).filter((line) => brigade.allows(line.employeeId)), query, (line) => `${line.employeeName ?? ""} ${line.day} ${calculation(line)}`);
         return sortDetailItems(filtered, { key: "date", dir: "desc" }, {
             date: (line) => parseDetailDate(line.day),
         });
-    }, [lines, query]);
+    }, [brigade, lines, query]);
     const showSkeleton = pending && lines === null && !failed && !timedOut;
     const showEmpty = !showSkeleton && !failed && !timedOut && lines !== null && lines.length === 0;
 
@@ -118,7 +125,13 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
             scrollRef={scrollRef}
             toolbar={(
                 <BonusDetailToolbar
+                    controls={brigade.active ? (
+                        <BrigadeMemberFilter className="hidden md:inline-flex" members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
+                    sort={brigade.active ? (
+                        <BrigadeMemberFilter members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     total={null}
                 />
             )}
@@ -146,6 +159,7 @@ export function KassaBonusDetail({ employeeId, period }: { employeeId: string; p
                                 <div key={line.id} data-scroll-row="" className={cn(detailRowClass, "flex items-center justify-between gap-2", kassaWideColumns)}>
                                     <span className="min-w-0 flex-1">
                                         <span className="block truncate font-medium tabular-nums">{line.day}</span>
+                                        {line.employeeName ? <span className="block truncate text-xs text-muted-foreground">{line.employeeName}</span> : null}
                                         <span className="block truncate text-xs text-muted-foreground sm:hidden">{calculation(line)}</span>
                                     </span>
                                     <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{calculation(line)}</span>

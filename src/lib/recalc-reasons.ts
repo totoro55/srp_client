@@ -6,6 +6,7 @@ const REASONS: Record<string, string> = {
     "raw.kassa_oper": "Загрузка кассовых операций",
     "branch.roles": "Смена ролей",
     "branch.shared-roles": "Роли общей премии",
+    "branch.brigades": "Сохранение бригад",
     tariffs: "Тарифы",
     coefficients: "Коэффициенты",
     "rrs.wizard": "Настройка корзин",

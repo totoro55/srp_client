@@ -4,12 +4,15 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from "rea
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useMotivationRoles } from "@/hooks/useMotivationRoles";
 import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_components/header/page-heading";
 import { cn } from "@/lib/utils";
 import { technicalAccount } from "@/lib/technical-accounts";
 import { useBranchDirectory } from "./branch-directory";
+import { useBranchStore } from "./branch-store";
 import { useSharedPremiumAuthors } from "./use-shared-premium-authors";
 import {
     currentBranchPeriod,
@@ -299,6 +302,14 @@ export function BranchPeriodField({ backHref }: { backHref?: string }) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const directory = useBranchDirectory();
+    const store = useBranchStore();
+    const motivation = useMotivationRoles();
+    const cabinet = pathname.startsWith("/branch/bonuses");
+    const ready = cabinet && branchId !== "" && directory.loadedBranchId.toLowerCase() === branchId.toLowerCase();
+    const brigadeMode = ready
+        ? store.slice(branchId, period, directory.employees, motivation).savedBrigades.mode
+        : "off";
 
     return (
         <div className="flex w-full min-w-0 shrink-0 items-center gap-1.5 sm:w-auto sm:gap-2">
@@ -323,6 +334,7 @@ export function BranchPeriodField({ backHref }: { backHref?: string }) {
                     router.replace(withBranchQuery(pathname, branchId, nextPeriod, pathname.endsWith("/lines") ? part : null));
                 }}
             />
+            {brigadeMode === "all" ? <Badge variant="secondary">Общая бригада</Badge> : null}
         </div>
     );
 }

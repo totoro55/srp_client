@@ -64,10 +64,14 @@ export interface WarehousePremiumLine {
     day: string;
     calculation: string;
     amount: number;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface WarehousePremiumDetail {
     lines: WarehousePremiumLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 interface WarehouseDetailRow {
@@ -77,6 +81,7 @@ interface WarehouseDetailRow {
     itemCount: number | string;
     volume: number | string;
     premium: number | string;
+    employeeId?: string | null;
 }
 
 export async function readWarehousePremiumDetail(
@@ -95,8 +100,30 @@ export async function readWarehousePremiumDetail(
     if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
+    const { collectBrigadeLines } = await import("@/services/brigade-detail");
+    const brigade = await collectBrigadeLines(period, branchId, employeeId, from, WAREHOUSE_INDICATOR, (input) => (
+        loadWarehouseLines(period, branchId, input.employeeId, input.from, input.until, input.accrualId, input.authors)
+    ));
+    if (brigade) {
+        return brigade;
+    }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, WAREHOUSE_INDICATOR);
-    const selectSql = await warehouseSelectSql();
+    return { lines: await loadWarehouseLines(period, branchId, employeeId, from, until, accrualId, null) };
+}
+
+async function loadWarehouseLines(
+    period: string,
+    branchId: string,
+    employeeId: string,
+    from: string | null,
+    until: string | null,
+    accrualId: number | null,
+    authors: string[] | null,
+): Promise<WarehousePremiumLine[]> {
+    const sourceSql = await warehouseSelectSql();
+    const brigade = authors !== null && authors.length > 0;
+    const { sqlForAuthors } = brigade ? await import("@/services/brigade-detail") : { sqlForAuthors: null };
+    const selectSql = sqlForAuthors ? sqlForAuthors(sourceSql) : sourceSql;
     const rows = await db.queryWithTimeout<WarehouseDetailRow>(
         `
         SELECT to_char(grouped.document_date, 'DD.MM.YYYY') AS day,
@@ -104,42 +131,46 @@ export async function readWarehousePremiumDetail(
                grouped.volume_tariff AS "volumeTariff",
                grouped.item_count AS "itemCount",
                grouped.volume,
-               grouped.premium
+               grouped.premium,
+               grouped.employee_uuid::text AS "employeeId"
         FROM (
             SELECT line.document_date,
                    line.quantity_tariff,
                    line.volume_tariff,
+                   line.employee_uuid,
                    SUM(line.item_count)::float8 AS item_count,
                    SUM(line.volume)::float8 AS volume,
                    SUM(line.premium)::float8 AS premium
             FROM (
 ${selectSql}
             ) line
-            GROUP BY line.document_date, line.quantity_tariff, line.volume_tariff
+            GROUP BY line.document_date, line.employee_uuid, line.quantity_tariff, line.volume_tariff
         ) grouped
         ORDER BY grouped.document_date DESC
         `,
-        [period, employeeId, branchId, from, until, accrualId, null],
+        brigade
+            ? [period, null, branchId, null, null, null, null, authors]
+            : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
-    return {
-        lines: rows.flatMap((row, index) => {
-            const quantityTariff = finiteNumber(row.quantityTariff);
-            const volumeTariff = finiteNumber(row.volumeTariff);
-            const itemCount = finiteNumber(row.itemCount);
-            const volume = finiteNumber(row.volume);
-            const amount = finiteNumber(row.premium);
-            if (quantityTariff === null || volumeTariff === null || itemCount === null || volume === null || amount === null) {
-                return [];
-            }
-            return [{
-                id: `${row.day}:${index}`,
-                day: row.day,
-                calculation: `${formatMoneyFactor(quantityTariff)} × ${formatCount(itemCount)} шт + ${formatMoneyFactor(volumeTariff)} × ${formatVolume(volume)} м³`,
-                amount,
-            }];
-        }),
-    };
+    return rows.flatMap((row, index) => {
+        const quantityTariff = finiteNumber(row.quantityTariff);
+        const volumeTariff = finiteNumber(row.volumeTariff);
+        const itemCount = finiteNumber(row.itemCount);
+        const volume = finiteNumber(row.volume);
+        const amount = finiteNumber(row.premium);
+        if (quantityTariff === null || volumeTariff === null || itemCount === null || volume === null || amount === null) {
+            return [];
+        }
+        const personId = row.employeeId?.toLowerCase() ?? "";
+        return [{
+            id: `${personId}:${row.day}:${index}`,
+            day: row.day,
+            calculation: `${formatMoneyFactor(quantityTariff)} × ${formatCount(itemCount)} шт + ${formatMoneyFactor(volumeTariff)} × ${formatVolume(volume)} м³`,
+            amount,
+            ...(personId ? { employeeId: personId } : {}),
+        }];
+    });
 }
 
 async function warehouseSelectSql(): Promise<string> {

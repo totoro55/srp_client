@@ -393,11 +393,15 @@ export interface SalePremiumDetailLine {
     documentTitle: string;
     productName: string;
     doubled: boolean;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface SalePremiumDetail {
     rowLabel: string;
     lines: SalePremiumDetailLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 interface PremiumDetailRow {
@@ -414,6 +418,7 @@ interface PremiumDetailRow {
     documentNumber: string | null;
     documentDay: string | null;
     productName: string | null;
+    employeeId?: string | null;
 }
 
 export async function readSalePremiumDetail(
@@ -458,7 +463,36 @@ export async function readSalePremiumDetail(
         return null;
     }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, SALE_INDICATOR);
-    return queryPremiumPage(axis, period, branchId, employeeId, from, until, accrualId);
+    const { readBrigadeDetailScope, liveBrigadeIds, frozenBrigadeSegments } = await import("@/services/brigade-detail");
+    const scope = await readBrigadeDetailScope(period, branchId, employeeId, from, SALE_INDICATOR);
+    if (!scope) {
+        return queryPremiumPage(axis, period, branchId, employeeId, from, until, accrualId, null, null);
+    }
+    const names = new Map(scope.members.map((member) => [member.id, member.name]));
+    const live = liveBrigadeIds(scope.members);
+    const frozen = frozenBrigadeSegments(scope.members);
+    const pages = await Promise.all([
+        live.length > 0
+            ? queryPremiumPage(axis, period, branchId, employeeId, null, null, null, live, names)
+            : Promise.resolve({ rowLabel: axis === "product_kind" ? "Изделие" : "Категория", lines: [] }),
+        ...frozen.map((segment) => queryPremiumPage(
+            axis,
+            period,
+            branchId,
+            segment.id,
+            segment.from,
+            segment.until,
+            segment.accrualId,
+            null,
+            names,
+        )),
+    ]);
+    return {
+        rowLabel: axis === "product_kind" ? "Изделие" : "Категория",
+        lines: pages.flatMap((page) => page.lines),
+        share: scope.share,
+        members: scope.members.map((member) => ({ id: member.id, name: member.name })),
+    };
 }
 
 async function queryPremiumPage(
@@ -469,9 +503,14 @@ async function queryPremiumPage(
     from: string | null,
     until: string | null,
     accrualId: number | null,
+    authorIds: string[] | null,
+    names: Map<string, string> | null,
 ): Promise<SalePremiumDetail> {
     const sourceSql = await readSaleQuery(axis === "product_kind" ? "sale-premium-kind.sql" : "sale-premium-category.sql");
-    const selectSql = await assignmentSql(sourceSql, period, employeeId);
+    const assigned = await assignmentSql(sourceSql, period, employeeId);
+    const brigade = authorIds !== null && authorIds.length > 0;
+    const { sqlForAuthors } = brigade ? await import("@/services/brigade-detail") : { sqlForAuthors: null };
+    const selectSql = sqlForAuthors ? sqlForAuthors(assigned) : assigned;
     const rows = await db.queryWithTimeout<PremiumDetailRow>(
         `
         WITH matched AS MATERIALIZED (
@@ -486,7 +525,8 @@ async function queryPremiumPage(
                    line.link_doc,
                    line.document_number,
                    line.document_date,
-                   line.product_name
+                   line.product_name,
+                   line.employee_uuid
             FROM (
 ${selectSql}
             ) line
@@ -502,7 +542,8 @@ ${selectSql}
                matched.link_doc AS "linkDoc",
                matched.document_number AS "documentNumber",
                to_char(matched.document_date, 'DD.MM') AS "documentDay",
-               matched.product_name AS "productName"
+               matched.product_name AS "productName",
+               matched.employee_uuid::text AS "employeeId"
         FROM matched
         LEFT JOIN product_categories category
             ON matched.axis = 'category'
@@ -511,7 +552,9 @@ ${selectSql}
             ON matched.axis = 'product_kind'
            AND kind.uuid = matched.code
         `,
-        [period, employeeId, branchId, from, until, accrualId, null],
+        brigade
+            ? [period, null, branchId, null, null, null, null, authorIds]
+            : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
         // Тарифы месяца соединяются одним проходом. Вложенный цикл читает весь список на каждую строку.
         { hashJoins: true },
@@ -522,8 +565,10 @@ ${selectSql}
         const documentNumber = row.documentNumber?.trim() || "Без номера";
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
+        const personId = row.employeeId?.toLowerCase() ?? "";
+        const personName = names?.get(personId) ?? "";
         return {
-            id: `${row.code ?? ""}:${documentId}:${index}`,
+            id: `${personId}:${row.code ?? ""}:${documentId}:${index}`,
             channel: channelLabel(row.channel),
             categoryTitle: row.itemTitle.trim() || "Без названия",
             calculation: calculationLabel(row),
@@ -532,6 +577,7 @@ ${selectSql}
             documentTitle,
             productName: row.productName?.trim() || "Без названия",
             doubled: row.baseMode === "per_unit" && (row.channel === "stm" || row.channel === "not_stm" || row.channel === "main") && price !== null && price >= 100000,
+            ...(personName ? { employeeId: personId, employeeName: personName } : {}),
         };
     });
     return {

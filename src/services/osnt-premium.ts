@@ -64,10 +64,14 @@ export interface OsntPremiumLine {
     day: string;
     calculation: string;
     amount: number;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface OsntPremiumDetail {
     lines: OsntPremiumLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 interface OsntDetailRow {
@@ -75,6 +79,7 @@ interface OsntDetailRow {
     documents: number | string;
     tariff: number | string;
     premium: number | string;
+    employeeId?: string | null;
 }
 
 export async function readOsntPremiumDetail(
@@ -93,38 +98,63 @@ export async function readOsntPremiumDetail(
     if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
+    const { collectBrigadeLines } = await import("@/services/brigade-detail");
+    const brigade = await collectBrigadeLines(period, branchId, employeeId, from, OSNT_INDICATOR, (input) => (
+        loadOsntLines(period, branchId, input.employeeId, input.from, input.until, input.accrualId, input.authors)
+    ));
+    if (brigade) {
+        return brigade;
+    }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, OSNT_INDICATOR);
-    const selectSql = await osntSelectSql();
+    return { lines: await loadOsntLines(period, branchId, employeeId, from, until, accrualId, null) };
+}
+
+async function loadOsntLines(
+    period: string,
+    branchId: string,
+    employeeId: string,
+    from: string | null,
+    until: string | null,
+    accrualId: number | null,
+    authors: string[] | null,
+): Promise<OsntPremiumLine[]> {
+    const sourceSql = await osntSelectSql();
+    const brigade = authors !== null && authors.length > 0;
+    const { sqlForAuthors } = brigade ? await import("@/services/brigade-detail") : { sqlForAuthors: null };
+    const selectSql = sqlForAuthors ? sqlForAuthors(sourceSql) : sourceSql;
     const rows = await db.queryWithTimeout<OsntDetailRow>(
         `
         SELECT to_char(line.document_date, 'DD.MM.YYYY') AS day,
                line.documents,
                (line.tariff * line.coefficient)::float8 AS tariff,
-               line.premium
+               line.premium,
+               line.employee_uuid::text AS "employeeId"
         FROM (
 ${selectSql}
         ) line
         ORDER BY line.document_date DESC, line.documents DESC
         `,
-        [period, employeeId, branchId, from, until, accrualId, null],
+        brigade
+            ? [period, null, branchId, null, null, null, null, authors]
+            : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
-    return {
-        lines: rows.flatMap((row, index) => {
-            const documents = finiteNumber(row.documents);
-            const tariff = finiteNumber(row.tariff);
-            const amount = finiteNumber(row.premium);
-            if (documents === null || tariff === null || amount === null) {
-                return [];
-            }
-            return [{
-                id: `${row.day}:${index}`,
-                day: row.day,
-                calculation: `${formatCount(documents)} шт × ${formatCount(tariff)} ₽`,
-                amount,
-            }];
-        }),
-    };
+    return rows.flatMap((row, index) => {
+        const documents = finiteNumber(row.documents);
+        const tariff = finiteNumber(row.tariff);
+        const amount = finiteNumber(row.premium);
+        if (documents === null || tariff === null || amount === null) {
+            return [];
+        }
+        const personId = row.employeeId?.toLowerCase() ?? "";
+        return [{
+            id: `${personId}:${row.day}:${index}`,
+            day: row.day,
+            calculation: `${formatCount(documents)} шт × ${formatCount(tariff)} ₽`,
+            amount,
+            ...(personId ? { employeeId: personId } : {}),
+        }];
+    });
 }
 
 async function osntSelectSql(): Promise<string> {

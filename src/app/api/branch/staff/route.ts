@@ -7,6 +7,7 @@ import { getAppSettings } from "@/services/app-settings";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
 import { managerBranchSettings } from "@/services/manager-branch-grants";
 import { cabinetViewer, readBranchPlacement, type BranchChoice } from "@/services/premium-access";
+import { readBranchBrigadeSetup } from "@/services/branch-brigades";
 import { readBranchRoleOverrides } from "@/services/motivation-roles";
 import { readBranchSharedPremiumRoleIds } from "@/services/shared-premium";
 import type { ApiResponse } from "@/types/api";
@@ -16,6 +17,7 @@ export interface BranchStaffPayload {
     branches: BranchOption[];
     employees: BranchStaffRow[];
     roleOverrides: Record<string, string | null>;
+    brigades: { mode: "off" | "all" | "groups"; groups: { id: string; name: string; memberIds: string[] }[] };
     indicators: ConnectedBasketIndicator[];
     salePremiums: Record<string, number>;
     releasePremiums: Record<string, number>;
@@ -56,6 +58,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Br
         const data = await readBranchStaff(access, period, branch);
         const visible = Boolean(branch && data.branches.some((item) => item.id.toLowerCase() === branch.toLowerCase()));
         const roleOverrides = visible && branch ? await readBranchRoleOverrides(branch, period) : {};
+        const brigades = visible && branch ? await readBranchBrigadeSetup(branch, period) : { mode: "off" as const, groups: [] };
         const sharedPremiumRoleIds = visible && branch ? await readBranchSharedPremiumRoleIds(branch) : [];
         const [viewer, placement, branchSettings] = await Promise.all([
             cabinetViewer(access),
@@ -70,6 +73,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Br
             data: {
                 ...data,
                 roleOverrides,
+                brigades,
                 sharedPremiumRoleIds,
                 branchSettings,
                 rolesEditable,

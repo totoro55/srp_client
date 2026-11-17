@@ -17,7 +17,9 @@ import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, SalePremiumError, type PremiumRun } from "@/services/sale-premium";
 import { moscowToday } from "@/services/segment-locks";
+import { calculateBrigadePremium } from "@/services/brigade-premium";
 import { calculateSharedPremium } from "@/services/shared-premium";
+import type { BrigadeIndicator } from "@/lib/brigade-shares";
 import { calculateUnloadingPremium } from "@/services/unloading-premium";
 import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
@@ -57,6 +59,10 @@ export async function recalculateBranchPremiums(input: {
         });
         try {
             const lines = await step.calculate();
+            const indicator = brigadeIndicator(step.kind);
+            if (indicator) {
+                await calculateBrigadePremium(input.period, indicator, run);
+            }
             await assertPremiumRecalcRunning(runId);
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
@@ -71,7 +77,7 @@ export async function recalculateBranchPremiums(input: {
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 
-export type MonthRecalcTarget = "baskets" | Exclude<BasketUpdateKind, "tariffs">;
+export type MonthRecalcTarget = "baskets" | Exclude<BasketUpdateKind, "tariffs" | "brigade">;
 
 /** Одна корзина, все корзины или общая премия за выбранные даты. Ручной запуск всех корзин в конце считает общую премию. Штатное расписание собирается только для корзин за весь месяц. */
 export async function recalculateMonthSelection(input: RecalcWindow & {
@@ -118,6 +124,10 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
         });
         try {
             const lines = await step.calculate();
+            const indicator = brigadeIndicator(step.kind);
+            if (indicator) {
+                await calculateBrigadePremium(input.period, indicator, run);
+            }
             await assertPremiumRecalcRunning(runId);
             await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
         } catch (error) {
@@ -128,6 +138,16 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
             throw error;
         }
     }
+}
+
+function brigadeIndicator(kind: BasketUpdateKind): BrigadeIndicator | null {
+    if (kind === "sale") return "Продажа товара";
+    if (kind === "release") return "Выдача товара";
+    if (kind === "kassa") return "Кассовые операции";
+    if (kind === "osnt") return "ОСНТ";
+    if (kind === "warehouse") return "Складские операции";
+    if (kind === "unloading") return "Разгрузка ТС";
+    return null;
 }
 
 function selectionSteps(

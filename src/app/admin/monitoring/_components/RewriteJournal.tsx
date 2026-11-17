@@ -35,6 +35,7 @@ const BASKET_OPTIONS: { id: BasketUpdateKind | "all"; label: string }[] = [
     { id: "unloading", label: "Разгрузка ТС" },
     { id: "shared", label: "Общая премия" },
     { id: "tariffs", label: "Тарифы продажи" },
+    { id: "brigade", label: "Доли бригады" },
 ];
 
 const STATUS_OPTIONS: { id: RecalcRunStatus | "all"; label: string }[] = [

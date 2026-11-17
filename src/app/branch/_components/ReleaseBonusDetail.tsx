@@ -27,6 +27,7 @@ import {
     detailNestedRowClass,
     detailRowClass,
 } from "./bonus-detail-ui";
+import { BrigadeMemberFilter, useBrigadeMemberFilter } from "./BrigadeDetailFilter";
 import { useBranchLocation } from "./BranchFrame";
 import { CopyDocumentButton, DetailHint } from "./SalesBonusDetail";
 import { findStaffSegment } from "./staff";
@@ -43,6 +44,8 @@ interface ReleaseLine {
     documentId: string;
     documentTitle: string;
     productName: string;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 interface ReleaseGroup {
@@ -55,6 +58,8 @@ interface ReleaseGroup {
 interface LiveReleaseDetail {
     rowLabel: string;
     lines: ReleaseLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 const releaseWideColumns = "sm:grid sm:grid-cols-[minmax(12rem,1.5fr)_minmax(14rem,1.2fr)_7.5rem_1.5rem] sm:items-center sm:gap-x-3";
@@ -73,6 +78,7 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
     const [mode, setMode] = useState<GroupMode>("category");
     const [openIds, setOpenIds] = useState<string[]>([]);
     const [query, setQuery] = useState("");
+    const brigade = useBrigadeMemberFilter(loaded?.members);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
     const [scope, setScope] = useState(scopeKey);
@@ -157,7 +163,8 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
         if (!loaded) {
             return [];
         }
-        const groups = groupPremiumLines(loaded.lines, mode, {
+        const lines = loaded.lines.filter((line) => brigade.allows(line.employeeId));
+        const groups = groupPremiumLines(lines, mode, {
             categoryTitle: (line) => line.categoryTitle,
             documentId: (line) => line.documentId,
             documentTitle: (line) => line.documentTitle,
@@ -165,9 +172,9 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
         return filterDetailItems(
             groups,
             query,
-            (group) => `${group.title} ${group.lines.map((line) => `${line.productName} ${line.categoryTitle} ${line.documentTitle} ${line.calculation}`).join(" ")}`,
+            (group) => `${group.title} ${group.lines.map((line) => `${line.employeeName ?? ""} ${line.productName} ${line.categoryTitle} ${line.documentTitle} ${line.calculation}`).join(" ")}`,
         );
-    }, [loaded, mode, query]);
+    }, [brigade, loaded, mode, query]);
     const showSkeleton = pending && !loaded && !failed && !timedOut;
     const showEmpty = !showSkeleton && !failed && !timedOut && loaded !== null && loaded.lines.length === 0 && query.trim() === "";
 
@@ -178,6 +185,7 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
             toolbar={(
                 <BonusDetailToolbar
                     controls={(
+                        <div className="flex min-w-0 items-center gap-2">
                         <ToggleGroup
                             variant="outline"
                             size="sm"
@@ -195,8 +203,15 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
                             <ToggleGroupItem value="category" className={detailModeToggleItemClass}>По категориям</ToggleGroupItem>
                             <ToggleGroupItem value="document" className={detailModeToggleItemClass}>По документам</ToggleGroupItem>
                         </ToggleGroup>
+                        {brigade.active ? (
+                            <BrigadeMemberFilter className="hidden md:inline-flex" members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                        ) : null}
+                        </div>
                     )}
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
+                    sort={brigade.active ? (
+                        <BrigadeMemberFilter members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     total={null}
                 />
             )}
@@ -282,6 +297,7 @@ function ReleaseLineRow({ line }: { line: ReleaseLine }) {
                 <DetailHint text={product || line.categoryTitle} className="block w-full min-w-0 truncate text-left text-xs font-medium leading-snug" contentClassName="text-[11px]">
                     {product || line.categoryTitle}
                 </DetailHint>
+                {line.employeeName ? <span className="block truncate text-xs text-muted-foreground">{line.employeeName}</span> : null}
                 {category || documentTitle ? (
                     <div className="mt-0.5 flex min-w-0 flex-col gap-0.5 sm:hidden">
                         {category ? <span className="truncate text-xs text-muted-foreground">{category}</span> : null}

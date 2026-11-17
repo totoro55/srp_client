@@ -65,10 +65,14 @@ export interface KassaPremiumLine {
     minutes: number;
     tariff: number;
     amount: number;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface KassaPremiumDetail {
     lines: KassaPremiumLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 interface KassaDetailRow {
@@ -76,6 +80,7 @@ interface KassaDetailRow {
     minute: number | string;
     tariff: number | string;
     premium: number | string;
+    employeeId?: string | null;
 }
 
 export async function readKassaPremiumDetail(
@@ -94,39 +99,64 @@ export async function readKassaPremiumDetail(
     if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
+    const { collectBrigadeLines } = await import("@/services/brigade-detail");
+    const brigade = await collectBrigadeLines(period, branchId, employeeId, from, KASSA_INDICATOR, (input) => (
+        loadKassaLines(period, branchId, input.employeeId, input.from, input.until, input.accrualId, input.authors)
+    ));
+    if (brigade) {
+        return brigade;
+    }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, KASSA_INDICATOR);
-    const selectSql = await kassaSelectSql();
+    return { lines: await loadKassaLines(period, branchId, employeeId, from, until, accrualId, null) };
+}
+
+async function loadKassaLines(
+    period: string,
+    branchId: string,
+    employeeId: string,
+    from: string | null,
+    until: string | null,
+    accrualId: number | null,
+    authors: string[] | null,
+): Promise<KassaPremiumLine[]> {
+    const sourceSql = await kassaSelectSql();
+    const brigade = authors !== null && authors.length > 0;
+    const { sqlForAuthors } = brigade ? await import("@/services/brigade-detail") : { sqlForAuthors: null };
+    const selectSql = sqlForAuthors ? sqlForAuthors(sourceSql) : sourceSql;
     const rows = await db.queryWithTimeout<KassaDetailRow>(
         `
         SELECT to_char(line.document_date, 'DD.MM.YYYY') AS day,
                line.minute,
                (line.tariff * line.coefficient)::float8 AS tariff,
-               line.premium
+               line.premium,
+               line.employee_uuid::text AS "employeeId"
         FROM (
 ${selectSql}
         ) line
         ORDER BY line.document_date DESC, line.minute DESC
         `,
-        [period, employeeId, branchId, from, until, accrualId, null],
+        brigade
+            ? [period, null, branchId, null, null, null, null, authors]
+            : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
-    return {
-        lines: rows.flatMap((row, index) => {
-            const minutes = finiteNumber(row.minute);
-            const tariff = finiteNumber(row.tariff);
-            const amount = finiteNumber(row.premium);
-            if (minutes === null || tariff === null || amount === null) {
-                return [];
-            }
-            return [{
-                id: `${row.day}:${index}`,
-                day: row.day,
-                minutes,
-                tariff,
-                amount,
-            }];
-        }),
-    };
+    return rows.flatMap((row, index) => {
+        const minutes = finiteNumber(row.minute);
+        const tariff = finiteNumber(row.tariff);
+        const amount = finiteNumber(row.premium);
+        if (minutes === null || tariff === null || amount === null) {
+            return [];
+        }
+        const personId = row.employeeId?.toLowerCase() ?? "";
+        return [{
+            id: `${personId}:${row.day}:${index}`,
+            day: row.day,
+            minutes,
+            tariff,
+            amount,
+            ...(personId ? { employeeId: personId } : {}),
+        }];
+    });
 }
 
 async function kassaSelectSql(): Promise<string> {

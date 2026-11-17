@@ -992,6 +992,8 @@ export interface SalesDetailLine {
     documentTitle: string;
     productName?: string;
     doubled?: boolean;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface SalesDetailGroup {

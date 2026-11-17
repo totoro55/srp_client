@@ -8,7 +8,7 @@ import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 import { notifyRecalc } from "@/services/notifications";
 
-export type BasketUpdateKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "shared" | "tariffs";
+export type BasketUpdateKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "shared" | "tariffs" | "brigade";
 export type RecalcRunStatus = "running" | "success" | "failed" | "cancelled";
 export type { RecalcScopeLevel };
 
@@ -84,7 +84,7 @@ export interface BasketUpdate {
     id: number;
     name: string;
     indicator: string;
-    kind: Exclude<BasketUpdateKind, "shared" | "tariffs">;
+    kind: Exclude<BasketUpdateKind, "shared" | "tariffs" | "brigade">;
     months: BasketUpdateMonth[];
     runs: BasketRecalcRun[];
 }
@@ -94,7 +94,7 @@ export interface BasketCalculationBoard {
     shared: SharedPremiumMonth[];
 }
 
-const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared" | "tariffs">> = {
+const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared" | "tariffs" | "brigade">> = {
     "Продажа товара": "sale",
     "Выдача товара": "release",
     "Кассовые операции": "kassa",
@@ -322,7 +322,7 @@ function sharedMonths(
 }
 
 const JOURNAL_PAGE = 40;
-const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "shared", "tariffs"];
+const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "shared", "tariffs", "brigade"];
 const JOURNAL_STATUSES: RecalcRunStatus[] = ["running", "success", "failed", "cancelled"];
 
 export function parseJournalBasket(value: string | null | undefined): BasketUpdateKind | null {
@@ -422,6 +422,9 @@ function journalWordMatches(token: string): string[] {
     }
     if (hit("тариф")) {
         parts.push("run.basket_kind = 'tariffs'");
+    }
+    if (hit("бригада")) {
+        parts.push("run.basket_kind = 'brigade'");
     }
     if (hit("ошибка")) {
         parts.push("run.status = 'failed'");

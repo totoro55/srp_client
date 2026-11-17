@@ -139,6 +139,12 @@ export const PERMISSION_CATALOG = [
         description: "Режим бригад и состав групп на филиале",
     },
     {
+        code: "branch.skip-recalc:write",
+        group: "Филиал",
+        title: "Сохранение без пересчёта",
+        description: "Роли и бригады филиала сохраняются без мгновенного пересчёта",
+    },
+    {
         code: "branch.shared:write",
         group: "Филиал",
         title: "Общая премия филиала",

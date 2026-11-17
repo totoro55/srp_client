@@ -6,6 +6,7 @@ import { readBranchKassaPremiumDays } from "@/services/kassa-premium";
 import { readBranchOsntPremiumDays } from "@/services/osnt-premium";
 import { readBranchReleasePremiumDays } from "@/services/release-premium";
 import { readBranchSalePremiumDays } from "@/services/sale-premium";
+import { applyBrigadeShares, readBranchBrigadeShares } from "@/services/brigade-premium";
 import { readBranchSharedPremiums } from "@/services/shared-premium";
 import { readBranchUnloadingPremiumDays } from "@/services/unloading-premium";
 import { readBranchWarehousePremiumDays } from "@/services/warehouse-premium";
@@ -129,7 +130,7 @@ export async function readBranchStaff(
     }
 
     const carried = rosterPeriod !== period;
-    const [versions, days, premiumDays, releaseDays, kassaDays, osntDays, warehouseDays, unloadingDays, sharedPremiums] = await Promise.all([
+    const [versions, days, premiumDays, releaseDays, kassaDays, osntDays, warehouseDays, unloadingDays, sharedPremiums, brigadeShares] = await Promise.all([
         db.query<StaffVersion>(
             `
             -- Состав последнего загруженного месяца, не позже выбранного.
@@ -184,19 +185,21 @@ export async function readBranchStaff(
         carried ? Promise.resolve([]) : readBranchWarehousePremiumDays(period, selected.id),
         carried ? Promise.resolve([]) : readBranchUnloadingPremiumDays(period, selected.id),
         carried ? Promise.resolve({}) : readBranchSharedPremiums(period, selected.id),
+        carried ? Promise.resolve(null) : readBranchBrigadeShares(period, selected.id),
     ]);
     const employees = staffSegments(versions, carried ? [] : days, selected.id.toLowerCase(), rosterPeriod);
+    const brigade = brigadeShares;
 
     return {
         branches,
         employees,
         indicators: await readConnectedIndicators(period, selected.id),
-        salePremiums: premiumsBySegment(employees, carried ? [] : premiumDays),
-        releasePremiums: premiumsBySegment(employees, carried ? [] : releaseDays),
-        kassaPremiums: premiumsBySegment(employees, carried ? [] : kassaDays),
-        osntPremiums: premiumsBySegment(employees, carried ? [] : osntDays),
-        warehousePremiums: premiumsBySegment(employees, carried ? [] : warehouseDays),
-        unloadingPremiums: premiumsBySegment(employees, carried ? [] : unloadingDays),
+        salePremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : premiumDays), brigade?.["Продажа товара"] ?? {}),
+        releasePremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : releaseDays), brigade?.["Выдача товара"] ?? {}),
+        kassaPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : kassaDays), brigade?.["Кассовые операции"] ?? {}),
+        osntPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : osntDays), brigade?.["ОСНТ"] ?? {}),
+        warehousePremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : warehouseDays), brigade?.["Складские операции"] ?? {}),
+        unloadingPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : unloadingDays), brigade?.["Разгрузка ТС"] ?? {}),
         sharedPremiums: carried ? {} : sharedPremiums,
         baseBonus: selected ? await readBaseBonus(period, selected.id) : null,
         priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,

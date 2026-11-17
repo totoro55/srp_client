@@ -16,6 +16,7 @@ import {
     useResetWhenChanged,
 } from "./BonusDetailPager";
 import { detailAmountClass, detailHeaderClass, detailRowClass } from "./bonus-detail-ui";
+import { BrigadeMemberFilter, useBrigadeMemberFilter } from "./BrigadeDetailFilter";
 import { useBranchDirectory } from "./branch-directory";
 import { useBranchLocation } from "./BranchFrame";
 import { formatMoney } from "./mock";
@@ -30,6 +31,8 @@ interface UnloadLine {
     volume: number;
     calculation: string;
     amount: number;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; period: string }) {
@@ -41,6 +44,8 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
     const [failed, setFailed] = useState(false);
     const [timedOut, setTimedOut] = useState(false);
     const [query, setQuery] = useState("");
+    const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+    const brigade = useBrigadeMemberFilter(members);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const measureRef = useRef<HTMLDivElement | null>(null);
     const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
@@ -48,6 +53,7 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
     if (scope !== scopeKey) {
         setScope(scopeKey);
         setLines(null);
+        setMembers([]);
         setFailed(false);
         setTimedOut(false);
     }
@@ -64,7 +70,7 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
         });
         fetch(`/api/branch/unloading-premium/detail?${params.toString()}`, { signal: controller.signal })
             .then(async (response) => {
-                const body = await response.json() as { success?: boolean; data?: { lines?: UnloadLine[] } };
+                const body = await response.json() as { success?: boolean; data?: { lines?: UnloadLine[]; members?: { id: string; name: string }[] } };
                 if (controller.signal.aborted) {
                     return;
                 }
@@ -83,6 +89,7 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
                 setFailed(false);
                 setTimedOut(false);
                 setLines(next);
+                setMembers(Array.isArray(body.data?.members) ? body.data.members : []);
             })
             .catch((error: unknown) => {
                 if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
@@ -96,13 +103,13 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
     }, [branchId, employee?.activeFrom, employee?.activeUntil, employeeId, period]);
 
     const rows = useMemo(() => {
-        const filtered = filterDetailItems(lines ?? [], query, (line) => `${line.day} ${line.participants} ${line.calculation}`);
+        const filtered = filterDetailItems((lines ?? []).filter((line) => brigade.allows(line.employeeId)), query, (line) => `${line.employeeName ?? ""} ${line.day} ${line.participants} ${line.calculation}`);
         return sortDetailItems(filtered, { key: "date", dir: "desc" }, {
             date: (line) => parseDetailDate(line.day),
             participants: (line) => line.participants,
             amount: (line) => line.amount,
         });
-    }, [lines, query]);
+    }, [brigade, lines, query]);
     const showSkeleton = lines === null && !failed && !timedOut;
     const showEmpty = !showSkeleton && !failed && !timedOut && lines !== null && lines.length === 0;
 
@@ -112,7 +119,13 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
             scrollRef={scrollRef}
             toolbar={(
                 <BonusDetailToolbar
+                    controls={brigade.active ? (
+                        <BrigadeMemberFilter className="hidden md:inline-flex" members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
+                    sort={brigade.active ? (
+                        <BrigadeMemberFilter members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     total={null}
                 />
             )}
@@ -142,6 +155,7 @@ export function UnloadBonusDetail({ employeeId, period }: { employeeId: string; 
                             <div key={line.id} data-scroll-row="" className={cn(detailRowClass, "flex items-center justify-between gap-2", unloadWideColumns)}>
                                 <span className="min-w-0 flex-1">
                                     <span className="block truncate font-medium tabular-nums">{line.day}</span>
+                                    {line.employeeName ? <span className="block truncate text-xs text-muted-foreground">{line.employeeName}</span> : null}
                                     <span className="block truncate text-xs text-muted-foreground sm:hidden">{formatVolume(line.volume)} · {line.participants} уч.</span>
                                     <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.calculation}</span>
                                 </span>

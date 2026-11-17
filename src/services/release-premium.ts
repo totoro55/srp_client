@@ -84,11 +84,15 @@ export interface ReleasePremiumDetailLine {
     documentId: string;
     documentTitle: string;
     productName: string;
+    employeeId?: string;
+    employeeName?: string;
 }
 
 export interface ReleasePremiumDetail {
     rowLabel: string;
     lines: ReleasePremiumDetailLine[];
+    share?: number | null;
+    members?: { id: string; name: string }[];
 }
 
 interface ReleaseDetailRow {
@@ -103,6 +107,7 @@ interface ReleaseDetailRow {
     documentNumber: string | null;
     documentDay: string | null;
     productName: string | null;
+    employeeId?: string | null;
 }
 
 export async function readReleasePremiumDetail(
@@ -121,9 +126,34 @@ export async function readReleasePremiumDetail(
     if (!await canReadEmployeeDetail(access, period, branchId, employeeId)) {
         return null;
     }
+    const { collectBrigadeLines } = await import("@/services/brigade-detail");
+    const brigade = await collectBrigadeLines(period, branchId, employeeId, from, RELEASE_INDICATOR, (input) => (
+        loadReleaseLines(period, branchId, input.employeeId, input.from, input.until, input.accrualId, input.authors)
+    ));
+    if (brigade) {
+        return { rowLabel: "Категория", ...brigade };
+    }
     const accrualId = await premiumAccrualId(period, branchId, employeeId, from, until, RELEASE_INDICATOR);
+    return {
+        rowLabel: "Категория",
+        lines: await loadReleaseLines(period, branchId, employeeId, from, until, accrualId, null),
+    };
+}
+
+async function loadReleaseLines(
+    period: string,
+    branchId: string,
+    employeeId: string,
+    from: string | null,
+    until: string | null,
+    accrualId: number | null,
+    authors: string[] | null,
+): Promise<ReleasePremiumDetailLine[]> {
     const sourceSql = await releaseSelectSql();
-    const selectSql = await assignmentSql(sourceSql, period, employeeId);
+    const assigned = await assignmentSql(sourceSql, period, employeeId);
+    const brigade = authors !== null && authors.length > 0;
+    const { sqlForAuthors } = brigade ? await import("@/services/brigade-detail") : { sqlForAuthors: null };
+    const selectSql = sqlForAuthors ? sqlForAuthors(assigned) : assigned;
     const rows = await db.queryWithTimeout<ReleaseDetailRow>(
         `
         WITH matched AS MATERIALIZED (
@@ -136,7 +166,8 @@ export async function readReleasePremiumDetail(
                    line.link_doc,
                    line.document_number,
                    line.document_date,
-                   line.product_name
+                   line.product_name,
+                   line.employee_uuid
             FROM (
 ${selectSql}
             ) line
@@ -151,32 +182,33 @@ ${selectSql}
                matched.link_doc AS "linkDoc",
                matched.document_number AS "documentNumber",
                to_char(matched.document_date, 'DD.MM') AS "documentDay",
-               matched.product_name AS "productName"
+               matched.product_name AS "productName",
+               matched.employee_uuid::text AS "employeeId"
         FROM matched
         LEFT JOIN product_categories category
             ON category.uuid = matched.category_code
         `,
-        [period, employeeId, branchId, from, until, accrualId, null],
+        brigade
+            ? [period, null, branchId, null, null, null, null, authors]
+            : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
-    const lines = rows.map((row, index) => {
+    return rows.map((row, index) => {
         const documentNumber = row.documentNumber?.trim() || "Без номера";
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
+        const personId = row.employeeId?.toLowerCase() ?? "";
         return {
-            id: `${row.categoryCode ?? ""}:${documentId}:${index}`,
+            id: `${personId}:${row.categoryCode ?? ""}:${documentId}:${index}`,
             categoryTitle: row.categoryTitle.trim() || "Без категории",
             calculation: calculationLabel(row),
             amount: finiteNumber(row.premium) ?? 0,
             documentId,
             documentTitle,
             productName: row.productName?.trim() || "Без названия",
+            ...(brigade || personId ? { employeeId: personId } : {}),
         };
     });
-    return {
-        rowLabel: "Категория",
-        lines,
-    };
 }
 
 async function releaseSelectSql(): Promise<string> {

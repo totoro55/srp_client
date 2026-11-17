@@ -42,6 +42,8 @@ interface BranchStoreValue {
     moveMember: (branchId: string, period: string, employeeId: string, groupId: string | null) => void;
     saveBrigades: (branchId: string, period: string) => void;
     revertBrigades: (branchId: string, period: string) => void;
+    hydrateBrigades: (branchId: string, period: string, setup: BrigadeSetup) => void;
+    commitBrigades: (branchId: string, period: string, setup: BrigadeSetup) => void;
 }
 
 const BranchStoreContext = createContext<BranchStoreValue | null>(null);
@@ -64,6 +66,10 @@ function seed(): BranchState {
         savedBrigades: {},
         draftBrigades: {},
     };
+}
+
+function sameSetup(left: BrigadeSetup, right: BrigadeSetup): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function sameOverrides(left: Record<string, string | null>, right: Record<string, string | null>): boolean {
@@ -207,6 +213,35 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
                 const saved = cloneSetup(current.savedBrigades[key] ?? EMPTY_BRIGADES);
                 return { ...current, draftBrigades: { ...current.draftBrigades, [key]: saved } };
             });
+        },
+        hydrateBrigades(branchId, period, setup) {
+            const key = keyOf(branchId, period);
+            const next = cloneSetup(setup);
+            setState((current) => {
+                const saved = current.savedBrigades[key] ?? EMPTY_BRIGADES;
+                if (sameSetup(saved, next)) {
+                    return current;
+                }
+                const draft = current.draftBrigades[key];
+                const dirty = draft !== undefined && !sameSetup(draft, saved);
+                if (dirty) {
+                    return { ...current, savedBrigades: { ...current.savedBrigades, [key]: next } };
+                }
+                return {
+                    ...current,
+                    savedBrigades: { ...current.savedBrigades, [key]: next },
+                    draftBrigades: { ...current.draftBrigades, [key]: cloneSetup(next) },
+                };
+            });
+        },
+        commitBrigades(branchId, period, setup) {
+            const key = keyOf(branchId, period);
+            const next = cloneSetup(setup);
+            setState((current) => ({
+                ...current,
+                savedBrigades: { ...current.savedBrigades, [key]: next },
+                draftBrigades: { ...current.draftBrigades, [key]: cloneSetup(next) },
+            }));
         },
     }), [hydrateRoles, state]);
 
