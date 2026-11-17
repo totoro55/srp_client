@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Asterisk, Check, CircleHelp, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Asterisk, Check, CircleHelp, Info, Loader2Icon, ShoppingBasket, SlidersHorizontal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,13 @@ import {
     type RrsEditPolicy,
 } from "@/lib/rrs-edit-window";
 import { ApiResponse } from "@/types/api";
+import {
+    finishedWizardSaveProgress,
+    initialWizardSaveProgress,
+    isWizardSaveStage,
+    wizardSaveProgressAt,
+    type WizardSaveStep,
+} from "@/lib/wizard-save-progress";
 import { PageHeading } from "@/app/_components/header/page-heading";
 import { CoefficientTable } from "./CoefficientTable";
 import { deleteDraft, readDraft, restoreDraft, writeDraft, type WizardDraft } from "./wizard-draft";
@@ -69,6 +76,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [confirmSave, setConfirmSave] = useState(false);
+    const [saveProgress, setSaveProgress] = useState<WizardSaveStep[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [branches, setBranches] = useState<RrsBranch[]>([]);
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
@@ -91,6 +99,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const frameRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLDivElement>(null);
     const barRef = useRef<HTMLDivElement>(null);
+    const stepScrollReady = useRef(false);
     const [actionsPinned, setActionsPinned] = useState(false);
     const [actionsHeight, setActionsHeight] = useState(0);
     const { data: session } = useSession();
@@ -376,6 +385,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         }
         setSaving(true);
         setError(null);
+        setSaveProgress(initialWizardSaveProgress());
         const period = `${month}-01`;
         const items = forms.map((form) => ({
             basketId: form.basketId,
@@ -383,6 +393,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             versionId: form.connected ? form.versionId : null,
             values: form.connected ? form.values : {},
         }));
+        let savedCard = false;
         try {
             const response = await fetch("/api/rrs/wizard", {
                 method: "POST",
@@ -409,15 +420,30 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     } : null,
                 }),
             });
-            const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
-            if (!json.success) {
-                setError(`${json.error.message} Черновик сохранён в этом браузере.`);
-                setConfirmSave(false);
-                return;
+            const contentType = response.headers.get("content-type") ?? "";
+            let recalc: StartedPremiumRecalc | null = null;
+            if (contentType.includes("application/json")) {
+                const json = (await response.json()) as ApiResponse<{ saved: true; recalc: StartedPremiumRecalc | null }>;
+                if (!json.success) {
+                    setError(`${json.error.message} Черновик сохранён в этом браузере.`);
+                    setConfirmSave(false);
+                    return;
+                }
+                recalc = json.data.recalc;
+            } else {
+                const saved = await readWizardSaveStream(response, (stage) => setSaveProgress(wizardSaveProgressAt(stage)));
+                if ("error" in saved) {
+                    setError(`${saved.error} Черновик сохранён в этом браузере.`);
+                    setConfirmSave(false);
+                    return;
+                }
+                recalc = saved.recalc;
             }
-            if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc);
+            setSaveProgress(finishedWizardSaveProgress());
+            if (recalc) {
+                showStartedRecalc(recalc);
             }
+            savedCard = true;
             setConfirmSave(false);
             setWizardFinished(true);
             if (username) {
@@ -429,6 +455,9 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             setConfirmSave(false);
         } finally {
             setSaving(false);
+            if (!savedCard) {
+                setSaveProgress(null);
+            }
         }
     }
 
@@ -731,6 +760,28 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
         };
     }, [activeKey, loading, steps.length]);
 
+    useEffect(() => {
+        if (!stepScrollReady.current) {
+            stepScrollReady.current = true;
+            return;
+        }
+        const body = bodyRef.current;
+        if (body && body.scrollTop > 0) {
+            body.scrollTo({ top: 0, behavior: "smooth" });
+        }
+        let node = frameRef.current?.parentElement ?? null;
+        while (node) {
+            const style = getComputedStyle(node);
+            if (/(auto|scroll)/.test(style.overflowY) && node.scrollTop > 0) {
+                node.scrollTo({ top: 0, behavior: "smooth" });
+            }
+            node = node.parentElement;
+        }
+        if (window.scrollY > 0) {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+    }, [activeKey]);
+
     return (
         <form className="flex w-full flex-col" onSubmit={onSubmit}>
             <ConfirmDialog
@@ -746,8 +797,14 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 confirmLabel={editing ? "Сохранить" : "Создать"}
                 confirmVariant="default"
                 isPending={saving}
+                progress={saveProgress ? <WizardSaveProgress steps={saveProgress} /> : null}
                 onConfirm={() => void saveCard()}
-                onOpenChange={setConfirmSave}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSaveProgress(null);
+                    }
+                    setConfirmSave(open);
+                }}
             />
             <ConfirmDialog
                 open={resumeDraft !== null}
@@ -833,7 +890,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     );
                 })}
             </ol>
-            <div className={cn("flex flex-col gap-6", activeKey !== "coefficients" && activeKey !== "tariffs" && "max-w-3xl")}>
+            <div className={cn("flex w-full flex-col gap-6", activeKey !== "coefficients" && activeKey !== "tariffs" && activeKey !== "motivation" && "max-w-3xl")}>
             <div>
                 <h2 className="text-lg font-semibold">{stepTitle}</h2>
                 {stepHint ? <p className="mt-1 text-sm text-muted-foreground">{stepHint}</p> : null}
@@ -983,12 +1040,12 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                 : `Включено ${bonusBranches.filter((branch) => enabled[branch.uuid]).length} из ${bonusBranches.length}`}
                     </p>
                     {branches.length > 0 ? (
-                        <Table containerClassName="rounded-lg border">
+                        <Table className="w-full table-fixed" containerClassName="w-full rounded-lg border">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Филиал</TableHead>
-                                    <TableHead className="w-44 text-right">Базовая премия</TableHead>
-                                    <TableHead className="min-w-72">
+                                    <TableHead className="w-[34%] whitespace-normal">Филиал</TableHead>
+                                    <TableHead className="w-[16%] whitespace-normal text-right">Базовая премия</TableHead>
+                                    <TableHead className="w-[30%] whitespace-normal">
                                         <span className="flex items-center gap-2">
                                             <Switch
                                                 checked={allWithBonusOn}
@@ -1016,7 +1073,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                             Участие
                                         </span>
                                     </TableHead>
-                                    <TableHead className="min-w-56">
+                                    <TableHead className="w-[20%] whitespace-normal">
                                         <span className="flex items-center gap-2">
                                             Бригада
                                             <Tooltip>
@@ -1042,11 +1099,11 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                     const blocked = !hasBaseBonus && !on;
                                     return (
                                         <TableRow key={branch.uuid} className={cn(on && "bg-emerald-50 dark:bg-emerald-950/30")}>
-                                            <TableCell className="font-medium">{branch.name}</TableCell>
-                                            <TableCell className={cn("text-right tabular-nums", bonus === null && "text-muted-foreground")}>
+                                            <TableCell className="font-medium whitespace-normal">{branch.name}</TableCell>
+                                            <TableCell className={cn("text-right whitespace-normal tabular-nums", bonus === null && "text-muted-foreground")}>
                                                 {bonus ?? "Нет"}
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="whitespace-normal">
                                                 <label className="flex items-center gap-2 text-sm">
                                                     <Switch
                                                         checked={on}
@@ -1062,12 +1119,12 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                                             }
                                                         }}
                                                     />
-                                                    <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
+                                                    <span className={cn("whitespace-normal", on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground")}>
                                                         {on ? "Включена" : hasBaseBonus ? "Выключена" : "Нельзя включить: нет базовой премии"}
                                                     </span>
                                                 </label>
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="whitespace-normal">
                                                 <label className="flex items-center gap-2 text-sm">
                                                     <Switch
                                                         checked={brigadeOn && on}
@@ -1211,4 +1268,72 @@ function BasketPick({
             )}
         </div>
     );
+}
+
+function WizardSaveProgress({ steps }: { steps: WizardSaveStep[] }) {
+    const current = steps.find((step) => step.state === "run");
+    return (
+        <ol className="flex flex-col gap-1.5 text-sm" aria-live="polite" aria-label={current?.label ?? "Сохранение карточки"}>
+            {steps.map((step) => (
+                <li
+                    key={step.id}
+                    aria-current={step.state === "run" ? "step" : undefined}
+                    className={cn(
+                        "flex items-center gap-2",
+                        step.state === "run" ? "text-foreground" : "text-muted-foreground",
+                    )}
+                >
+                    <span className="grid size-3.5 shrink-0 place-items-center">
+                        {step.state === "run" ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+                        {step.state === "done" ? <Check className="size-3.5" /> : null}
+                        {step.state === "wait" ? <span className="size-1.5 rounded-full bg-muted-foreground/40" /> : null}
+                    </span>
+                    {step.label}
+                </li>
+            ))}
+        </ol>
+    );
+}
+
+async function readWizardSaveStream(
+    response: Response,
+    onStage: (stage: WizardSaveStep["id"]) => void,
+): Promise<{ recalc: StartedPremiumRecalc | null } | { error: string }> {
+    if (!response.ok || !response.body) {
+        return { error: "Не удалось сохранить карточку РРС" };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let donePayload: { recalc: StartedPremiumRecalc | null } | null = null;
+    while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+            break;
+        }
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                continue;
+            }
+            const event = JSON.parse(trimmed) as { stage?: unknown; message?: unknown; recalc?: StartedPremiumRecalc | null };
+            if (event.stage === "error") {
+                return { error: typeof event.message === "string" ? event.message : "Не удалось сохранить карточку РРС" };
+            }
+            if (event.stage === "done") {
+                donePayload = { recalc: event.recalc ?? null };
+                continue;
+            }
+            if (isWizardSaveStage(event.stage)) {
+                onStage(event.stage);
+            }
+        }
+    }
+    if (!donePayload) {
+        return { error: "Не удалось сохранить карточку РРС" };
+    }
+    return donePayload;
 }

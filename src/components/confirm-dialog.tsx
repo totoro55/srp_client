@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -24,6 +24,7 @@ interface ConfirmDialogProps {
     isPending?: boolean;
     confirmDelaySeconds?: number;
     extraLabel?: string;
+    progress?: ReactNode;
     onConfirm: () => void | Promise<void>;
     onExtra?: () => void | Promise<void>;
     onOpenChange: (open: boolean) => void;
@@ -40,6 +41,7 @@ export function ConfirmDialog({
     isPending = false,
     confirmDelaySeconds = 0,
     extraLabel,
+    progress,
     onConfirm,
     onExtra,
     onOpenChange,
@@ -81,6 +83,7 @@ export function ConfirmDialog({
                     <AlertDialogTitle>{title}</AlertDialogTitle>
                     <AlertDialogDescription>{description}</AlertDialogDescription>
                 </AlertDialogHeader>
+                {progress}
                 <AlertDialogFooter>
                     {showCancel && (
                         <AlertDialogCancel disabled={isPending}>{cancelLabel}</AlertDialogCancel>

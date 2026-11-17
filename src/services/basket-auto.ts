@@ -24,7 +24,7 @@ export async function runDueBasketPremiums(now = new Date()): Promise<void> {
     await runAutomaticBaskets(now);
 }
 
-/** Штатное расписание один раз, затем продажа, выдача и касса, затем общая премия. */
+/** Штатное расписание один раз, затем корзины, один расчёт долей бригады и общая премия. */
 export async function runAutomaticBaskets(now = new Date()): Promise<void> {
     const period = automaticBasketPeriod(now);
     const day = moscowToday(now);

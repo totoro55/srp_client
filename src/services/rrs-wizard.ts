@@ -13,6 +13,7 @@ import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-q
 import { db } from "@/services/db";
 import { previewConnectionTariffs, writeWizardTariffs } from "@/services/tariff-exceptions";
 import type { TariffExceptionPage } from "@/lib/tariff-exceptions";
+import type { WizardSaveStage } from "@/lib/wizard-save-progress";
 
 export interface WizardTariffCommit {
     rows: TariffSaveRow[];
@@ -155,8 +156,14 @@ export async function previewWizardTariffs(
     return previewConnectionTariffs(access, territoryUuid, period, sales.versionId, sales.values);
 }
 
-export async function commitRrsWizard(access: AccessView, input: WizardCommitInput): Promise<StartedPremiumRecalc | null> {
+export async function commitRrsWizard(
+    access: AccessView,
+    input: WizardCommitInput,
+    onProgress: (stage: WizardSaveStage) => void = () => {},
+): Promise<StartedPremiumRecalc | null> {
+    onProgress("guard");
     await guardRrsMonth(access, input.territoryUuid, input.period);
+    onProgress("read");
     const [month, coefficients, motivation] = await Promise.all([
         getRrsMonth(access, input.territoryUuid, input.period),
         wizardCoefficients(access, input.territoryUuid, input.period),
@@ -183,13 +190,19 @@ export async function commitRrsWizard(access: AccessView, input: WizardCommitInp
         }
     }
     const brigadeChanged = await db.transaction(async (query) => {
+        onProgress("baskets");
         await applyRrsMonth(query, access, input.territoryUuid, input.period, input.items);
+        onProgress("motivation");
         await writeBranchMotivation(query, access.username, input.territoryUuid, motivation.period, motivation.items);
+        onProgress("brigades");
         const changed = await writeMotivationBrigades(query, motivation.period, motivation.items);
+        onProgress("coefficients");
         await replacePeriodCoefficients(query, access.username, input.territoryUuid, input.period, input.coefficients);
+        onProgress("tariffs");
         await writeWizardTariffs(query, access, input.territoryUuid, input.period, input.tariffs);
         return changed;
     });
+    onProgress("recalc");
     if (brigadeChanged.length > 0) {
         await triggerBrigadeRecalc({
             period: input.period,

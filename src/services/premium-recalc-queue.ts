@@ -11,7 +11,7 @@ import {
     PremiumRecalcBusyError,
     PremiumRecalcCancelledError,
 } from "@/services/basket-updates";
-import { brigadeIndicatorOf, runBrigadeJournal } from "@/services/brigade-recalc";
+import { brigadeIndicatorOf, flushQueuedBrigades, queueBrigadeIndicator, type QueuedBrigade } from "@/services/brigade-recalc";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateOsntPremium } from "@/services/osnt-premium";
@@ -226,82 +226,101 @@ async function pump(): Promise<void> {
 
 async function runJob(job: Job): Promise<void> {
     const kinds = ORDER.filter((kind) => job.scopes.has(kind));
-    for (let index = 0; index < kinds.length; index += 1) {
-        const kind = kinds[index];
-        const scope = job.scopes.get(kind);
-        if (!scope) {
-            continue;
-        }
-        const branches = await resolveBranches(job, scope);
-        const scopeLevel: RecalcScopeLevel = job.territoryId === null && scope.all
-            ? "division"
-            : scope.all
-                ? "territory"
-                : "branch";
-        const scopeIds = scopeLevel === "division"
-            ? []
-            : scopeLevel === "territory" && job.territoryId
-                ? [job.territoryId]
-                : branches ?? [];
-        const isLast = index === kinds.length - 1;
-        const indicator = brigadeIndicatorOf(kind);
-        let runId: number;
-        try {
-            runId = await beginPremiumRecalc({
-                kind,
-                period: job.period,
-                origin: job.origin,
-                trigger: job.trigger,
-                actor: job.actor,
-                scopeLevel,
-                scopeIds,
-            });
-        } catch (error) {
-            if (error instanceof PremiumRecalcBusyError) {
-                for (const done of kinds.slice(0, index)) {
-                    job.scopes.delete(done);
+    const brigadeFollows = kinds.some((kind) => brigadeIndicatorOf(kind));
+    const brigades = new Map<string, QueuedBrigade>();
+    const route = job.route || "очередь пересчёта";
+    try {
+        for (let index = 0; index < kinds.length; index += 1) {
+            const kind = kinds[index];
+            const scope = job.scopes.get(kind);
+            if (!scope) {
+                continue;
+            }
+            const branches = await resolveBranches(job, scope);
+            const scopeLevel: RecalcScopeLevel = job.territoryId === null && scope.all
+                ? "division"
+                : scope.all
+                    ? "territory"
+                    : "branch";
+            const scopeIds = scopeLevel === "division"
+                ? []
+                : scopeLevel === "territory" && job.territoryId
+                    ? [job.territoryId]
+                    : branches ?? [];
+            const isLast = index === kinds.length - 1;
+            const indicator = brigadeIndicatorOf(kind);
+            let runId: number;
+            try {
+                runId = await beginPremiumRecalc({
+                    kind,
+                    period: job.period,
+                    origin: job.origin,
+                    trigger: job.trigger,
+                    actor: job.actor,
+                    scopeLevel,
+                    scopeIds,
+                });
+            } catch (error) {
+                if (error instanceof PremiumRecalcBusyError) {
+                    for (const done of kinds.slice(0, index)) {
+                        job.scopes.delete(done);
+                    }
                 }
+                throw error;
             }
-            throw error;
-        }
-        const route = job.route || "очередь пересчёта";
-        try {
-            const lines = await calculate(kind, job.period, branches, scopeLevel);
-            await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
+            try {
+                const lines = await calculate(kind, job.period, branches, scopeLevel);
+                await assertPremiumRecalcRunning(runId);
+                await finishPremiumRecalc(runId, lines, { announce: isLast && !brigadeFollows });
+            } catch (error) {
+                if (!(error instanceof PremiumRecalcCancelledError)) {
+                    await failPremiumRecalc(runId, error, route);
+                }
+                throw error;
             }
-            await failPremiumRecalc(runId, error, route);
-            throw error;
-        }
-        if (!indicator) {
-            continue;
-        }
-        try {
-            await runBrigadeJournal({
-                period: job.period,
-                indicators: [indicator],
-                actor: job.actor,
-                trigger: job.trigger,
-                origin: job.origin,
+            if (!indicator) {
+                continue;
+            }
+            queueBrigadeIndicator(brigades, {
+                indicator,
                 scopeLevel,
                 scopeIds,
-                route,
                 run: {
                     ...(branches === null ? {} : { branches }),
                     timeoutMs: recalcTimeoutMs(scopeLevel),
                 },
-                announce: isLast,
             });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
-            }
-            throw error;
         }
+    } catch (error) {
+        if (error instanceof PremiumRecalcCancelledError) {
+            return;
+        }
+        try {
+            await flushQueuedBrigades({
+                batches: brigades,
+                period: job.period,
+                actor: job.actor,
+                trigger: job.trigger,
+                origin: job.origin,
+                route,
+                announce: false,
+            });
+        } catch (flushError) {
+            if (!(flushError instanceof PremiumRecalcCancelledError)) {
+                console.error("Не удалось записать доли бригады после прерванного пересчёта", flushError);
+            }
+        }
+        throw error;
     }
+    await flushQueuedBrigades({
+        batches: brigades,
+        period: job.period,
+        actor: job.actor,
+        trigger: job.trigger,
+        origin: job.origin,
+        route,
+        announce: true,
+    });
 }
 
 async function resolveBranches(job: Job, scope: KindScope): Promise<string[] | null> {

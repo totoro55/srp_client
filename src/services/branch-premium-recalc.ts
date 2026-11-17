@@ -12,7 +12,7 @@ import {
     type BasketUpdateKind,
 } from "@/services/basket-updates";
 import { db } from "@/services/db";
-import { brigadeIndicatorOf, runBrigadeJournal } from "@/services/brigade-recalc";
+import { brigadeIndicatorOf, flushQueuedBrigades, queueBrigadeIndicator, type QueuedBrigade } from "@/services/brigade-recalc";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
@@ -46,59 +46,78 @@ export async function recalculateBranchPremiums(input: {
         { kind: "unloading", calculate: () => calculateUnloadingPremium(input.period, false, run) },
         { kind: "shared", calculate: () => calculateSharedPremium(input.period, run) },
     ];
-    for (const [index, step] of steps.entries()) {
-        const isLast = index === steps.length - 1;
-        const indicator = brigadeIndicatorOf(step.kind);
-        const runId = await beginPremiumRecalc({
-            kind: step.kind,
-            period: input.period,
-            origin: "manual",
-            trigger: input.trigger,
-            actor: input.actor,
-            scopeLevel: "branch",
-            scopeIds: [input.branchId],
-        });
-        try {
-            const lines = await step.calculate();
-            await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
-            }
-            await failPremiumRecalc(runId, error, input.route);
-            throw error;
-        }
-        if (!indicator) {
-            continue;
-        }
-        try {
-            await runBrigadeJournal({
+    const brigadeFollows = steps.some((step) => brigadeIndicatorOf(step.kind));
+    const brigades = new Map<string, QueuedBrigade>();
+    try {
+        for (const [index, step] of steps.entries()) {
+            const isLast = index === steps.length - 1;
+            const indicator = brigadeIndicatorOf(step.kind);
+            const runId = await beginPremiumRecalc({
+                kind: step.kind,
                 period: input.period,
-                indicators: [indicator],
+                origin: "manual",
+                trigger: input.trigger,
+                actor: input.actor,
+                scopeLevel: "branch",
+                scopeIds: [input.branchId],
+            });
+            try {
+                const lines = await step.calculate();
+                await assertPremiumRecalcRunning(runId);
+                await finishPremiumRecalc(runId, lines, { announce: isLast && !brigadeFollows });
+            } catch (error) {
+                if (!(error instanceof PremiumRecalcCancelledError)) {
+                    await failPremiumRecalc(runId, error, input.route);
+                }
+                throw error;
+            }
+            if (!indicator) {
+                continue;
+            }
+            queueBrigadeIndicator(brigades, {
+                indicator,
+                scopeLevel: "branch",
+                scopeIds: [input.branchId],
+                run,
+            });
+        }
+    } catch (error) {
+        if (error instanceof PremiumRecalcCancelledError) {
+            return;
+        }
+        try {
+            await flushQueuedBrigades({
+                batches: brigades,
+                period: input.period,
                 actor: input.actor,
                 trigger: input.trigger,
                 origin: "manual",
-                scopeLevel: "branch",
-                scopeIds: [input.branchId],
                 route: input.route,
-                run,
-                announce: isLast,
+                announce: false,
             });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
+        } catch (flushError) {
+            if (!(flushError instanceof PremiumRecalcCancelledError)) {
+                console.error("Не удалось записать доли бригады после прерванного пересчёта", flushError);
             }
-            throw error;
         }
+        throw error;
     }
+    await flushQueuedBrigades({
+        batches: brigades,
+        period: input.period,
+        actor: input.actor,
+        trigger: input.trigger,
+        origin: "manual",
+        route: input.route,
+        announce: true,
+    });
 }
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 
 export type MonthRecalcTarget = "baskets" | Exclude<BasketUpdateKind, "tariffs" | "brigade">;
 
-/** Одна корзина, все корзины или общая премия за выбранные даты. Ручной запуск всех корзин в конце считает общую премию. Штатное расписание собирается только для корзин за весь месяц. */
+/** Одна корзина, все корзины или общая премия за выбранные даты. Ручной запуск всех корзин в конце считает общую премию. Доли бригады посчитанных корзин пишутся одним запуском после них. Штатное расписание собирается только для корзин за весь месяц. */
 export async function recalculateMonthSelection(input: RecalcWindow & {
     target: MonthRecalcTarget;
     actor: string;
@@ -131,52 +150,72 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
     if (input.origin === "manual" && input.target === "baskets") {
         steps.push({ kind: "shared", calculate: () => calculateSharedPremium(input.period, run) });
     }
-    for (const [index, step] of steps.entries()) {
-        const isLast = index === steps.length - 1;
-        const indicator = brigadeIndicatorOf(step.kind);
-        const runId = await beginPremiumRecalc({
-            kind: step.kind,
-            period: input.period,
-            origin: input.origin,
-            trigger: input.trigger,
-            actor: input.actor,
-            scopeLevel: "division",
-            conditions,
-        });
-        try {
-            const lines = await step.calculate();
-            await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
-            }
-            await failPremiumRecalc(runId, error, input.route);
-            throw error;
-        }
-        if (!indicator) {
-            continue;
-        }
-        try {
-            await runBrigadeJournal({
+    const brigadeFollows = steps.some((step) => brigadeIndicatorOf(step.kind));
+    const brigades = new Map<string, QueuedBrigade>();
+    try {
+        for (const [index, step] of steps.entries()) {
+            const isLast = index === steps.length - 1;
+            const indicator = brigadeIndicatorOf(step.kind);
+            const runId = await beginPremiumRecalc({
+                kind: step.kind,
                 period: input.period,
-                indicators: [indicator],
+                origin: input.origin,
+                trigger: input.trigger,
+                actor: input.actor,
+                scopeLevel: "division",
+                conditions,
+            });
+            try {
+                const lines = await step.calculate();
+                await assertPremiumRecalcRunning(runId);
+                await finishPremiumRecalc(runId, lines, { announce: isLast && !brigadeFollows });
+            } catch (error) {
+                if (!(error instanceof PremiumRecalcCancelledError)) {
+                    await failPremiumRecalc(runId, error, input.route);
+                }
+                throw error;
+            }
+            if (!indicator) {
+                continue;
+            }
+            queueBrigadeIndicator(brigades, {
+                indicator,
+                scopeLevel: "division",
+                scopeIds: [],
+                conditions,
+                run,
+            });
+        }
+    } catch (error) {
+        if (error instanceof PremiumRecalcCancelledError) {
+            return;
+        }
+        try {
+            await flushQueuedBrigades({
+                batches: brigades,
+                period: input.period,
                 actor: input.actor,
                 trigger: input.trigger,
                 origin: input.origin,
-                scopeLevel: "division",
-                conditions,
                 route: input.route,
-                run,
-                announce: isLast,
+                announce: false,
             });
-        } catch (error) {
-            if (error instanceof PremiumRecalcCancelledError) {
-                return;
+        } catch (flushError) {
+            if (!(flushError instanceof PremiumRecalcCancelledError)) {
+                console.error("Не удалось записать доли бригады после прерванного пересчёта", flushError);
             }
-            throw error;
         }
+        throw error;
     }
+    await flushQueuedBrigades({
+        batches: brigades,
+        period: input.period,
+        actor: input.actor,
+        trigger: input.trigger,
+        origin: input.origin,
+        route: input.route,
+        announce: true,
+    });
 }
 
 function selectionSteps(
