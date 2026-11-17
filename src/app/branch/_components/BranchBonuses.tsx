@@ -1235,11 +1235,13 @@ function placeAimFrame(frame: HTMLElement, scope: HTMLElement, cell: HTMLElement
 function AimFrame({ root }: { root: RefObject<HTMLDivElement | null> }) {
     const frameRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
-        const scope = root.current;
-        const frame = frameRef.current;
-        if (!scope || !frame) {
+        const scopeEl = root.current;
+        const frameEl = frameRef.current;
+        if (!scopeEl || !frameEl) {
             return;
         }
+        const scope = scopeEl;
+        const frame = frameEl;
         const scroller = scope.querySelector<HTMLElement>("[data-slot=table-container]");
         let activeCell: HTMLElement | null = null;
         let observer: ResizeObserver | null = null;
