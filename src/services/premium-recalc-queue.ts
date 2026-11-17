@@ -11,6 +11,7 @@ import {
     PremiumRecalcBusyError,
     PremiumRecalcCancelledError,
 } from "@/services/basket-updates";
+import { brigadeIndicatorOf, runBrigadeJournal } from "@/services/brigade-recalc";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateOsntPremium } from "@/services/osnt-premium";
@@ -242,6 +243,8 @@ async function runJob(job: Job): Promise<void> {
             : scopeLevel === "territory" && job.territoryId
                 ? [job.territoryId]
                 : branches ?? [];
+        const isLast = index === kinds.length - 1;
+        const indicator = brigadeIndicatorOf(kind);
         let runId: number;
         try {
             runId = await beginPremiumRecalc({
@@ -261,15 +264,41 @@ async function runJob(job: Job): Promise<void> {
             }
             throw error;
         }
+        const route = job.route || "очередь пересчёта";
         try {
             const lines = await calculate(kind, job.period, branches, scopeLevel);
             await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: index === kinds.length - 1 });
+            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
         } catch (error) {
             if (error instanceof PremiumRecalcCancelledError) {
                 return;
             }
-            await failPremiumRecalc(runId, error, job.route || "очередь пересчёта");
+            await failPremiumRecalc(runId, error, route);
+            throw error;
+        }
+        if (!indicator) {
+            continue;
+        }
+        try {
+            await runBrigadeJournal({
+                period: job.period,
+                indicators: [indicator],
+                actor: job.actor,
+                trigger: job.trigger,
+                origin: job.origin,
+                scopeLevel,
+                scopeIds,
+                route,
+                run: {
+                    ...(branches === null ? {} : { branches }),
+                    timeoutMs: recalcTimeoutMs(scopeLevel),
+                },
+                announce: isLast,
+            });
+        } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
             throw error;
         }
     }

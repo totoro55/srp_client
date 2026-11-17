@@ -134,7 +134,7 @@ export function WarehouseBonusDetail({ employeeId, period }: { employeeId: strin
             ) : failed ? (
                 <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Не удалось прочитать складские операции.</p>
             ) : showEmpty ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За этот отрезок складских операций нет.</p>
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За выбранный период складских операций нет.</p>
             ) : (
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[44rem]">

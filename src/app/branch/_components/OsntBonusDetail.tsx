@@ -134,7 +134,7 @@ export function OsntBonusDetail({ employeeId, period }: { employeeId: string; pe
             ) : failed ? (
                 <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Не удалось прочитать ОСНТ.</p>
             ) : showEmpty ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За этот отрезок операций ОСНТ нет.</p>
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За выбранный период операций ОСНТ нет.</p>
             ) : (
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[40rem]">

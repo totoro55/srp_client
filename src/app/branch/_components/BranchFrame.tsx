@@ -12,6 +12,7 @@ import { PageHeading, usePageHeadingMenu, type PageHeadingCrumb } from "@/app/_c
 import { cn } from "@/lib/utils";
 import { technicalAccount } from "@/lib/technical-accounts";
 import { useBranchDirectory } from "./branch-directory";
+import { BranchRecalcLockProvider, BranchRecalcOverlay } from "./branch-recalc-lock";
 import { useBranchStore } from "./branch-store";
 import { useSharedPremiumAuthors } from "./use-shared-premium-authors";
 import {
@@ -210,25 +211,33 @@ export function BranchFrame({ children }: { children: ReactNode }) {
     const backHref = [...trail].reverse().find((item) => item.href)?.href;
 
     return (
-        <div className={cn("flex w-full min-w-0 flex-col gap-4 [@media(max-height:500px)]:gap-2!", fillViewport && "-mb-4 h-[calc(100dvh-5rem)] min-h-0 md:-mb-6 md:h-[calc(100dvh-5.5rem)] [@media(max-height:500px)]:-mb-2! [@media(max-height:500px)]:h-[calc(100dvh-4.5rem)]!")}>
-            <PageHeading trail={trail} />
-            {fillViewport ? (
-                <div ref={narrowScrollRef} data-narrow-scroll="" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 max-sm:gap-2 max-sm:overflow-y-auto max-sm:overscroll-contain">
-                    {bonusList ? null : (
-                        <div className="shrink-0">
-                            <BranchPeriodField backHref={backHref} />
+        <BranchRecalcLockProvider branchId={branchId} period={period}>
+            <div className={cn("flex w-full min-w-0 flex-col gap-4 [@media(max-height:500px)]:gap-2!", fillViewport && "-mb-4 h-[calc(100dvh-5rem)] min-h-0 md:-mb-6 md:h-[calc(100dvh-5.5rem)] [@media(max-height:500px)]:-mb-2! [@media(max-height:500px)]:h-[calc(100dvh-4.5rem)]!")}>
+                <PageHeading trail={trail} />
+                {fillViewport ? (
+                    <div ref={narrowScrollRef} data-narrow-scroll="" className="relative flex min-h-0 min-w-0 flex-1 flex-col gap-4 max-sm:gap-2 max-sm:overflow-y-auto max-sm:overscroll-contain">
+                        {bonusList ? null : (
+                            <div className="shrink-0">
+                                <BranchPeriodField backHref={backHref} />
+                            </div>
+                        )}
+                        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col max-sm:h-auto max-sm:flex-none">
+                            {children}
+                            <BranchRecalcOverlay />
                         </div>
-                    )}
-                    <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:h-auto max-sm:flex-none">{children}</div>
-                    <NarrowScrollTail rootRef={narrowScrollRef} />
-                </div>
-            ) : (
-                <>
-                    <BranchPeriodField backHref={backHref} />
-                    {children}
-                </>
-            )}
-        </div>
+                        <NarrowScrollTail rootRef={narrowScrollRef} />
+                    </div>
+                ) : (
+                    <div className="relative flex min-w-0 flex-col gap-4 [@media(max-height:500px)]:gap-2!">
+                        <BranchPeriodField backHref={backHref} />
+                        <div className="relative min-w-0">
+                            {children}
+                            <BranchRecalcOverlay />
+                        </div>
+                    </div>
+                )}
+            </div>
+        </BranchRecalcLockProvider>
     );
 }
 

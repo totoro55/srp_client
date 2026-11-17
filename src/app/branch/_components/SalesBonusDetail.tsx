@@ -245,7 +245,7 @@ export function SalesBonusDetail({ employeeId, period }: { employeeId: string; p
             ) : timedOut ? (
                 <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{DETAIL_TIMEOUT_MESSAGE}</p>
             ) : showEmpty ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Нет данных по продажам.</p>
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За выбранный период продаж нет.</p>
             ) : (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[48rem]">

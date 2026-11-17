@@ -224,7 +224,7 @@ export function ReleaseBonusDetail({ employeeId, period }: { employeeId: string;
             ) : failed ? (
                 <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Не удалось прочитать выдачу.</p>
             ) : showEmpty ? (
-                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Нет данных по выдаче.</p>
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">За выбранный период выдач нет.</p>
             ) : (
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                         <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[40rem]">

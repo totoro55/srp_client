@@ -3,13 +3,14 @@
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Asterisk, Check, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Asterisk, Check, CircleHelp, Info, ShoppingBasket, SlidersHorizontal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner, FormSkeleton } from "@/components/loading-state";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -71,6 +72,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
     const [error, setError] = useState<string | null>(null);
     const [branches, setBranches] = useState<RrsBranch[]>([]);
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+    const [brigade, setBrigade] = useState<Record<string, boolean>>({});
     const [baseBonus, setBaseBonus] = useState<Record<string, boolean>>({});
     const [bonusAmount, setBonusAmount] = useState<Record<string, string | null>>({});
     const [coefficientValues, setCoefficientValues] = useState<Record<string, string>>({});
@@ -392,6 +394,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     motivation: branches.map((branch) => ({
                         branchUuid: branch.uuid,
                         enabled: enabled[branch.uuid] ?? false,
+                        brigade: brigade[branch.uuid] ?? false,
                     })),
                     coefficients: coefficientLines.map((line) => ({
                         branchUuid: line.branch.uuid,
@@ -475,7 +478,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     ? "С выбранного месяца допускается смена версии. Ознакомьтесь с описанием версий и выберите одну."
                     : "Выберите версию, которая будет действовать с выбранного месяца. Смена версии доступна начиная со следующего месяца.";
 
-    const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, stepKey: activeKey, forms, enabled, coefficientValues });
+    const draftSnapshot = JSON.stringify({ territoryUuid, month, step: safeStep, stepKey: activeKey, forms, enabled, brigade, coefficientValues });
     const unfinished = !wizardFinished && !loading && tailReady && resumeDraft === null && (draftRestored || draftSnapshot !== baselineSnapshot);
 
     useEffect(() => {
@@ -508,11 +511,13 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 }
                 const nextBranches = motivationJson.data.branches;
                 const nextEnabled: Record<string, boolean> = {};
+                const nextBrigade: Record<string, boolean> = {};
                 const nextBonus: Record<string, boolean> = {};
                 const nextAmount: Record<string, string | null> = {};
                 for (const branch of nextBranches) {
                     const item = motivationJson.data.items.find((row) => row.branchUuid === branch.uuid);
                     nextEnabled[branch.uuid] = item?.enabled ?? false;
+                    nextBrigade[branch.uuid] = item?.brigade === true;
                     nextBonus[branch.uuid] = item?.hasBaseBonus ?? false;
                     nextAmount[branch.uuid] = item?.baseBonus ?? null;
                 }
@@ -524,6 +529,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 }
                 setBranches(nextBranches);
                 setEnabled(nextEnabled);
+                setBrigade(nextBrigade);
                 setBaseBonus(nextBonus);
                 setBonusAmount(nextAmount);
                 setCoefficientValues(nextCoefficients);
@@ -544,6 +550,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                     step: safeStep, stepKey: activeKey,
                     forms,
                     enabled: nextEnabled,
+                    brigade: nextBrigade,
                     coefficientValues: nextCoefficients,
                 }));
                 setTailReady(true);
@@ -574,11 +581,12 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
+                brigade,
                 coefficients: coefficientValues,
             });
         }, 400);
         return () => window.clearTimeout(timer);
-    }, [tailReady, username, territoryUuid, month, resumeDraft, draftSnapshot, baselineSnapshot, draftRestored, wizardFinished, safeStep, activeKey, forms, enabled, coefficientValues]);
+    }, [tailReady, username, territoryUuid, month, resumeDraft, draftSnapshot, baselineSnapshot, draftRestored, wizardFinished, safeStep, activeKey, forms, enabled, brigade, coefficientValues]);
 
     useEffect(() => {
         function onClick(event: MouseEvent) {
@@ -607,6 +615,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
+                brigade,
                 coefficients: coefficientValues,
             });
             event.preventDefault();
@@ -618,7 +627,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             document.removeEventListener("click", onClick, true);
             window.removeEventListener("beforeunload", onUnload);
         };
-    }, [unfinished, username, territoryUuid, month, safeStep, forms, enabled, coefficientValues]);
+    }, [unfinished, username, territoryUuid, month, safeStep, forms, enabled, brigade, coefficientValues]);
 
     function acceptDraft() {
         if (!resumeDraft) {
@@ -639,6 +648,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             : restoredKeys[restored.legacyStep] ?? "place";
         setForms(restored.forms);
         setEnabled(restored.enabled);
+        setBrigade(restored.brigade);
         setCoefficientValues(restored.coefficients);
         setCoefficientSaved({ ...restored.coefficients });
         setStepKey(restoredKey);
@@ -651,6 +661,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             stepKey: restoredKey,
             forms: restored.forms,
             enabled: restored.enabled,
+            brigade: restored.brigade,
             coefficientValues: restored.coefficients,
         }));
         setResumeDraft(null);
@@ -673,6 +684,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                 step: safeStep, stepKey: activeKey,
                 forms,
                 enabled,
+                brigade,
                 coefficients: coefficientValues,
             });
         }
@@ -961,7 +973,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             {!loading && activeKey === "motivation" ? (
                 <div className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">
-                        Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. Переключатель в шапке включает или выключает сразу все филиалы с премией. По умолчанию филиал выключен.
+                        Включите филиалы, которые участвуют в мотивации в выбранном месяце. Подключить можно филиал, у которого за этот месяц есть базовая премия. Переключатель в шапке включает или выключает сразу все филиалы с премией. Колонка «Бригада» включает на филиале полную бригадную мотивацию. По умолчанию филиал выключен.
                     </p>
                     <p className="text-sm text-muted-foreground">
                         {branches.length === 0
@@ -990,9 +1002,33 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                                         }
                                                         return next;
                                                     });
+                                                    if (!checked) {
+                                                        setBrigade((current) => {
+                                                            const next = { ...current };
+                                                            for (const branch of bonusBranches) {
+                                                                next[branch.uuid] = false;
+                                                            }
+                                                            return next;
+                                                        });
+                                                    }
                                                 }}
                                             />
                                             Участие
+                                        </span>
+                                    </TableHead>
+                                    <TableHead className="min-w-56">
+                                        <span className="flex items-center gap-2">
+                                            Бригада
+                                            <Tooltip>
+                                                <TooltipTrigger
+                                                    render={<button type="button" className="inline-flex text-muted-foreground hover:text-foreground" aria-label="Справка по бригаде" />}
+                                                >
+                                                    <CircleHelp className="size-4" />
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-sm text-left">
+                                                    Включение активирует на филиале бригадную мотивацию в режиме полной бригады. Настройка частичной (групповой) бригады доступна только в настройках филиала.
+                                                </TooltipContent>
+                                            </Tooltip>
                                         </span>
                                     </TableHead>
                                 </TableRow>
@@ -1000,6 +1036,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                             <TableBody>
                                 {branches.map((branch) => {
                                     const on = enabled[branch.uuid] ?? false;
+                                    const brigadeOn = brigade[branch.uuid] ?? false;
                                     const hasBaseBonus = baseBonus[branch.uuid] ?? false;
                                     const bonus = formatBaseBonus(bonusAmount[branch.uuid] ?? null);
                                     const blocked = !hasBaseBonus && !on;
@@ -1020,10 +1057,28 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
                                                                 return;
                                                             }
                                                             setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
+                                                            if (!checked) {
+                                                                setBrigade((current) => ({ ...current, [branch.uuid]: false }));
+                                                            }
                                                         }}
                                                     />
                                                     <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
                                                         {on ? "Включена" : hasBaseBonus ? "Выключена" : "Нельзя включить: нет базовой премии"}
+                                                    </span>
+                                                </label>
+                                            </TableCell>
+                                            <TableCell>
+                                                <label className="flex items-center gap-2 text-sm">
+                                                    <Switch
+                                                        checked={brigadeOn && on}
+                                                        disabled={saving || !on}
+                                                        aria-label={brigadeOn ? `Выключить полную бригаду ${branch.name}` : `Включить полную бригаду ${branch.name}`}
+                                                        onCheckedChange={(checked) => {
+                                                            setBrigade((current) => ({ ...current, [branch.uuid]: checked }));
+                                                        }}
+                                                    />
+                                                    <span className={brigadeOn && on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
+                                                        {brigadeOn && on ? "Полная" : "Выключена"}
                                                     </span>
                                                 </label>
                                             </TableCell>

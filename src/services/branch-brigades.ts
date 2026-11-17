@@ -118,6 +118,87 @@ export async function saveBranchBrigadeSetup(
     return readBranchBrigadeSetup(branch, period);
 }
 
+/** Читает режим бригады филиалов за месяц. Нет строки — off. */
+export async function readBranchBrigadeModes(
+    period: string,
+    branchIds: readonly string[],
+): Promise<Map<string, BrigadeMode>> {
+    const modes = new Map<string, BrigadeMode>();
+    const ids = [...new Set(branchIds.map((id) => id.toLowerCase()).filter((id) => UUID.test(id)))];
+    for (const id of ids) {
+        modes.set(id, "off");
+    }
+    if (!PERIOD.test(period) || ids.length === 0) {
+        return modes;
+    }
+    const rows = await db.query<{ branchId: string; mode: string }>(
+        `
+        SELECT branch_uuid::text AS "branchId", mode
+        FROM main.branch_brigades
+        WHERE period = $1::date
+          AND branch_uuid = ANY($2::uuid[])
+        `,
+        [period, ids],
+    );
+    for (const row of rows) {
+        if (row.mode === "off" || row.mode === "all" || row.mode === "groups") {
+            modes.set(row.branchId.toLowerCase(), row.mode);
+        }
+    }
+    return modes;
+}
+
+/**
+ * Включает или выключает полную бригаду (режим all), группы не трогает.
+ * false при режиме groups оставляет groups. Возвращает, сменился ли режим.
+ */
+export async function writeBranchBrigadeFullMode(
+    query: PremiumQuery,
+    branchId: string,
+    period: string,
+    full: boolean,
+): Promise<boolean> {
+    if (!UUID.test(branchId) || !PERIOD.test(period)) {
+        throw new BrigadeSetupError("Укажите филиал и месяц");
+    }
+    const branch = branchId.toLowerCase();
+    const current = await readSetup(query, branch, period);
+    if (full) {
+        if (current.mode === "all") {
+            return false;
+        }
+        await writeSetup(query, branch, period, { mode: "all", groups: current.groups });
+        return true;
+    }
+    if (current.mode !== "all") {
+        return false;
+    }
+    await writeSetup(query, branch, period, { mode: "off", groups: current.groups });
+    return true;
+}
+
+async function readSetup(query: PremiumQuery, branchId: string, period: string): Promise<BrigadeSetupRecord> {
+    const rows = await query<{ mode: string; groupId: string | null; name: string | null; employeeId: string | null }>(
+        `
+        SELECT setup.mode,
+               grp.id::text AS "groupId",
+               grp.name,
+               member.employee_uuid::text AS "employeeId"
+        FROM main.branch_brigades setup
+        LEFT JOIN main.branch_brigade_groups grp
+            ON grp.branch_uuid = setup.branch_uuid
+           AND grp.period = setup.period
+        LEFT JOIN main.branch_brigade_members member
+            ON member.group_id = grp.id
+        WHERE setup.branch_uuid = $1::uuid
+          AND setup.period = $2::date
+        ORDER BY grp.sort_order, member.employee_uuid
+        `,
+        [branchId, period],
+    );
+    return rowsToSetup(rows);
+}
+
 async function writeSetup(
     query: PremiumQuery,
     branchId: string,

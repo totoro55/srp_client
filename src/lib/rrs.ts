@@ -148,6 +148,11 @@ export interface RrsCoefficientPage {
 export interface RrsMotivationItem {
     branchUuid: string;
     enabled: boolean;
+    /**
+     * Полная бригада филиала (режим all).
+     * false при выключенной или групповой бригаде. В запросе сохранения необязателен: нет поля — режим не меняют.
+     */
+    brigade?: boolean;
     /** За выбранный месяц в выгрузке есть непустая базовая премия. */
     hasBaseBonus: boolean;
     /** Текст премии из выгрузки. Пусто, если строки за месяц нет. */

@@ -2,8 +2,11 @@ import { buildChangeEvents, snapshotsFromRows, type StoredChangeRow } from "@/li
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen, type RrsEditPolicy } from "@/lib/rrs-edit-window";
 import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage, RrsTerritory } from "@/lib/rrs";
 import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { BRIGADE_INDICATORS } from "@/lib/brigade-shares";
 import { getAppSettings } from "@/services/app-settings";
 import { getRrsCard, getRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
+import { readBranchBrigadeModes, writeBranchBrigadeFullMode } from "@/services/branch-brigades";
+import { runBrigadeJournal } from "@/services/brigade-recalc";
 import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
 import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
@@ -80,7 +83,11 @@ export async function getBranchMotivation(
     );
     const enabledByBranch = new Map(stored.map((item) => [item.branchUuid.toLowerCase(), item.enabled]));
     const listed = branches.map((branch) => ({ ...branch, uuid: branch.uuid.toLowerCase() }));
-    const withBonus = await branchesWithBaseBonus(period, listed.map((branch) => branch.uuid));
+    const branchIds = listed.map((branch) => branch.uuid);
+    const [withBonus, brigadeModes] = await Promise.all([
+        branchesWithBaseBonus(period, branchIds),
+        readBranchBrigadeModes(period, branchIds),
+    ]);
     return {
         territory: card.territory,
         period,
@@ -89,6 +96,7 @@ export async function getBranchMotivation(
         items: listed.map((branch) => ({
             branchUuid: branch.uuid,
             enabled: enabledByBranch.get(branch.uuid) ?? DEFAULT_ENABLED,
+            brigade: brigadeModes.get(branch.uuid) === "all",
             hasBaseBonus: withBonus.has(branch.uuid),
             baseBonus: withBonus.get(branch.uuid) ?? null,
         })),
@@ -105,9 +113,20 @@ export async function saveBranchMotivation(
     items: RrsMotivationItem[],
 ): Promise<StartedPremiumRecalc | null> {
     const prepared = await prepareBranchMotivation(access, territoryUuid, period, items);
-    await db.transaction(async (query) => {
+    const brigadeChanged = await db.transaction(async (query) => {
         await writeBranchMotivation(query, access.username, territoryUuid, prepared.period, prepared.items);
+        return writeMotivationBrigades(query, prepared.period, prepared.items);
     });
+    if (brigadeChanged.length > 0) {
+        await triggerBrigadeRecalc({
+            period: prepared.period,
+            branchIds: brigadeChanged,
+            actor: access.username,
+            trigger: "rrs.motivation",
+            route: "/api/rrs/cards/[territoryUuid]/motivation",
+            editable: true,
+        });
+    }
     if (prepared.changedBranchIds.length === 0) {
         return null;
     }
@@ -161,9 +180,14 @@ export async function prepareBranchMotivation(
         if ((current?.enabled ?? false) !== item.enabled) {
             changedBranchIds.push(branchUuid);
         }
+        let brigade: boolean | undefined = typeof item.brigade === "boolean" ? item.brigade && item.enabled : undefined;
+        if (!item.enabled && (current?.brigade ?? false)) {
+            brigade = false;
+        }
         prepared.push({
             branchUuid,
             enabled: item.enabled,
+            ...(brigade === undefined ? {} : { brigade }),
             hasBaseBonus: current?.hasBaseBonus ?? false,
             baseBonus: current?.baseBonus ?? null,
         });
@@ -288,6 +312,54 @@ export async function listMotivationHistory(
 
 function participationLabel(enabled: boolean): string {
     return enabled ? "Включена" : "Выключена";
+}
+
+/** Пишет полную бригаду для филиалов, у которых в items передано поле brigade. */
+export async function writeMotivationBrigades(
+    query: Sql,
+    period: string,
+    items: RrsMotivationItem[],
+): Promise<string[]> {
+    const changed: string[] = [];
+    for (const item of items) {
+        if (typeof item.brigade !== "boolean") {
+            continue;
+        }
+        const full = item.enabled && item.brigade;
+        if (await writeBranchBrigadeFullMode(query, item.branchUuid, period, full)) {
+            changed.push(item.branchUuid.toLowerCase());
+        }
+    }
+    return changed;
+}
+
+export async function triggerBrigadeRecalc(input: {
+    period: string;
+    branchIds: readonly string[];
+    actor: string;
+    trigger: string;
+    route: string;
+    editable: boolean;
+}): Promise<void> {
+    const ids = [...new Set(input.branchIds.map((id) => id.toLowerCase()))];
+    if (!input.editable || ids.length === 0) {
+        return;
+    }
+    try {
+        await runBrigadeJournal({
+            period: input.period,
+            indicators: BRIGADE_INDICATORS,
+            actor: input.actor,
+            trigger: input.trigger,
+            origin: "manual",
+            scopeLevel: "branch",
+            scopeIds: ids,
+            route: input.route,
+            run: { branches: ids },
+        });
+    } catch (error) {
+        console.error("Не удалось пересчитать доли бригады после настройки РРС", error);
+    }
 }
 
 async function branchesWithBaseBonus(period: string, branchUuids: string[]): Promise<Map<string, string>> {

@@ -25,6 +25,7 @@ import { notifyError, notifySuccess } from "@/lib/notify";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
 import { useBranchDirectory, type BranchChoice } from "./branch-directory";
+import { useBranchRecalcLock } from "./branch-recalc-lock";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
 import { EmployeeNameLine } from "./EmployeeMovementMark";
@@ -67,6 +68,7 @@ function brigadeNotice(seconds: number, skip: boolean): string {
 export function BranchSettings() {
     const { branchId, period } = useBranchLocation();
     const directory = useBranchDirectory();
+    const { locked: recalcLocked } = useBranchRecalcLock();
     const access = useAccess();
     const session = useSession();
     const grantSubject = !access.fullAccess && receivesManagerGrants(access.roleCode, session.data?.user?.title ?? "");
@@ -105,30 +107,30 @@ export function BranchSettings() {
             </TabsList>
             {roles ? (
                 <TabsContent value="staff">
-                    <Staff branchId={branchId} period={period} closed={!directory.rolesEditable} inMotivation />
+                    <Staff branchId={branchId} period={period} closed={!directory.rolesEditable || recalcLocked} inMotivation />
                 </TabsContent>
             ) : null}
             {brigades ? (
                 <TabsContent value="brigades">
-                    <Brigades branchId={branchId} period={period} closed={false} inMotivation />
+                    <Brigades branchId={branchId} period={period} closed={recalcLocked} inMotivation />
                 </TabsContent>
             ) : null}
             {shared ? (
                 <TabsContent value="shared">
-                    <SharedPremiumTab branchId={branchId} period={period} />
+                    <SharedPremiumTab branchId={branchId} period={period} recalcLocked={recalcLocked} />
                 </TabsContent>
             ) : null}
         </Tabs>
     );
 }
 
-function SharedPremiumTab({ branchId, period }: { branchId: string; period: string }) {
+function SharedPremiumTab({ branchId, period, recalcLocked }: { branchId: string; period: string; recalcLocked: boolean }) {
     const directory = useBranchDirectory();
 
     return (
         <div className="flex flex-col gap-3">
             {directory.error ? <Notice>{directory.error}</Notice> : null}
-            <SharedPremiumRoles branchId={branchId} period={period} disabled={directory.loading} />
+            <SharedPremiumRoles branchId={branchId} period={period} disabled={directory.loading || recalcLocked} />
         </div>
     );
 }

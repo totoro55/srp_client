@@ -6,10 +6,10 @@ import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen } from "@/lib/rrs-
 import { AdminAuthError, adminAuthErrorResponse } from "@/lib/require-admin";
 import { getRequestAccess } from "@/server/authz/resolve-access";
 import { getAppSettings } from "@/services/app-settings";
-import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, PremiumRecalcBusyError } from "@/services/basket-updates";
+import { PremiumRecalcBusyError } from "@/services/basket-updates";
 import { BrigadeSetupError, parseBrigadeSetup, saveBranchBrigadeSetup, type BrigadeSetupRecord } from "@/services/branch-brigades";
 import { isStaffPeriod, readBranchStaff } from "@/services/branch-staff";
-import { calculateBrigadePremiums } from "@/services/brigade-premium";
+import { runBrigadeJournal } from "@/services/brigade-recalc";
 import { holdsBranchSetting, managerMayChangeBranch } from "@/services/manager-branch-grants";
 import { SalePremiumError } from "@/services/sale-premium";
 import type { ApiResponse } from "@/types/api";
@@ -64,29 +64,21 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         const saved = await saveBranchBrigadeSetup(branchId, period, setup);
         let recalculated = false;
         let recalcMessage: string | null = null;
-        let runId: number | null = null;
         if (!skipRecalc) {
             try {
-                runId = await beginPremiumRecalc({
-                    kind: "brigade",
+                await runBrigadeJournal({
                     period,
-                    origin: "manual",
-                    trigger: "branch.brigades",
+                    indicators: BRIGADE_INDICATORS,
                     actor: access.username,
+                    trigger: "branch.brigades",
+                    origin: "manual",
                     scopeLevel: "branch",
                     scopeIds: [branchId],
+                    route: "/api/branch/brigades",
+                    run: { branch: branchId.toLowerCase() },
                 });
-                const lines = await calculateBrigadePremiums(period, BRIGADE_INDICATORS, { branch: branchId.toLowerCase() });
-                await finishPremiumRecalc(runId, lines);
                 recalculated = true;
             } catch (error) {
-                if (runId !== null) {
-                    try {
-                        await failPremiumRecalc(runId, error, "/api/branch/brigades");
-                    } catch (failError) {
-                        console.error("Не удалось закрыть запуск долей бригады", failError);
-                    }
-                }
                 recalcMessage = error instanceof SalePremiumError || error instanceof PremiumRecalcBusyError
                     ? error.message
                     : "Не удалось пересчитать доли бригады";

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUpDown, ChevronDown, ListFilter, RotateCcw, Search, X } from "lucide-react";
 import { cn } from "cn";
@@ -106,8 +106,8 @@ function blankServices(): Record<ServiceIndicatorId, number | null> {
 
 const TEXT_COLUMNS = new Set<BonusColumn>(["name", "role", "brigade"]);
 const HEAD_TONE: Record<"name" | "role" | "base" | "fixed" | "current" | "forecast" | "total" | "basket" | "service", string> = {
-    name: "bg-amber-100 text-amber-950 shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--color-amber-100)] dark:bg-amber-950 dark:text-amber-50 dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--color-amber-950)]",
-    role: "bg-rose-100 text-rose-950 shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:bg-rose-950 dark:text-rose-50 dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]",
+    name: "bg-amber-100 text-amber-950 shadow-[1px_0_0_0_var(--color-amber-100)] dark:bg-amber-950 dark:text-amber-50 dark:shadow-[1px_0_0_0_var(--color-amber-950)]",
+    role: "bg-rose-100 text-rose-950 shadow-[1px_0_0_0_var(--color-rose-100),2px_0_0_0_rgba(0,0,0,0.12)] dark:bg-rose-950 dark:text-rose-50 dark:shadow-[1px_0_0_0_var(--color-rose-950),2px_0_0_0_rgba(0,0,0,0.28)]",
     base: "bg-sky-100 text-sky-950 dark:bg-sky-950 dark:text-sky-50",
     fixed: "bg-indigo-100 text-indigo-950 dark:bg-indigo-950 dark:text-indigo-50",
     current: "bg-teal-100 text-teal-950 dark:bg-teal-950 dark:text-teal-50",
@@ -148,30 +148,93 @@ function headTone(column: BonusColumn, columns: CabinetColumns): string | undefi
     return undefined;
 }
 
-function payRatio(values: number[], value: number): number {
-    if (values.length <= 1) {
-        return 0.5;
+/** Недобор до среднего УОТ в пределах этой суммы ещё считается «выше». */
+const PAY_HEAT_TOLERANCE = 2000;
+
+function averagePayLevel(levels: readonly (number | null | undefined)[]): number | null {
+    let sum = 0;
+    let count = 0;
+    for (const level of levels) {
+        if (level === null || level === undefined) {
+            continue;
+        }
+        sum += level;
+        count += 1;
     }
-    let lower = 0;
-    let same = 0;
-    for (const item of values) {
-        if (item < value) {
-            lower += 1;
-        } else if (item === value) {
-            same += 1;
+    return count === 0 ? null : sum / count;
+}
+
+/** Midrank внутри стороны: один человек — середина половины, иначе 0…1 по возрастанию. */
+function sideRatioLookup(values: number[], low: number, high: number): Map<number, number> {
+    const ranks = new Map<number, number>();
+    if (values.length === 0) {
+        return ranks;
+    }
+    if (values.length === 1) {
+        ranks.set(values[0]!, (low + high) / 2);
+        return ranks;
+    }
+    const sorted = values.slice().sort((left, right) => left - right);
+    let index = 0;
+    while (index < sorted.length) {
+        const value = sorted[index]!;
+        let next = index + 1;
+        while (next < sorted.length && sorted[next] === value) {
+            next += 1;
+        }
+        const mid = (index + (next - index - 1) / 2) / (sorted.length - 1);
+        ranks.set(value, low + mid * (high - low));
+        index = next;
+    }
+    return ranks;
+}
+
+/** Ниже порога — лёгкий красный, на пороге и выше — зелёный. */
+function payHeatLookup(values: number[], avgPayLevel: number | null): Map<number, number> {
+    const ranks = new Map<number, number>();
+    if (avgPayLevel === null || values.length === 0) {
+        return ranks;
+    }
+    const threshold = avgPayLevel - PAY_HEAT_TOLERANCE;
+    const below: number[] = [];
+    const above: number[] = [];
+    for (const value of values) {
+        if (value < threshold) {
+            below.push(value);
+        } else {
+            above.push(value);
         }
     }
-    return (lower + (same - 1) / 2) / (values.length - 1);
+    for (const [value, ratio] of sideRatioLookup(below, 0, 0.5)) {
+        ranks.set(value, ratio);
+    }
+    for (const [value, ratio] of sideRatioLookup(above, 0.5, 1)) {
+        ranks.set(value, ratio);
+    }
+    return ranks;
 }
 
 function payHeat(ratio: number): { backgroundColor: string } {
     const t = Math.min(1, Math.max(0, (ratio - 0.08) / 0.72));
     const eased = t * t * (3 - 2 * t);
-    const hue = 20 + eased * 145;
-    const strength = 42 + eased * 28;
-    return { backgroundColor: `color-mix(in oklab, oklch(0.64 0.21 ${hue.toFixed(1)}) ${strength.toFixed(0)}%, var(--background))` };
+    // Красный только в нижней половине и слабее зелёного; середина быстрее уходит в зелень.
+    const hue = 28 + Math.pow(eased, 0.55) * 137;
+    const edge = Math.min(1, Math.abs(ratio - 0.5) * 2);
+    const edgeEase = edge * edge * (3 - 2 * edge);
+    const below = ratio < 0.5;
+    const chroma = below ? 0.05 + edgeEase * 0.08 : 0.08 + edgeEase * 0.14;
+    const strength = below ? 16 + edgeEase * 22 : 28 + edgeEase * 42;
+    return { backgroundColor: `color-mix(in oklab, oklch(0.74 ${chroma.toFixed(3)} ${hue.toFixed(1)}) ${strength.toFixed(0)}%, var(--background))` };
 }
-const CELL = "border-r border-b border-border px-1.5 py-1 shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent] [@media(max-height:500px)]:py-0.5";
+
+function payHeatStyle(ranks: Map<number, number>, amount: number | null): { backgroundColor: string } | undefined {
+    if (amount === null) {
+        return undefined;
+    }
+    const ratio = ranks.get(amount);
+    return ratio === undefined ? undefined : payHeat(ratio);
+}
+const CELL = "border-r border-b border-border px-1.5 py-1 [@media(max-height:500px)]:py-0.5";
 const EDGE = "border-r-2";
 const SHORTFALL = "font-medium text-amber-700 dark:text-amber-300";
 const ROLE_MARK: Record<string, string> = {
@@ -185,23 +248,10 @@ const NAME_COL = "w-max min-w-max whitespace-nowrap";
 const ROLE_COL = "w-[7.25rem] min-w-[7.25rem] max-w-[7.25rem]";
 const HOUR_COL = "w-[5.75rem] min-w-[5.75rem] tabular-nums";
 const MONEY_COL = "w-[7.75rem] min-w-[7.75rem] tabular-nums";
-const PIN_NAME = "sticky left-0 z-20 border-l bg-background shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--background)]";
-const PIN_ROLE = "sticky left-(--name-col) z-20 bg-background shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_transparent,1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const AIM_COL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
-const AIM_ROW = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
-const AIM_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent)]";
-const AIM_NAME_COL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background)]";
-const AIM_NAME_ROW = "shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--foreground)_20%,transparent),inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background)]";
-const AIM_NAME_CELL = "shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--foreground)_20%,transparent),inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background)]";
-const AIM_ROLE = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const AIM_ROLE_ROW = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const AIM_ROLE_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--background),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const AIM_NAME_HEAD = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-amber-100)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-amber-950)]";
-const AIM_NAME_HEAD_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-amber-100)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-amber-950)]";
-const AIM_ROLE_HEAD = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const AIM_ROLE_HEAD_CELL = "shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-100),4px_0_8px_-4px_rgba(0,0,0,0.28)] dark:shadow-[inset_2px_0_0_0_transparent,inset_0_-2px_0_0_transparent,inset_0_0_0_2px_transparent,inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_5%,transparent),1px_0_0_0_var(--color-rose-950),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
-const PIN_NAME_HEAD = "sticky left-0 z-30 border-l bg-card shadow-[1px_0_0_0_var(--card)]";
-const PIN_ROLE_HEAD = "sticky left-(--name-col) z-30 bg-card shadow-[1px_0_0_0_var(--card),4px_0_8px_-4px_rgba(0,0,0,0.28)]";
+const PIN_NAME = "sticky left-0 z-20 border-l bg-background shadow-[1px_0_0_0_var(--background)] transform-gpu";
+const PIN_ROLE = "sticky left-(--name-col) z-20 bg-background shadow-[1px_0_0_0_var(--background),2px_0_0_0_rgba(0,0,0,0.12)] transform-gpu";
+const PIN_NAME_HEAD = "sticky left-0 z-30 border-l bg-card shadow-[1px_0_0_0_var(--card)] transform-gpu";
+const PIN_ROLE_HEAD = "sticky left-(--name-col) z-30 bg-card shadow-[1px_0_0_0_var(--card),2px_0_0_0_rgba(0,0,0,0.12)] transform-gpu";
 const SERVICE_LAST = SERVICE_INDICATORS[SERVICE_INDICATORS.length - 1].id;
 const WASH_BASE = "bg-[color-mix(in_oklab,var(--color-sky-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-sky-950)_62%,var(--background))]";
 const WASH_FIXED = "bg-[color-mix(in_oklab,var(--color-indigo-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-indigo-950)_62%,var(--background))]";
@@ -262,11 +312,24 @@ function dataClass(column: BonusColumn, columns: CabinetColumns, value?: number)
     );
 }
 
-type CellHover = { row: string; column: number };
-type AimPin = "name" | "role" | "name-head" | "role-head";
 const HEAD_ROW = "head";
+const DESKTOP_QUERY = "(min-width: 640px)";
 
-function columnIndex(column: BonusColumn, brigadeOn: boolean, columns: CabinetColumns, showForecast: boolean): number {
+function subscribeDesktop(onChange: () => void) {
+    const media = window.matchMedia(DESKTOP_QUERY);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+}
+
+function useIsDesktopCabinet(): boolean {
+    return useSyncExternalStore(
+        subscribeDesktop,
+        () => window.matchMedia(DESKTOP_QUERY).matches,
+        () => true,
+    );
+}
+
+function buildColumnIndexes(brigadeOn: boolean, columns: CabinetColumns, showForecast: boolean): Map<BonusColumn, number> {
     const order: BonusColumn[] = [
         "name",
         "role",
@@ -281,7 +344,7 @@ function columnIndex(column: BonusColumn, brigadeOn: boolean, columns: CabinetCo
         ...columns.baskets.map((indicator) => indicator.id),
         ...SERVICE_INDICATORS.map((indicator) => indicator.id),
     ];
-    return order.indexOf(column);
+    return new Map(order.map((column, index) => [column, index]));
 }
 
 function pointerOverScrollbar(scroller: HTMLElement, clientX: number, clientY: number): boolean {
@@ -295,35 +358,6 @@ function pointerOverScrollbar(scroller: HTMLElement, clientX: number, clientY: n
     return overVertical || overHorizontal;
 }
 
-function aimClass(hover: CellHover | null, row: string, column: number, pin?: AimPin): string | undefined {
-    if (!hover || (hover.row !== row && hover.column !== column)) {
-        return undefined;
-    }
-    const active = hover.row === row && hover.column === column;
-    if (pin === "name") {
-        if (active) {
-            return AIM_NAME_CELL;
-        }
-        return hover.row === row ? AIM_NAME_ROW : AIM_NAME_COL;
-    }
-    if (pin === "role") {
-        if (active) {
-            return AIM_ROLE_CELL;
-        }
-        return hover.row === row ? AIM_ROLE_ROW : AIM_ROLE;
-    }
-    if (pin === "name-head") {
-        return active ? AIM_NAME_HEAD_CELL : AIM_NAME_HEAD;
-    }
-    if (pin === "role-head") {
-        return active ? AIM_ROLE_HEAD_CELL : AIM_ROLE_HEAD;
-    }
-    if (active) {
-        return AIM_CELL;
-    }
-    return hover.row === row ? AIM_ROW : AIM_COL;
-}
-
 export function BranchBonuses() {
     const router = useRouter();
     const { branchId, period } = useBranchLocation();
@@ -335,15 +369,15 @@ export function BranchBonuses() {
     const [brigades, setBrigades] = useState<string[]>([]);
     const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>([...DEFAULT_HIDDEN_MOVEMENTS]);
     const [sort, setSort] = useState<BonusSort | null>(null);
-    const [hover, setHover] = useState<CellHover | null>(null);
     const tableFrame = useRef<HTMLDivElement>(null);
+    const isDesktop = useIsDesktopCabinet();
     const slice = store.slice(branchId, period, directory.employees, settings);
     const brigadeOn = slice.savedBrigades.mode === "groups";
     const showForecast = !monthHasEnded(period);
-    const columns = cabinetColumns(directory.indicators);
-    const services = blankServices();
+    const columns = useMemo(() => cabinetColumns(directory.indicators), [directory.indicators]);
+    const services = useMemo(() => blankServices(), []);
     const poolHref = withBranchQuery("/branch/bonuses/common", branchId, period);
-    const rows = directory.employees.flatMap((employee) => {
+    const rows = useMemo(() => directory.employees.flatMap((employee) => {
         const roleId = slice.savedRoles[roleKey(employee)] ?? null;
         if (!inCalculation(employee, roleId) || !hasTimesheetHours(employee.timesheetHours)) {
             return [];
@@ -360,7 +394,7 @@ export function BranchBonuses() {
             "Складские операции": directory.warehousePremiums[key],
             "Разгрузка ТС": directory.unloadingPremiums[key],
         });
-        const shared = directory.sharedPremiums[roleKey(employee)] ?? 0;
+        const shared = directory.sharedPremiums[key] ?? 0;
         const earned = earnedPremium([...Object.values(premiums), ...Object.values(services), shared]);
         return [{
             employee,
@@ -380,15 +414,37 @@ export function BranchBonuses() {
             brigade: brigadeName(employee.id, slice.savedBrigades, true),
             ...brigadePlace(employee.id, slice.savedBrigades.groups),
         } satisfies BonusRow];
-    });
-    const roleOptions = uniqueSorted(rows.map((row) => row.role));
-    const brigadeOptions = uniqueSorted(rows.flatMap((row) => row.brigade ? [row.brigade] : []));
-    const sortable = new Set(sortColumns(brigadeOn, columns, showForecast).map((item) => item.key));
+    }), [
+        columns.baskets,
+        directory.baseBonus,
+        directory.employees,
+        directory.kassaPremiums,
+        directory.osntPremiums,
+        directory.priceGrowth,
+        directory.releasePremiums,
+        directory.salePremiums,
+        directory.sharedPremiums,
+        directory.unloadingPremiums,
+        directory.warehousePremiums,
+        services,
+        settings,
+        slice.savedBrigades,
+        slice.savedRoles,
+    ]);
+    const roleOptions = useMemo(() => uniqueSorted(rows.map((row) => row.role)), [rows]);
+    const brigadeOptions = useMemo(
+        () => uniqueSorted(rows.flatMap((row) => row.brigade ? [row.brigade] : [])),
+        [rows],
+    );
+    const sortable = useMemo(
+        () => new Set(sortColumns(brigadeOn, columns, showForecast).map((item) => item.key)),
+        [brigadeOn, columns, showForecast],
+    );
     const explicitSort = sort && sort.key === "brigade" && !brigadeOn
         ? null
         : sort && sortable.has(sort.key) ? sort : null;
     const needle = query.trim().toLowerCase();
-    const filtered = rows.filter((row) => {
+    const filtered = useMemo(() => rows.filter((row) => {
         if (roles.length > 0 && !roles.includes(row.role)) {
             return false;
         }
@@ -405,29 +461,44 @@ export function BranchBonuses() {
         const movementAlias = row.employee.movement === "transferred" ? "переведен" : row.employee.movement === "title" ? "смена должности" : "";
         const haystack = `${row.employee.name} ${row.employee.title} ${row.role} ${row.brigade ?? ""} ${movement} ${movementAlias}`.toLowerCase();
         return haystack.includes(needle);
-    });
-    const roleCounts = countKeys(filtered, (row) => row.role);
-    const brigadeCounts = brigadeOn ? countKeys(filtered, (row) => row.brigadeKey) : null;
-    const roleCountsByBrigade = brigadeOn ? countRolesByBrigade(filtered) : null;
-    const visible = filtered.slice().sort((left, right) => explicitSort
-        ? compareRows(left, right, explicitSort, showForecast)
-        : compareDefault(left, right, {
-            brigadeOn,
-            roleCounts,
-            brigadeCounts,
-            roleCountsByBrigade,
-        }));
-    const roleCount = new Set(visible.map((row) => row.role)).size;
-    const grouping = brigadeOn && (explicitSort === null || explicitSort.key === "brigade")
-        ? "brigade"
-        : explicitSort === null && roleCount > 1
-            ? "role"
-            : null;
-    const places = grouping
-        ? groupPlaces(visible, (row) => grouping === "brigade" ? row.brigadeKey : row.role)
-        : visible.map(() => null);
-    const currentPays = visible.flatMap((row) => row.pay.currentPay === null ? [] : [row.pay.currentPay]);
-    const forecastPays = visible.flatMap((row) => row.pay.forecastPay === null ? [] : [row.pay.forecastPay]);
+    }), [brigadeOn, brigades, hiddenMovements, needle, roles, rows]);
+    const visibleBundle = useMemo(() => {
+        const roleCounts = countKeys(filtered, (row) => row.role);
+        const brigadeCounts = brigadeOn ? countKeys(filtered, (row) => row.brigadeKey) : null;
+        const roleCountsByBrigade = brigadeOn ? countRolesByBrigade(filtered) : null;
+        const visible = filtered.slice().sort((left, right) => explicitSort
+            ? compareRows(left, right, explicitSort, showForecast)
+            : compareDefault(left, right, {
+                brigadeOn,
+                roleCounts,
+                brigadeCounts,
+                roleCountsByBrigade,
+            }));
+        const roleCount = new Set(visible.map((row) => row.role)).size;
+        const grouping = brigadeOn && (explicitSort === null || explicitSort.key === "brigade")
+            ? "brigade"
+            : explicitSort === null && roleCount > 1
+                ? "role"
+                : null;
+        const places = grouping
+            ? groupPlaces(visible, (row) => grouping === "brigade" ? row.brigadeKey : row.role)
+            : visible.map(() => null);
+        const avgPayLevel = averagePayLevel(rows.map((row) => row.employee.payLevel));
+        const currentPays = visible.flatMap((row) => row.pay.currentPay === null ? [] : [row.pay.currentPay]);
+        const forecastPays = visible.flatMap((row) => row.pay.forecastPay === null ? [] : [row.pay.forecastPay]);
+        return {
+            visible,
+            places,
+            currentHeat: payHeatLookup(currentPays, avgPayLevel),
+            forecastHeat: payHeatLookup(forecastPays, avgPayLevel),
+        };
+    }, [brigadeOn, explicitSort, filtered, rows, showForecast]);
+    const { visible, places, currentHeat: currentHeatRanks, forecastHeat: forecastHeatRanks } = visibleBundle;
+    const columnIndexes = useMemo(
+        () => buildColumnIndexes(brigadeOn, columns, showForecast),
+        [brigadeOn, columns, showForecast],
+    );
+    const col = (column: BonusColumn) => columnIndexes.get(column) ?? -1;
     const movementFilterChanged = !sameMovements(hiddenMovements, DEFAULT_HIDDEN_MOVEMENTS);
     const filtersActive = needle !== "" || roles.length > 0 || movementFilterChanged || (brigadeOn && brigades.length > 0);
     const carriedRoster = directory.rosterPeriod !== null && directory.rosterPeriod !== period;
@@ -463,6 +534,18 @@ export function BranchBonuses() {
         observer.observe(header);
         return () => observer.disconnect();
     }, [visibleNames, columnCount, pending]);
+    useEffect(() => {
+        if (!isDesktop || pending || blocked) {
+            return;
+        }
+        const host = window as Window & { __cabinetScrollBench?: typeof runCabinetScrollBench };
+        host.__cabinetScrollBench = runCabinetScrollBench;
+        return () => {
+            if (host.__cabinetScrollBench === runCabinetScrollBench) {
+                delete host.__cabinetScrollBench;
+            }
+        };
+    }, [blocked, isDesktop, pending]);
 
     return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 max-sm:h-auto max-sm:flex-none [@media(max-height:500px)]:gap-2!">
@@ -516,9 +599,9 @@ export function BranchBonuses() {
                         >
                             <RotateCcw />
                         </Button>
-                        <div className="sm:hidden">
+                        {!isDesktop ? (
                             <SortMenu sort={explicitSort} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} />
-                        </div>
+                        ) : null}
                     </div>
                 </div>
             </div>
@@ -532,76 +615,30 @@ export function BranchBonuses() {
                 </div>
             ) : null}
             {blocked ? <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{blocked}</p> : null}
-            {pending || blocked ? null : <>
-            <div className="overflow-visible rounded-lg border sm:hidden">
-                {visible.length === 0 ? (
-                    <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyText}</p>
-                ) : groupRuns(visible, places).map((run) => {
-                    const cards = run.rows.map((row) => (
-                        <BonusListItem
-                            key={roleKey(row.employee)}
-                            row={row}
-                            brigadeOn={brigadeOn}
-                            branchId={branchId}
-                            period={period}
-                            href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
-                            lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
-                            poolHref={poolHref}
-                            baskets={columns.baskets}
-                            currentHeat={row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay))}
-                            forecastHeat={showForecast && row.pay.forecastPay !== null ? payHeat(payRatio(forecastPays, row.pay.forecastPay)) : undefined}
-                            showForecast={showForecast}
-                        />
-                    ));
-                    if (!run.framed) {
-                        return cards;
-                    }
-                    return (
-                        <div key={roleKey(run.rows[0].employee)} className="m-1 overflow-hidden rounded-md border border-primary/35">
-                            {cards}
-                        </div>
-                    );
-                })}
-            </div>
+            {pending || blocked ? null : isDesktop ? (
             <div
                 ref={tableFrame}
-                className="relative hidden min-h-0 flex-1 flex-col [--name-col:15rem] sm:flex"
-                onMouseLeave={() => setHover((current) => current === null ? current : null)}
-                onWheel={() => setHover((current) => current === null ? current : null)}
-                onMouseMove={(event) => {
-                    const scroller = tableFrame.current?.querySelector<HTMLElement>("[data-slot=table-container]");
-                    if (!scroller || !pointerOverScrollbar(scroller, event.clientX, event.clientY)) {
-                        return;
-                    }
-                    setHover((current) => current === null ? current : null);
-                }}
-                onMouseDown={(event) => {
-                    const scroller = tableFrame.current?.querySelector<HTMLElement>("[data-slot=table-container]");
-                    if (!scroller || !pointerOverScrollbar(scroller, event.clientX, event.clientY)) {
-                        return;
-                    }
-                    setHover((current) => current === null ? current : null);
-                }}
+                className="relative flex min-h-0 flex-1 flex-col [--name-col:15rem]"
             >
-            <AimFrame hover={hover} root={tableFrame} />
-            <Table containerClassName="min-h-0 max-w-full flex-1" className="w-max cursor-default border-separate border-spacing-0 text-xs">
+            <AimFrame root={tableFrame} />
+            <Table containerClassName="min-h-0 max-w-full flex-1 overscroll-x-contain [transform:translateZ(0)]" className="w-max cursor-default border-separate border-spacing-0 text-xs">
                 <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                        <SortHead label="Сотрудник" column="name" sort={explicitSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Роль" column="role" sort={explicitSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={explicitSort} hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
-                        <SortHead label="Часов по графику" column="schedule" sort={explicitSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Часов по табелю" column="timesheet" sort={explicitSort} fit="hour" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Оклад" column="salary" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Фиксированная премия" column="fixed" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        <SortHead label="Текущая ЗП" column="current" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
-                        {showForecast ? <SortHead label="Прогноз ЗП" column="forecast" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} /> : null}
-                        <SortHead label="Общая премия" column="total" sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                        <SortHead label="Сотрудник" column="name" sort={explicitSort} pin={PIN_NAME_HEAD} widthClass={NAME_COL} columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        <SortHead label="Роль" column="role" sort={explicitSort} pin={PIN_ROLE_HEAD} widthClass={ROLE_COL} columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        {brigadeOn ? <SortHead label="Бригада" column="brigade" sort={explicitSort} columnIndexes={columnIndexes} columns={columns} onSort={setSort} /> : null}
+                        <SortHead label="Часов по графику" column="schedule" sort={explicitSort} fit="hour" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        <SortHead label="Часов по табелю" column="timesheet" sort={explicitSort} fit="hour" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        <SortHead label="Оклад" column="salary" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        <SortHead label="Фиксированная премия" column="fixed" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        <SortHead label="Текущая ЗП" column="current" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        {showForecast ? <SortHead label="Прогноз ЗП" column="forecast" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} /> : null}
+                        <SortHead label="Общая премия" column="total" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         {columns.baskets.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         ))}
                         {SERVICE_INDICATORS.map((indicator) => (
-                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" hover={hover} brigadeOn={brigadeOn} columns={columns} showForecast={showForecast} onSort={setSort} onHover={setHover} />
+                            <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         ))}
                     </TableRow>
                 </TableHeader>
@@ -615,8 +652,8 @@ export function BranchBonuses() {
                     ) : visible.map((row, index) => {
                         const href = segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom);
                         const lines = canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail);
-                        const currentHeat = row.pay.currentPay === null ? undefined : payHeat(payRatio(currentPays, row.pay.currentPay));
-                        const forecastHeat = row.pay.forecastPay === null ? undefined : payHeat(payRatio(forecastPays, row.pay.forecastPay));
+                        const currentHeat = payHeatStyle(currentHeatRanks, row.pay.currentPay);
+                        const forecastHeat = payHeatStyle(forecastHeatRanks, row.pay.forecastPay);
                         const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
                         const rowId = roleKey(row.employee);
                         const movement = row.employee.movement;
@@ -625,29 +662,27 @@ export function BranchBonuses() {
                         return (
                             <Fragment key={rowId}>
                             <TableRow className="hover:bg-transparent">
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("name", brigadeOn, columns, showForecast)} pin="name" className={cn(dataClass("name", columns), movementNameClass(movement), frameClass(place, "name"))} onOpen={() => router.push(href)} onHover={setHover}>
+                                <AimedCell row={rowId} column={col("name")} className={cn(dataClass("name", columns), movementNameClass(movement), frameClass(place, "name"))} onOpen={() => router.push(href)}>
                                     <EmployeeNameLine name={row.employee.name} movement={movement} movementOn={row.employee.movementOn} partial={row.employee.partial} from={row.employee.activeFrom} until={row.employee.activeUntil} fit />
                                 </AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("role", brigadeOn, columns, showForecast)} pin="role" className={cn(dataClass("role", columns), movementNameClass(movement), frameClass(place, "body"))} onHover={setHover}>
+                                <AimedCell row={rowId} column={col("role")} className={cn(dataClass("role", columns), movementNameClass(movement), frameClass(place, "body"))}>
                                     <RoleLabel role={row.role} plain={movement !== undefined} />
                                 </AimedCell>
-                                {brigadeOn ? <AimedCell hover={hover} row={rowId} column={columnIndex("brigade", brigadeOn, columns, showForecast)} className={valued("brigade")} onHover={setHover}>{row.brigade}</AimedCell> : null}
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("schedule", brigadeOn, columns, showForecast)} className={valued("schedule", row.pay.scheduleHours ?? undefined)} onHover={setHover}>{formatHours(row.pay.scheduleHours)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("timesheet", brigadeOn, columns, showForecast)} className={cn(valued("timesheet", row.pay.timesheetHours ?? undefined), timesheetShort && SHORTFALL)} onHover={setHover}>{formatHours(row.pay.timesheetHours)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("salary", brigadeOn, columns, showForecast)} className={valued("salary", row.pay.salary)} onHover={setHover}>{formatAmount(row.pay.salary)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("fixed", brigadeOn, columns, showForecast)} className={valued("fixed", row.fixed)} onHover={setHover}>{formatAmount(row.fixed)}</AimedCell>
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("current", brigadeOn, columns, showForecast)} className={valued("current", row.pay.currentPay)} style={currentHeat} onHover={setHover}>{formatAmount(row.pay.currentPay)}</AimedCell>
-                                {showForecast ? <AimedCell hover={hover} row={rowId} column={columnIndex("forecast", brigadeOn, columns, showForecast)} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat} onHover={setHover}>{formatAmount(row.pay.forecastPay)}</AimedCell> : null}
-                                <AimedCell hover={hover} row={rowId} column={columnIndex("total", brigadeOn, columns, showForecast)} className={valued("total", row.total)} onOpen={() => router.push(poolHref)} onHover={setHover}>{formatAmount(row.total)}</AimedCell>
+                                {brigadeOn ? <AimedCell row={rowId} column={col("brigade")} className={valued("brigade")}>{row.brigade}</AimedCell> : null}
+                                <AimedCell row={rowId} column={col("schedule")} className={valued("schedule", row.pay.scheduleHours ?? undefined)}>{formatHours(row.pay.scheduleHours)}</AimedCell>
+                                <AimedCell row={rowId} column={col("timesheet")} className={cn(valued("timesheet", row.pay.timesheetHours ?? undefined), timesheetShort && SHORTFALL)}>{formatHours(row.pay.timesheetHours)}</AimedCell>
+                                <AimedCell row={rowId} column={col("salary")} className={valued("salary", row.pay.salary)}>{formatAmount(row.pay.salary)}</AimedCell>
+                                <AimedCell row={rowId} column={col("fixed")} className={valued("fixed", row.fixed)}>{formatAmount(row.fixed)}</AimedCell>
+                                <AimedCell row={rowId} column={col("current")} className={valued("current", row.pay.currentPay)} style={currentHeat}>{formatAmount(row.pay.currentPay)}</AimedCell>
+                                {showForecast ? <AimedCell row={rowId} column={col("forecast")} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat}>{formatAmount(row.pay.forecastPay)}</AimedCell> : null}
+                                <AimedCell row={rowId} column={col("total")} className={valued("total", row.total)} onOpen={() => router.push(poolHref)}>{formatAmount(row.total)}</AimedCell>
                                 {columns.baskets.map((indicator) => (
                                     <AimedCell
                                         key={indicator.id}
-                                        hover={hover}
                                         row={rowId}
-                                        column={columnIndex(indicator.id, brigadeOn, columns, showForecast)}
+                                        column={col(indicator.id)}
                                         className={valued(indicator.id, row.premiums[indicator.id])}
                                         onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
-                                        onHover={setHover}
                                     >
                                         {formatAmount(row.premiums[indicator.id])}
                                     </AimedCell>
@@ -655,12 +690,10 @@ export function BranchBonuses() {
                                 {SERVICE_INDICATORS.map((indicator) => (
                                     <AimedCell
                                         key={indicator.id}
-                                        hover={hover}
                                         row={rowId}
-                                        column={columnIndex(indicator.id, brigadeOn, columns, showForecast)}
+                                        column={col(indicator.id)}
                                         className={cn(valued(indicator.id, row.services[indicator.id]), indicator.id === SERVICE_LAST && frameClass(place, "end"))}
                                         onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
-                                        onHover={setHover}
                                     >
                                         {formatAmount(row.services[indicator.id])}
                                     </AimedCell>
@@ -677,7 +710,38 @@ export function BranchBonuses() {
                 </TableBody>
             </Table>
             </div>
-            </>}
+            ) : (
+            <div className="overflow-visible rounded-lg border">
+                {visible.length === 0 ? (
+                    <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyText}</p>
+                ) : groupRuns(visible, places).map((run) => {
+                    const cards = run.rows.map((row) => (
+                        <BonusListItem
+                            key={roleKey(row.employee)}
+                            row={row}
+                            brigadeOn={brigadeOn}
+                            branchId={branchId}
+                            period={period}
+                            href={segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}`, branchId, period), row.employee.activeFrom)}
+                            lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
+                            poolHref={poolHref}
+                            baskets={columns.baskets}
+                            currentHeat={payHeatStyle(currentHeatRanks, row.pay.currentPay)}
+                            forecastHeat={showForecast ? payHeatStyle(forecastHeatRanks, row.pay.forecastPay) : undefined}
+                            showForecast={showForecast}
+                        />
+                    ));
+                    if (!run.framed) {
+                        return cards;
+                    }
+                    return (
+                        <div key={roleKey(run.rows[0].employee)} className="m-1 overflow-hidden rounded-md border border-primary/35">
+                            {cards}
+                        </div>
+                    );
+                })}
+            </div>
+            )}
         </div>
     );
 }
@@ -999,6 +1063,167 @@ const AIM_FADE_MS = 160;
 const AIM_BORDER = "color-mix(in oklab, var(--foreground) 80%, transparent)";
 const AIM_FILL = "color-mix(in oklab, var(--foreground) 6%, transparent)";
 
+type CabinetScrollPass = {
+    mode: "current" | "legacy-paint";
+    rows: number;
+    cells: number;
+    frames: number;
+    avgFrameMs: number;
+    p95FrameMs: number;
+    maxFrameMs: number;
+    over16ms: number;
+    over33ms: number;
+    longAnimationFrames: number;
+    longAnimationFrameMs: number;
+};
+
+type CabinetScrollBench = {
+    label: string;
+    distance: number;
+    maxScroll: number;
+    durationMs: number;
+    passes: CabinetScrollPass[];
+};
+
+async function measureCabinetScrollPass(
+    scroller: HTMLElement,
+    mode: CabinetScrollPass["mode"],
+    distance: number,
+    durationMs: number,
+): Promise<CabinetScrollPass> {
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const rows = scroller.querySelectorAll("tbody tr").length;
+    const cells = scroller.querySelectorAll("td, th").length;
+    const frameDeltas: number[] = [];
+    let longAnimationFrames = 0;
+    let longAnimationFrameMs = 0;
+    let loafObserver: PerformanceObserver | null = null;
+    try {
+        loafObserver = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                longAnimationFrames += 1;
+                longAnimationFrameMs += entry.duration;
+            }
+        });
+        loafObserver.observe({ type: "long-animation-frame", buffered: false } as PerformanceObserverInit);
+    } catch {
+        loafObserver = null;
+    }
+
+    scroller.scrollLeft = 0;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+    let last = performance.now();
+    let measuring = true;
+    const tick = (now: number) => {
+        if (!measuring) {
+            return;
+        }
+        frameDeltas.push(now - last);
+        last = now;
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+
+    const started = performance.now();
+    await new Promise<void>((resolve) => {
+        const step = (now: number) => {
+            const progress = Math.min(1, (now - started) / durationMs);
+            scroller.scrollLeft = distance * progress;
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                resolve();
+            }
+        };
+        requestAnimationFrame(step);
+    });
+    measuring = false;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    loafObserver?.disconnect();
+
+    const samples = frameDeltas.slice(2).sort((left, right) => left - right);
+    const average = samples.reduce((sum, value) => sum + value, 0) / Math.max(samples.length, 1);
+    const at = (quantile: number) => samples[Math.min(samples.length - 1, Math.floor(samples.length * quantile))] ?? 0;
+    return {
+        mode,
+        rows,
+        cells,
+        frames: samples.length,
+        avgFrameMs: round(average),
+        p95FrameMs: round(at(0.95)),
+        maxFrameMs: round(samples[samples.length - 1] ?? 0),
+        over16ms: samples.filter((value) => value > 16.67).length,
+        over33ms: samples.filter((value) => value > 33.34).length,
+        longAnimationFrames,
+        longAnimationFrameMs: round(longAnimationFrameMs),
+    };
+}
+
+async function runCabinetScrollBench(label = "run"): Promise<CabinetScrollBench | null> {
+    const scroller = document.querySelector<HTMLElement>("[data-slot=table-container]");
+    const body = scroller?.querySelector("tbody");
+    if (!scroller || !body) {
+        return null;
+    }
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth;
+    if (maxScroll <= 0) {
+        return null;
+    }
+    const distance = Math.min(maxScroll, Math.max(600, Math.floor(maxScroll * 0.7)));
+    const durationMs = 1200;
+    const originalRows = Array.from(body.querySelectorAll(":scope > tr"));
+    const clones: HTMLTableRowElement[] = [];
+    const targetRows = Math.max(160, originalRows.length);
+    while (originalRows.length + clones.length < targetRows) {
+        for (const row of originalRows) {
+            if (originalRows.length + clones.length >= targetRows) {
+                break;
+            }
+            const clone = row.cloneNode(true) as HTMLTableRowElement;
+            clone.setAttribute("data-scroll-bench-clone", "");
+            body.append(clone);
+            clones.push(clone);
+        }
+    }
+    const legacyStyle = document.createElement("style");
+    legacyStyle.setAttribute("data-scroll-bench-style", "");
+    legacyStyle.textContent = `
+      [data-slot="table-container"][data-scroll-bench-legacy] {
+        transform: none !important;
+      }
+      [data-slot="table-container"][data-scroll-bench-legacy] td,
+      [data-slot="table-container"][data-scroll-bench-legacy] th {
+        transform: none !important;
+        box-shadow:
+          inset 2px 0 0 transparent,
+          inset 0 -2px 0 transparent,
+          inset 0 0 0 2px transparent,
+          inset 0 0 0 999px transparent,
+          4px 0 8px -4px rgba(0,0,0,0.28) !important;
+      }
+    `;
+    document.head.append(legacyStyle);
+
+    const current = await measureCabinetScrollPass(scroller, "current", distance, durationMs);
+    scroller.setAttribute("data-scroll-bench-legacy", "");
+    const legacy = await measureCabinetScrollPass(scroller, "legacy-paint", distance, durationMs);
+    scroller.removeAttribute("data-scroll-bench-legacy");
+    for (const clone of clones) {
+        clone.remove();
+    }
+    legacyStyle.remove();
+    scroller.scrollLeft = 0;
+
+    return {
+        label,
+        distance,
+        maxScroll,
+        durationMs,
+        passes: [current, legacy],
+    };
+}
+
 function placeAimFrame(frame: HTMLElement, scope: HTMLElement, cell: HTMLElement) {
     const scopeBox = scope.getBoundingClientRect();
     const box = cell.getBoundingClientRect();
@@ -1007,42 +1232,108 @@ function placeAimFrame(frame: HTMLElement, scope: HTMLElement, cell: HTMLElement
     frame.style.transform = `translate3d(${box.left - scopeBox.left}px, ${box.top - scopeBox.top}px, 0)`;
 }
 
-function AimFrame({ hover, root }: { hover: CellHover | null; root: RefObject<HTMLDivElement | null> }) {
+function AimFrame({ root }: { root: RefObject<HTMLDivElement | null> }) {
     const frameRef = useRef<HTMLDivElement>(null);
-    useLayoutEffect(() => {
-        const frame = frameRef.current;
+    useEffect(() => {
         const scope = root.current;
-        if (!frame || !scope) {
+        const frame = frameRef.current;
+        if (!scope || !frame) {
             return;
         }
-        if (!hover) {
+        const scroller = scope.querySelector<HTMLElement>("[data-slot=table-container]");
+        let activeCell: HTMLElement | null = null;
+        let observer: ResizeObserver | null = null;
+        let scrolling = false;
+        let scrollIdle = 0;
+        let placeRaf = 0;
+
+        function clear() {
+            activeCell = null;
+            observer?.disconnect();
+            observer = null;
+            if (placeRaf) {
+                cancelAnimationFrame(placeRaf);
+                placeRaf = 0;
+            }
             frame.style.opacity = "0";
             frame.style.borderColor = "transparent";
             frame.style.backgroundColor = "transparent";
             frame.style.transition = "none";
-            return;
+            frame.style.transform = "none";
+            frame.style.width = "0px";
+            frame.style.height = "0px";
         }
-        const cell = scope.querySelector<HTMLElement>(`[data-aim="${hover.row}:${hover.column}"]`);
-        if (!cell) {
-            return;
+
+        function schedulePlace(cell: HTMLElement) {
+            if (placeRaf) {
+                return;
+            }
+            placeRaf = requestAnimationFrame(() => {
+                placeRaf = 0;
+                if (activeCell === cell) {
+                    placeAimFrame(frame, scope, cell);
+                }
+            });
         }
-        frame.style.transition = "none";
-        frame.style.opacity = "1";
-        frame.style.borderColor = "transparent";
-        frame.style.backgroundColor = "transparent";
-        placeAimFrame(frame, scope, cell);
-        frame.getBoundingClientRect();
-        frame.style.transition = `border-color ${AIM_FADE_MS}ms ease-out, background-color ${AIM_FADE_MS}ms ease-out`;
-        frame.style.borderColor = AIM_BORDER;
-        frame.style.backgroundColor = AIM_FILL;
-        const observer = new ResizeObserver(() => placeAimFrame(frame, scope, cell));
-        observer.observe(cell);
-        const table = cell.closest("table");
-        if (table) {
-            observer.observe(table);
+
+        function aimAt(cell: HTMLElement) {
+            if (activeCell === cell) {
+                schedulePlace(cell);
+                return;
+            }
+            activeCell = cell;
+            observer?.disconnect();
+            frame.style.transition = "none";
+            frame.style.opacity = "1";
+            frame.style.borderColor = "transparent";
+            frame.style.backgroundColor = "transparent";
+            placeAimFrame(frame, scope, cell);
+            frame.getBoundingClientRect();
+            frame.style.transition = `border-color ${AIM_FADE_MS}ms ease-out, background-color ${AIM_FADE_MS}ms ease-out`;
+            frame.style.borderColor = AIM_BORDER;
+            frame.style.backgroundColor = AIM_FILL;
+            observer = new ResizeObserver(() => schedulePlace(cell));
+            observer.observe(cell);
         }
-        return () => observer.disconnect();
-    }, [hover, root]);
+
+        function onScroll() {
+            scrolling = true;
+            clear();
+            window.clearTimeout(scrollIdle);
+            scrollIdle = window.setTimeout(() => {
+                scrolling = false;
+            }, 120);
+        }
+
+        function onMove(event: MouseEvent) {
+            if (scrolling) {
+                return;
+            }
+            if (scroller && pointerOverScrollbar(scroller, event.clientX, event.clientY)) {
+                clear();
+                return;
+            }
+            const target = (event.target as Element | null)?.closest?.("[data-aim]");
+            if (!(target instanceof HTMLElement) || !scope.contains(target)) {
+                clear();
+                return;
+            }
+            aimAt(target);
+        }
+
+        scope.addEventListener("mousemove", onMove);
+        scope.addEventListener("mouseleave", clear);
+        scope.addEventListener("wheel", onScroll, { passive: true });
+        scroller?.addEventListener("scroll", onScroll, { passive: true });
+        return () => {
+            scope.removeEventListener("mousemove", onMove);
+            scope.removeEventListener("mouseleave", clear);
+            scope.removeEventListener("wheel", onScroll);
+            scroller?.removeEventListener("scroll", onScroll);
+            window.clearTimeout(scrollIdle);
+            clear();
+        };
+    }, [root]);
     return (
         <div
             ref={frameRef}
@@ -1053,32 +1344,25 @@ function AimFrame({ hover, root }: { hover: CellHover | null; root: RefObject<HT
 }
 
 function AimedCell({
-    hover,
     row,
     column,
-    pin,
     className,
     style,
     onOpen,
-    onHover,
     children,
 }: {
-    hover: CellHover | null;
     row: string;
     column: number;
-    pin?: "name" | "role";
     className?: string;
     style?: { backgroundColor: string };
     onOpen?: () => void;
-    onHover: (hover: CellHover) => void;
     children: ReactNode;
 }) {
     return (
         <TableCell
             data-aim={`${row}:${column}`}
-            className={cn(className, aimClass(hover, row, column, pin), onOpen && "cursor-pointer")}
+            className={cn(className, onOpen && "cursor-pointer")}
             style={style}
-            onMouseEnter={() => onHover({ row, column })}
             onClick={onOpen}
         >
             {children}
@@ -1094,11 +1378,8 @@ function SortHead({
     fit,
     pin,
     widthClass,
-    hover,
-    brigadeOn,
+    columnIndexes,
     columns,
-    showForecast,
-    onHover,
 }: {
     label: string;
     column: BonusColumn;
@@ -1107,25 +1388,20 @@ function SortHead({
     fit?: "hour" | "money";
     pin?: string;
     widthClass?: string;
-    hover: CellHover | null;
-    brigadeOn: boolean;
+    columnIndexes: Map<BonusColumn, number>;
     columns: CabinetColumns;
-    showForecast: boolean;
-    onHover: (hover: CellHover) => void;
 }) {
     const active = sort?.key === column;
     const next = nextSort(sort, column);
     const mark = sort?.direction === "asc" ? "↑" : "↓";
     const width = fit === "hour" ? HOUR_COL : fit === "money" ? MONEY_COL : widthClass;
-    const index = columnIndex(column, brigadeOn, columns, showForecast);
-    const headPin = column === "name" ? "name-head" : column === "role" ? "role-head" : undefined;
+    const index = columnIndexes.get(column) ?? -1;
     return (
         <TableHead
             data-aim={`${HEAD_ROW}:${index}`}
             aria-sort={active ? (sort?.direction === "asc" ? "ascending" : "descending") : "none"}
             tabIndex={0}
-            className={cn(CELL, endsGroup(column, columns) && EDGE, "h-auto cursor-pointer border-t text-center whitespace-normal hover:text-foreground", width, pin, headTone(column, columns), aimClass(hover, HEAD_ROW, index, headPin))}
-            onMouseEnter={() => onHover({ row: HEAD_ROW, column: index })}
+            className={cn(CELL, endsGroup(column, columns) && EDGE, "h-auto cursor-pointer border-t text-center whitespace-normal hover:text-foreground", width, pin, headTone(column, columns))}
             onClick={() => onSort(next)}
             onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {

@@ -7,7 +7,7 @@ import { parseRrsSaveInput, type RrsCoefficientPage, type RrsCoefficientValue, t
 import type { AccessView } from "@/server/authz/resolve-access";
 import { getAppSettings } from "@/services/app-settings";
 import { applyRrsMonth, changedConnectionKinds, getRrsMonth, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
-import { prepareBranchMotivation, writeBranchMotivation } from "@/services/branch-motivation";
+import { prepareBranchMotivation, triggerBrigadeRecalc, writeBranchMotivation, writeMotivationBrigades } from "@/services/branch-motivation";
 import { coefficientBranchChanges, getBranchCoefficients, replacePeriodCoefficients } from "@/services/basket-coefficients";
 import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
@@ -80,9 +80,13 @@ function parseMotivation(value: unknown): RrsMotivationItem[] | { error: string 
         if (typeof row.branchUuid !== "string" || !BRANCH_UUID.test(row.branchUuid) || typeof row.enabled !== "boolean") {
             return { error: "Передайте участие филиалов" };
         }
+        if (row.brigade !== undefined && typeof row.brigade !== "boolean") {
+            return { error: "Передайте участие филиалов" };
+        }
         items.push({
             branchUuid: row.branchUuid.toLowerCase(),
             enabled: row.enabled,
+            ...(typeof row.brigade === "boolean" ? { brigade: row.brigade } : {}),
             hasBaseBonus: false,
             baseBonus: null,
         });
@@ -178,12 +182,24 @@ export async function commitRrsWizard(access: AccessView, input: WizardCommitInp
             }
         }
     }
-    await db.transaction(async (query) => {
+    const brigadeChanged = await db.transaction(async (query) => {
         await applyRrsMonth(query, access, input.territoryUuid, input.period, input.items);
         await writeBranchMotivation(query, access.username, input.territoryUuid, motivation.period, motivation.items);
+        const changed = await writeMotivationBrigades(query, motivation.period, motivation.items);
         await replacePeriodCoefficients(query, access.username, input.territoryUuid, input.period, input.coefficients);
         await writeWizardTariffs(query, access, input.territoryUuid, input.period, input.tariffs);
+        return changed;
     });
+    if (brigadeChanged.length > 0) {
+        await triggerBrigadeRecalc({
+            period: input.period,
+            branchIds: brigadeChanged,
+            actor: access.username,
+            trigger: "rrs.wizard",
+            route: "/api/rrs/wizard",
+            editable: true,
+        });
+    }
     return enqueuePremiumScopes({
         period: input.period,
         actor: access.username,

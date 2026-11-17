@@ -31,10 +31,28 @@ const EXTERNAL_TABLES = new Set([
     "basket_kind_stats",
     "basic_bonuses",
     "hr_ktu",
+    "hr_ktu_promouter",
     "sale",
     "grafiki_tabeli",
     "kassa_oper",
+    "osnt",
+    "wh_operations",
+    "unloading_car",
+    "grafik_otgruzok",
 ]);
+
+const QUALIFIED = /(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Za-z_][A-Za-z0-9_]*)/;
+
+function splitQualified(value: string): { schema: string | null; name: string } | null {
+    const match = value.match(QUALIFIED);
+    if (!match?.[2]) {
+        return null;
+    }
+    return {
+        schema: match[1] ? match[1].toLowerCase() : null,
+        name: match[2].toLowerCase(),
+    };
+}
 
 function skipString(text: string, start: number): number {
     let index = start + 1;
@@ -191,29 +209,42 @@ function tableOf(tables: Map<string, MutableTable>, name: string): MutableTable 
 }
 
 function applyStatement(tables: Map<string, MutableTable>, statement: string) {
-    const create = statement.match(/^CREATE TABLE IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)\s*;?$/i);
+    const create = statement.match(/^CREATE TABLE IF NOT EXISTS\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)\s*;?$/i);
     if (create?.[1] && create[2]) {
-        const name = create[1].toLowerCase();
-        tables.set(name, {
-            name,
-            schema: "public",
+        const qualified = splitQualified(create[1]);
+        if (!qualified) {
+            return;
+        }
+        tables.set(qualified.name, {
+            name: qualified.name,
+            schema: qualified.schema ?? "public",
             note: "",
             columns: parseColumns(create[2]),
         });
         return;
     }
-    const drop = statement.match(/^DROP TABLE IF EXISTS\s+(?:public\.)?([A-Za-z_][A-Za-z0-9_]*)\s*;?$/i);
+    const drop = statement.match(/^DROP TABLE IF EXISTS\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)\s*;?$/i);
     if (drop?.[1]) {
-        tables.delete(drop[1].toLowerCase());
+        const qualified = splitQualified(drop[1]);
+        if (qualified) {
+            tables.delete(qualified.name);
+        }
         return;
     }
-    const alter = statement.match(/^ALTER TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+([\s\S]*);?$/i);
+    const alter = statement.match(/^ALTER TABLE\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)\s+([\s\S]*);?$/i);
     if (!alter?.[1] || !alter[2]) {
         return;
     }
-    const table = tableOf(tables, alter[1]);
+    const qualified = splitQualified(alter[1]);
+    if (!qualified) {
+        return;
+    }
+    const table = tableOf(tables, qualified.name);
     if (!table) {
         return;
+    }
+    if (qualified.schema) {
+        table.schema = qualified.schema;
     }
     const body = alter[2].trim().replace(/;\s*$/, "");
     const add = body.match(/^ADD COLUMN IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s+([\s\S]+)$/i);
@@ -248,19 +279,32 @@ function applyStatement(tables: Map<string, MutableTable>, statement: string) {
 }
 
 function applyComment(tables: Map<string, MutableTable>, statement: string) {
-    const tableComment = statement.match(/^COMMENT ON TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+IS\s+'((?:[^']|'')*)'/i);
+    const tableComment = statement.match(/^COMMENT ON TABLE\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)\s+IS\s+'((?:[^']|'')*)'/i);
     if (tableComment?.[1] && tableComment[2] !== undefined) {
-        const table = tableOf(tables, tableComment[1]);
+        const qualified = splitQualified(tableComment[1]);
+        const table = qualified ? tableOf(tables, qualified.name) : undefined;
         if (table) {
+            if (qualified?.schema) {
+                table.schema = qualified.schema;
+            }
             table.note = unescapeLiteral(tableComment[2]);
         }
         return;
     }
-    const columnComment = statement.match(/^COMMENT ON COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s+IS\s+'((?:[^']|'')*)'/i);
-    if (columnComment?.[1] && columnComment[2] && columnComment[3] !== undefined) {
-        const column = tableOf(tables, columnComment[1])?.columns.find((item) => item.name === columnComment[2]?.toLowerCase());
+    const columnComment = statement.match(
+        /^COMMENT ON COLUMN\s+(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s+IS\s+'((?:[^']|'')*)'/i,
+    );
+    if (columnComment?.[2] && columnComment[3] && columnComment[4] !== undefined) {
+        const schema = columnComment[1]?.toLowerCase() ?? null;
+        const tableName = columnComment[2].toLowerCase();
+        const columnName = columnComment[3].toLowerCase();
+        const table = tableOf(tables, tableName);
+        if (table && schema) {
+            table.schema = schema;
+        }
+        const column = table?.columns.find((item) => item.name === columnName);
         if (column) {
-            column.note = unescapeLiteral(columnComment[3]);
+            column.note = unescapeLiteral(columnComment[4]);
         }
     }
 }

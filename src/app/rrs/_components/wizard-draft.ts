@@ -11,6 +11,7 @@ export interface WizardDraft {
     stepKey?: string;
     forms: BasketForm[];
     enabled: Record<string, boolean>;
+    brigade?: Record<string, boolean>;
     coefficients: Record<string, string>;
     savedAt: string;
 }
@@ -18,6 +19,7 @@ export interface WizardDraft {
 export interface DraftRestore {
     forms: BasketForm[];
     enabled: Record<string, boolean>;
+    brigade: Record<string, boolean>;
     coefficients: Record<string, string>;
     stepKey: string | null;
     legacyStep: number;
@@ -93,16 +95,21 @@ export function restoreDraft(
     let droppedBranches = 0;
     let blockedByBonus = 0;
     const enabled: Record<string, boolean> = {};
+    const brigade: Record<string, boolean> = {};
+    const draftBrigade = draft.brigade ?? {};
     for (const branch of branches) {
         const wanted = draft.enabled[branch.uuid] ?? draft.enabled[branch.uuid.toLowerCase()] ?? false;
         const savedOn = savedEnabled[branch.uuid] ?? savedEnabled[branch.uuid.toLowerCase()] ?? false;
         const hasBaseBonus = baseBonus[branch.uuid] ?? baseBonus[branch.uuid.toLowerCase()] ?? false;
         if (wanted && !hasBaseBonus && !savedOn) {
             enabled[branch.uuid] = false;
+            brigade[branch.uuid] = false;
             blockedByBonus += 1;
             continue;
         }
         enabled[branch.uuid] = wanted;
+        brigade[branch.uuid] = wanted
+            && (draftBrigade[branch.uuid] ?? draftBrigade[branch.uuid.toLowerCase()] ?? false);
     }
     for (const uuid of Object.keys(draft.enabled)) {
         if (!knownBranches.has(uuid.toLowerCase())) {
@@ -157,6 +164,7 @@ export function restoreDraft(
     return {
         forms,
         enabled,
+        brigade,
         coefficients,
         stepKey: typeof draft.stepKey === "string" ? draft.stepKey : null,
         legacyStep: draft.step,
@@ -182,6 +190,7 @@ function readKey(key: string): WizardDraft | null {
             stepKey: typeof parsed.stepKey === "string" ? parsed.stepKey : undefined,
             forms: parsed.forms,
             enabled: parsed.enabled ?? {},
+            brigade: parsed.brigade ?? {},
             coefficients: parsed.coefficients ?? {},
             savedAt: parsed.savedAt ?? "",
         };

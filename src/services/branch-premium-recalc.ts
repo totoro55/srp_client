@@ -12,14 +12,13 @@ import {
     type BasketUpdateKind,
 } from "@/services/basket-updates";
 import { db } from "@/services/db";
+import { brigadeIndicatorOf, runBrigadeJournal } from "@/services/brigade-recalc";
 import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, SalePremiumError, type PremiumRun } from "@/services/sale-premium";
 import { moscowToday } from "@/services/segment-locks";
-import { calculateBrigadePremium } from "@/services/brigade-premium";
 import { calculateSharedPremium } from "@/services/shared-premium";
-import type { BrigadeIndicator } from "@/lib/brigade-shares";
 import { calculateUnloadingPremium } from "@/services/unloading-premium";
 import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
@@ -48,6 +47,8 @@ export async function recalculateBranchPremiums(input: {
         { kind: "shared", calculate: () => calculateSharedPremium(input.period, run) },
     ];
     for (const [index, step] of steps.entries()) {
+        const isLast = index === steps.length - 1;
+        const indicator = brigadeIndicatorOf(step.kind);
         const runId = await beginPremiumRecalc({
             kind: step.kind,
             period: input.period,
@@ -59,17 +60,35 @@ export async function recalculateBranchPremiums(input: {
         });
         try {
             const lines = await step.calculate();
-            const indicator = brigadeIndicator(step.kind);
-            if (indicator) {
-                await calculateBrigadePremium(input.period, indicator, run);
-            }
             await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
+            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
         } catch (error) {
             if (error instanceof PremiumRecalcCancelledError) {
                 return;
             }
             await failPremiumRecalc(runId, error, input.route);
+            throw error;
+        }
+        if (!indicator) {
+            continue;
+        }
+        try {
+            await runBrigadeJournal({
+                period: input.period,
+                indicators: [indicator],
+                actor: input.actor,
+                trigger: input.trigger,
+                origin: "manual",
+                scopeLevel: "branch",
+                scopeIds: [input.branchId],
+                route: input.route,
+                run,
+                announce: isLast,
+            });
+        } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
             throw error;
         }
     }
@@ -113,6 +132,8 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
         steps.push({ kind: "shared", calculate: () => calculateSharedPremium(input.period, run) });
     }
     for (const [index, step] of steps.entries()) {
+        const isLast = index === steps.length - 1;
+        const indicator = brigadeIndicatorOf(step.kind);
         const runId = await beginPremiumRecalc({
             kind: step.kind,
             period: input.period,
@@ -124,12 +145,8 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
         });
         try {
             const lines = await step.calculate();
-            const indicator = brigadeIndicator(step.kind);
-            if (indicator) {
-                await calculateBrigadePremium(input.period, indicator, run);
-            }
             await assertPremiumRecalcRunning(runId);
-            await finishPremiumRecalc(runId, lines, { announce: index === steps.length - 1 });
+            await finishPremiumRecalc(runId, lines, { announce: isLast && !indicator });
         } catch (error) {
             if (error instanceof PremiumRecalcCancelledError) {
                 return;
@@ -137,17 +154,29 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
             await failPremiumRecalc(runId, error, input.route);
             throw error;
         }
+        if (!indicator) {
+            continue;
+        }
+        try {
+            await runBrigadeJournal({
+                period: input.period,
+                indicators: [indicator],
+                actor: input.actor,
+                trigger: input.trigger,
+                origin: input.origin,
+                scopeLevel: "division",
+                conditions,
+                route: input.route,
+                run,
+                announce: isLast,
+            });
+        } catch (error) {
+            if (error instanceof PremiumRecalcCancelledError) {
+                return;
+            }
+            throw error;
+        }
     }
-}
-
-function brigadeIndicator(kind: BasketUpdateKind): BrigadeIndicator | null {
-    if (kind === "sale") return "Продажа товара";
-    if (kind === "release") return "Выдача товара";
-    if (kind === "kassa") return "Кассовые операции";
-    if (kind === "osnt") return "ОСНТ";
-    if (kind === "warehouse") return "Складские операции";
-    if (kind === "unloading") return "Разгрузка ТС";
-    return null;
 }
 
 function selectionSteps(

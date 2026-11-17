@@ -3,7 +3,8 @@ import { createErrorResponse } from "@/lib/api-error";
 import { airflowActor } from "@/lib/airflow-token";
 import { adminAuthErrorResponse, requirePermission } from "@/lib/require-admin";
 import { audit } from "@/server/authz/resolve-access";
-import { beginPremiumRecalc, failPremiumRecalc, finishPremiumRecalc, PremiumRecalcBusyError, systemTrigger } from "@/services/basket-updates";
+import { beginPremiumRecalc, failPremiumRecalc, PremiumRecalcBusyError, systemTrigger } from "@/services/basket-updates";
+import { followBasketWithBrigade } from "@/services/brigade-recalc";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { SalePremiumError } from "@/services/sale-premium";
 import type { ApiResponse } from "@/types/api";
@@ -32,14 +33,25 @@ export async function POST(request: Request): Promise<NextResponse<ApiResponse<R
         }
         const origin = loader ? "system" as const : "manual" as const;
         const trigger = origin === "system" ? systemTrigger(body?.trigger) : "manual";
+        const route = "/api/branch/release-premium/recalculate";
         const runId = await beginPremiumRecalc({ kind: "release", period, origin, trigger, actor, scopeLevel: "division" });
         try {
             const lines = await calculateReleasePremium(period);
-            await finishPremiumRecalc(runId, lines, { announce: body?.announce !== false });
+            await followBasketWithBrigade({
+                kind: "release",
+                period,
+                basketRunId: runId,
+                basketLines: lines,
+                actor,
+                trigger,
+                origin,
+                route,
+                announce: body?.announce !== false,
+            });
             await audit(actor, "release-premium.recalculate", `${period}; ${origin}; ${trigger}`);
             return NextResponse.json({ success: true, data: { period, lines } });
         } catch (error) {
-            await failPremiumRecalc(runId, error, "/api/branch/release-premium/recalculate");
+            await failPremiumRecalc(runId, error, route);
             throw error;
         }
     } catch (error) {

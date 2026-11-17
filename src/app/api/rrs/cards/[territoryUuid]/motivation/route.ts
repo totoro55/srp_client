@@ -72,7 +72,16 @@ function readItems(value: unknown): RrsMotivationItem[] | null {
         if (typeof record.branchUuid !== "string" || typeof record.enabled !== "boolean") {
             return null;
         }
-        items.push({ branchUuid: record.branchUuid, enabled: record.enabled, hasBaseBonus: false, baseBonus: null });
+        if (record.brigade !== undefined && typeof record.brigade !== "boolean") {
+            return null;
+        }
+        items.push({
+            branchUuid: record.branchUuid,
+            enabled: record.enabled,
+            ...(typeof record.brigade === "boolean" ? { brigade: record.brigade } : {}),
+            hasBaseBonus: false,
+            baseBonus: null,
+        });
     }
     return items;
 }

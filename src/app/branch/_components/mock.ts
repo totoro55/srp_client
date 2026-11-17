@@ -2193,7 +2193,7 @@ export function brigadeName(employeeId: string, setup: BrigadeSetup, participati
         return "Общая бригада";
     }
     const group = setup.groups.find((item) => item.memberIds.includes(employeeId));
-    return group ? group.name.trim() || "Бригада" : "Вне бригады";
+    return group ? group.name.trim() || "Бригада" : null;
 }
 
 export function withBranchQuery(path: string, branchId: string, period: string, part?: string | null, tab?: string | null): string {

@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { History, Save, Undo2 } from "lucide-react";
+import { CircleHelp, History, Save, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { HelpDrawer } from "@/components/help-drawer";
 import { FormAlert } from "@/components/form-alert";
@@ -22,6 +23,8 @@ import { premiumSaveDescription, type StartedPremiumRecalc } from "@/lib/premium
 import { showStartedRecalc } from "@/lib/recalc-plan";
 import { formatMonth } from "../../../_components/model";
 
+const BRIGADE_HINT = "Включение активирует на филиале бригадную мотивацию в режиме полной бригады. Настройка частичной (групповой) бригады доступна только в настройках филиала.";
+
 export function BranchMotivation() {
     const params = useParams<{ territoryUuid: string }>();
     const router = useRouter();
@@ -31,6 +34,8 @@ export function BranchMotivation() {
     const [page, setPage] = useState<RrsMotivationPage | null>(null);
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
     const [saved, setSaved] = useState<Record<string, boolean>>({});
+    const [brigade, setBrigade] = useState<Record<string, boolean>>({});
+    const [savedBrigade, setSavedBrigade] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -55,9 +60,12 @@ export function BranchMotivation() {
             return;
         }
         const next = participation(json.data);
+        const nextBrigade = brigadeFlags(json.data);
         setPage(json.data);
         setEnabled(next);
         setSaved(next);
+        setBrigade(nextBrigade);
+        setSavedBrigade(nextBrigade);
         setLoading(false);
     }, [requestedPeriod, territoryUuid]);
 
@@ -83,7 +91,10 @@ export function BranchMotivation() {
     const hint = page ? settingsPeriodHint(page.period, page.editPolicy, loading) : null;
 
     const dirtyCount = page
-        ? page.branches.filter((branch) => isEnabled(enabled, branch.uuid) !== isEnabled(saved, branch.uuid)).length
+        ? page.branches.filter((branch) => (
+            isEnabled(enabled, branch.uuid) !== isEnabled(saved, branch.uuid)
+            || isEnabled(brigade, branch.uuid) !== isEnabled(savedBrigade, branch.uuid)
+        )).length
         : 0;
     const bonusBranches = page
         ? page.branches.filter((branch) => page.items.find((row) => row.branchUuid === branch.uuid)?.hasBaseBonus)
@@ -114,6 +125,7 @@ export function BranchMotivation() {
                     items: page.branches.map((branch) => ({
                         branchUuid: branch.uuid,
                         enabled: isEnabled(enabled, branch.uuid),
+                        brigade: isEnabled(brigade, branch.uuid),
                     })),
                 }),
             });
@@ -204,6 +216,7 @@ export function BranchMotivation() {
                                         disabled={saving || loading || !page.editable || dirtyCount === 0}
                                         onClick={() => {
                                             setEnabled(saved);
+                                            setBrigade(savedBrigade);
                                             setConfirmSave(false);
                                             setError(null);
                                         }}
@@ -221,7 +234,7 @@ export function BranchMotivation() {
                 )}
             />
             <FormAlert message={error} />
-            {loading && !page ? <DataTableSkeleton columns={3} rows={8} /> : null}
+            {loading && !page ? <DataTableSkeleton columns={4} rows={8} /> : null}
             {page ? (
                 <>
                     <TabsContent value="participation" className="flex flex-col gap-4">
@@ -253,9 +266,31 @@ export function BranchMotivation() {
                                                 }
                                                 return next;
                                             });
+                                            if (!checked) {
+                                                setBrigade((current) => {
+                                                    const next = { ...current };
+                                                    for (const branch of bonusBranches) {
+                                                        next[branch.uuid] = false;
+                                                    }
+                                                    return next;
+                                                });
+                                            }
                                         }}
                                     />
                                     Участие
+                                </span>
+                            </TableHead>
+                            <TableHead className="min-w-56">
+                                <span className="flex items-center gap-2">
+                                    Бригада
+                                    <Tooltip>
+                                        <TooltipTrigger
+                                            render={<button type="button" className="inline-flex text-muted-foreground hover:text-foreground" aria-label="Справка по бригаде" />}
+                                        >
+                                            <CircleHelp className="size-4" />
+                                        </TooltipTrigger>
+                                        <TooltipContent className="max-w-sm text-left">{BRIGADE_HINT}</TooltipContent>
+                                    </Tooltip>
                                 </span>
                             </TableHead>
                         </TableRow>
@@ -263,7 +298,8 @@ export function BranchMotivation() {
                     <TableBody>
                         {page.branches.map((branch) => {
                             const on = isEnabled(enabled, branch.uuid);
-                            const dirty = on !== isEnabled(saved, branch.uuid);
+                            const brigadeOn = isEnabled(brigade, branch.uuid);
+                            const dirty = on !== isEnabled(saved, branch.uuid) || brigadeOn !== isEnabled(savedBrigade, branch.uuid);
                             const item = page.items.find((row) => row.branchUuid === branch.uuid);
                             const hasBaseBonus = item?.hasBaseBonus ?? false;
                             const bonus = formatBaseBonus(item?.baseBonus ?? null);
@@ -285,10 +321,28 @@ export function BranchMotivation() {
                                                         return;
                                                     }
                                                     setEnabled((current) => ({ ...current, [branch.uuid]: checked }));
+                                                    if (!checked) {
+                                                        setBrigade((current) => ({ ...current, [branch.uuid]: false }));
+                                                    }
                                                 }}
                                             />
                                             <span className={on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
                                                 {on ? "Включена" : hasBaseBonus ? "Выключена" : "Нельзя включить: нет базовой премии"}
+                                            </span>
+                                        </label>
+                                    </TableCell>
+                                    <TableCell>
+                                        <label className="flex items-center gap-2 text-sm">
+                                            <Switch
+                                                checked={brigadeOn && on}
+                                                disabled={!page.editable || saving || !on}
+                                                aria-label={brigadeOn ? `Выключить полную бригаду ${branch.name}` : `Включить полную бригаду ${branch.name}`}
+                                                onCheckedChange={(checked) => {
+                                                    setBrigade((current) => ({ ...current, [branch.uuid]: checked }));
+                                                }}
+                                            />
+                                            <span className={brigadeOn && on ? "text-emerald-800 dark:text-emerald-200" : "text-muted-foreground"}>
+                                                {brigadeOn && on ? "Полная" : "Выключена"}
                                             </span>
                                         </label>
                                     </TableCell>
@@ -331,13 +385,26 @@ function participation(page: RrsMotivationPage): Record<string, boolean> {
     return next;
 }
 
+function brigadeFlags(page: RrsMotivationPage): Record<string, boolean> {
+    const next: Record<string, boolean> = {};
+    for (const item of page.items) {
+        next[item.branchUuid] = item.brigade === true;
+    }
+    for (const branch of page.branches) {
+        if (next[branch.uuid] === undefined) {
+            next[branch.uuid] = false;
+        }
+    }
+    return next;
+}
+
 function MotivationHelp({ cutoffDay }: { cutoffDay: number | null }) {
     return (
         <div className="flex flex-col gap-3">
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Участие</h3>
                 <p className="text-muted-foreground">
-                    Мотивация филиала по умолчанию выключена. В колонке «Базовая премия» показана сумма из выгрузки за выбранный месяц. Филиал можно подключить, только если сумма есть. Переключатель в шапке колонки «Участие» включает или выключает сразу все филиалы с премией и не меняет филиалы без неё. Изменение записывается кнопкой «Сохранить».
+                    Мотивация филиала по умолчанию выключена. В колонке «Базовая премия» показана сумма из выгрузки за выбранный месяц. Филиал можно подключить, только если сумма есть. Переключатель в шапке колонки «Участие» включает или выключает сразу все филиалы с премией и не меняет филиалы без неё. Колонка «Бригада» включает на филиале полную бригадную мотивацию. Частичная (групповая) бригада настраивается только в кабинете филиала. Изменение записывается кнопкой «Сохранить».
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">

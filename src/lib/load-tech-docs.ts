@@ -38,6 +38,9 @@ async function apiRoutes(): Promise<{ path: string; methods: string[]; group: st
             } else if (entry.name === "route.ts") {
                 const relative = path.relative(path.join(process.cwd(), "src/app"), directory).replaceAll("\\", "/");
                 const routePath = `/${relative}`;
+                if (routePath.endsWith("/fixture")) {
+                    continue;
+                }
                 const source = await readFile(full, "utf8");
                 const known = apiDescription(routePath);
                 found.push({

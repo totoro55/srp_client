@@ -441,3 +441,4 @@ select {
 .formula-layout .katex-html > .katex-base > :is(.mord, .mbin, .mrel, .mopen, .mclose, .mpunct, .minner, .mop) + :is(.mord, .mbin, .mrel, .mopen, .mclose, .mpunct, .minner, .mop) {
     margin-left: var(--formula-gap, 8px) !important;
 }
+

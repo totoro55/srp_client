@@ -103,9 +103,24 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
         });
     }, []);
 
-    const value = useMemo<BranchStoreValue>(() => ({
+    const value = useMemo<BranchStoreValue>(() => {
+        let sliceCache: {
+            key: string;
+            employees: StaffEmployee[];
+            settings: MotivationSettings;
+            result: ReturnType<BranchStoreValue["slice"]>;
+        } | null = null;
+        return {
         slice(branchId, period, employees, settings) {
             const key = keyOf(branchId, period);
+            if (
+                sliceCache
+                && sliceCache.key === key
+                && sliceCache.employees === employees
+                && sliceCache.settings === settings
+            ) {
+                return sliceCache.result;
+            }
             const savedOverrides = state.savedRoles[key] ?? {};
             const draftOverrides = state.draftRoles[key] ?? savedOverrides;
             const savedBrigades = state.savedBrigades[key] ?? EMPTY_BRIGADES;
@@ -114,7 +129,7 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
             for (const employee of employees) {
                 roleManual[employee.id] = roleIsManual(draftOverrides, employee.id);
             }
-            return {
+            const result = {
                 savedRoles: effectiveRoles(employees, savedOverrides, settings),
                 draftRoles: effectiveRoles(employees, draftOverrides, settings),
                 roleManual,
@@ -123,6 +138,8 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
                 rolesDirty: !sameOverrides(draftOverrides, savedOverrides),
                 brigadesDirty: JSON.stringify(draftBrigades) !== JSON.stringify(savedBrigades),
             };
+            sliceCache = { key, employees, settings, result };
+            return result;
         },
         setRole(branchId, period, employeeId, roleId) {
             const key = keyOf(branchId, period);
@@ -243,7 +260,8 @@ export function BranchStoreProvider({ children }: { children: ReactNode }) {
                 draftBrigades: { ...current.draftBrigades, [key]: cloneSetup(next) },
             }));
         },
-    }), [hydrateRoles, state]);
+        };
+    }, [hydrateRoles, state]);
 
     return <BranchStoreContext.Provider value={value}>{children}</BranchStoreContext.Provider>;
 }
