@@ -534,11 +534,10 @@ export async function readActorRecalcJournal(actor: string): Promise<BasketRecal
         SELECT ${RUN_COLUMNS}
         FROM premium_recalc_runs
         WHERE lower(actor) = lower($1)
-          -- Значок в шапке: только то, что этот человек запустил сегодня по Москве.
+          -- Значок в шапке: всё, что этот человек запустил сегодня по Москве.
           AND created_at >= ((NOW() AT TIME ZONE 'Europe/Moscow')::date) AT TIME ZONE 'Europe/Moscow'
           AND created_at < (((NOW() AT TIME ZONE 'Europe/Moscow')::date + 1) AT TIME ZONE 'Europe/Moscow')
         ORDER BY created_at ASC, id ASC
-        LIMIT 100
         `,
         [actor],
     );

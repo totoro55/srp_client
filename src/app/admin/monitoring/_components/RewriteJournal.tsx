@@ -379,7 +379,7 @@ export function RewriteJournal({
                 <RecalcJournalLog
                     key={`${basket ?? "all"}:${status ?? "all"}:${query ?? ""}:${from ?? ""}:${to ?? ""}`}
                     events={events}
-                    plan={preview || narrowed ? null : plan}
+                    plan={preview ? null : plan}
                     preview={preview}
                     olderPending={olderPending}
                     onNearTop={preview ? undefined : () => void loadOlder()}

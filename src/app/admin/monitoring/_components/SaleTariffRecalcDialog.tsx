@@ -79,6 +79,7 @@ export function SaleTariffRecalcDialog({
     async function start() {
         setSaving(true);
         setError(null);
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch("/api/admin/monitoring/sale-tariffs", {
                 method: "POST",
@@ -94,13 +95,14 @@ export function SaleTariffRecalcDialog({
             onOpenChange(false);
             openRecalcConsole({
                 period,
-                kinds: ["tariffs"],
+                kinds: ["tariffs", "sale", "shared", "brigade"],
                 reason: "tariffs",
                 actor,
                 scopeLevel: names.length === ready.length ? "division" : "territory",
                 scopeLabel: names.length === ready.length ? "Все РРС" : names.length === 1 ? `РРС «${names[0]}»` : `${names.length} РРС`,
                 title: "Тарифы продажи",
-                detail: "Включены уже сохранённые исключения. После записи пересчитаются продажа и общая премия.",
+                detail: "Включены уже сохранённые исключения. После записи пересчитаются продажа, общая премия и доли бригады.",
+                startedAt,
             });
         } catch {
             setError("Не удалось запустить пересчёт тарифов");
@@ -120,7 +122,7 @@ export function SaleTariffRecalcDialog({
                     <DialogTitle>Пересчёт тарифов продажи</DialogTitle>
                     <DialogDescription>
                         Перед запуском видны версия и ось. В расчёт входят исключения, которые уже включены для РРС.
-                        После записи тарифов пересчитаются продажа и общая премия.
+                        После записи тарифов пересчитаются продажа, общая премия и доли бригады.
                     </DialogDescription>
                 </DialogHeader>
                 <FormAlert message={error} />

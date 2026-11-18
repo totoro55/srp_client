@@ -394,6 +394,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             values: form.connected ? form.values : {},
         }));
         let savedCard = false;
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch("/api/rrs/wizard", {
                 method: "POST",
@@ -441,7 +442,7 @@ export function RrsWizard({ mode = "create" }: { mode?: "create" | "edit" }) {
             }
             setSaveProgress(finishedWizardSaveProgress());
             if (recalc) {
-                showStartedRecalc(recalc);
+                showStartedRecalc(recalc, startedAt);
             }
             savedCard = true;
             setConfirmSave(false);

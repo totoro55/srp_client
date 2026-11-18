@@ -26,22 +26,45 @@ interface PlanEvent {
     createdAt: string;
     status: string;
     actor: string;
+    trigger?: string;
 }
 
-export function showStartedRecalc(notice: StartedPremiumRecalc): void {
+const LAUNCH_SKEW_MS = 1000;
+
+/** События именно этого запуска. Чужой триггер и более ранний запуск того же вида не снимают шаг из очереди. */
+export function planLaunchEvents(plan: RecalcPlan, events: readonly PlanEvent[]): PlanEvent[] {
+    const started = new Date(plan.startedAt).getTime() - LAUNCH_SKEW_MS;
+    const period = plan.period.slice(0, 10);
+    return events.filter((event) => {
+        const created = new Date(event.createdAt).getTime();
+        if (event.period.slice(0, 10) !== period || Number.isNaN(created) || created < started) {
+            return false;
+        }
+        if (plan.actor !== "" && event.actor.toLowerCase() !== plan.actor.toLowerCase()) {
+            return false;
+        }
+        return plan.reason === "" || event.trigger === undefined || event.trigger === plan.reason;
+    });
+}
+
+export function showStartedRecalc(notice: StartedPremiumRecalc, startedAt?: string): void {
+    const kinds = notice.trigger === "tariffs" && !notice.kinds.includes("brigade")
+        ? [...notice.kinds, "brigade" as const]
+        : notice.kinds;
     openRecalcConsole({
         period: notice.period,
-        kinds: notice.kinds,
+        kinds,
         reason: notice.trigger,
         actor: notice.actor,
         scopeLevel: notice.scopeLevel,
         scopeLabel: notice.scopeLabel,
         title: `${notice.scopeLabel}, ${recalcReasonLabel(notice.trigger, "manual")}`,
+        startedAt,
     });
 }
 
-export function openRecalcConsole(input: Omit<RecalcPlan, "startedAt" | "detail"> & { detail?: string }): void {
-    const plan: RecalcPlan = { ...input, detail: input.detail ?? "", startedAt: new Date().toISOString() };
+export function openRecalcConsole(input: Omit<RecalcPlan, "startedAt" | "detail"> & { detail?: string; startedAt?: string }): void {
+    const plan: RecalcPlan = { ...input, detail: input.detail ?? "", startedAt: input.startedAt ?? new Date().toISOString() };
     sessionStorage.setItem(RECALC_PLAN_KEY, JSON.stringify(plan));
     window.dispatchEvent(new CustomEvent(RECALC_CONSOLE_EVENT, { detail: { open: true } }));
 }
@@ -89,13 +112,7 @@ export function syncRecalcPlan(events: PlanEvent[]): RecalcPlan | null {
     if (!plan) {
         return null;
     }
-    const started = new Date(plan.startedAt).getTime() - 5000;
-    const fresh = events.filter((event) => {
-        if (event.period !== plan.period || new Date(event.createdAt).getTime() < started) {
-            return false;
-        }
-        return plan.actor === "" || event.actor.toLowerCase() === plan.actor.toLowerCase();
-    });
+    const fresh = planLaunchEvents(plan, events);
     const blocked = fresh.some((event) => event.status === "failed" || event.status === "cancelled");
     const kinds = blocked ? [] : plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind));
     if (!blocked && kinds.length === plan.kinds.length) {

@@ -92,9 +92,12 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
             title: consoleTitle(request),
             detail: formatRecalcConditions(request),
         });
-        void runSelection(request).then((message) => {
-            if (message) {
-                setError(message);
+        void runSelection(request).then((result) => {
+            if (!result) {
+                return;
+            }
+            setError(result.message);
+            if (result.clearPlan) {
                 clearRecalcPlan();
             }
         });
@@ -444,7 +447,7 @@ function formDescription(form: MonthForm): string {
     return "Пересчитаются документы выбранных дат только этой корзины. Штатное расписание по дням останется текущим. Другие корзины и общая премия этим запуском не считаются.";
 }
 
-async function runSelection(form: MonthForm): Promise<string | null> {
+async function runSelection(form: MonthForm): Promise<{ message: string; clearPlan: boolean } | null> {
     try {
         const response = await fetch("/api/branch/month-premium/recalculate", {
             method: "POST",
@@ -460,9 +463,13 @@ async function runSelection(form: MonthForm): Promise<string | null> {
             }),
         });
         const json = (await response.json()) as ApiResponse<{ period: string }>;
-        return json.success ? null : json.error.message;
+        if (json.success) {
+            return null;
+        }
+        // 5xx и обрыв ответа случаются, когда расчёт уже идёт. Очередь тогда оставляем.
+        return { message: json.error.message, clearPlan: response.status < 500 };
     } catch {
-        return "Не удалось пересчитать месяц";
+        return { message: "Не удалось пересчитать месяц", clearPlan: false };
     }
 }
 

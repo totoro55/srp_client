@@ -313,6 +313,7 @@ export function EnabledExceptions() {
         }
         setSavingTariffs(true);
         setPreviewError(null);
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch(`/api/rrs/cards/${territoryUuid}/tariff-recalc`, {
                 method: "PUT",
@@ -326,7 +327,7 @@ export function EnabledExceptions() {
                 return;
             }
             if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc);
+                showStartedRecalc(json.data.recalc, startedAt);
             }
             notifySuccess("Тарифы сохранены");
             setConfirmTariffs(false);
@@ -511,7 +512,7 @@ export function EnabledExceptions() {
                     ? premiumSaveDescription(
                         `Рассчитанные тарифы по продажам для «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`,
                         page.period,
-                        "После сохранения будет пересчитана премия по корзине продаж для всей этой территории за тот же месяц.",
+                        "После сохранения для всей этой территории за тот же месяц пересчитаются продажа, общая премия и доли бригады.",
                     )
                     : ""}
                 confirmLabel="Сохранить"

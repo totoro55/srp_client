@@ -116,6 +116,7 @@ export function BranchMotivation() {
         }
         setSaving(true);
         setError(null);
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch(`/api/rrs/cards/${territoryUuid}/motivation`, {
                 method: "PUT",
@@ -136,7 +137,7 @@ export function BranchMotivation() {
                 return;
             }
             if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc);
+                showStartedRecalc(json.data.recalc, startedAt);
             }
             notifySuccess("Участие филиалов сохранено");
             setConfirmSave(false);

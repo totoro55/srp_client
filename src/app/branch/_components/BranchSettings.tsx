@@ -423,7 +423,7 @@ function Staff({
                     const scopeLabel = branchScopeLabel(directory.branches, branchId);
                     openRecalcConsole({
                         period,
-                        kinds: ["sale", "release", "kassa", "shared", "brigade"],
+                        kinds: ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "shared", "brigade"],
                         reason: "branch.roles",
                         actor,
                         scopeLevel: "branch",

@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ButtonSpinner } from "@/components/loading-state";
 import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
-import { syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
-import { notifySuccess } from "@/lib/notify";
+import { planLaunchEvents, syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -180,28 +179,31 @@ function ProcessGroup({ process, defaultOpen }: { process: JournalProcess; defau
     const status = groupStatus(process);
     const several = process.operations.length > 1;
     const everyFailed = process.operations.every((operation) => operation.status === "failed");
+    const only = process.operations[0];
     return (
         <TraceCollapsible open={open} onOpenChange={setOpen}>
-            <TraceCollapsibleTrigger className="w-full items-start">
-                <TraceLine
-                    status={traceStatus(status === "failed" && !everyFailed ? "done" : status)}
-                    className="w-full min-w-0 flex-1 flex-col items-stretch gap-1 group-aria-expanded/trace-collapsible-trigger:gap-0"
-                >
-                    <span className="flex min-w-0 items-center gap-2">
-                        <TraceIcon>{statusIcon(status, several)}</TraceIcon>
-                        <TraceTitle>{groupTitle(process)}</TraceTitle>
-                    </span>
-                    <TraceDescription
-                        aria-hidden={open}
-                        className="grid min-h-0 w-full min-w-0 grid-rows-[1fr] pl-6 whitespace-normal opacity-100 transition-[grid-template-rows,opacity] duration-200 group-aria-expanded/trace-collapsible-trigger:grid-rows-[0fr] group-aria-expanded/trace-collapsible-trigger:opacity-0"
+            <span className="flex w-full min-w-0 items-start gap-1">
+                <TraceCollapsibleTrigger className="min-w-0 flex-1 items-start">
+                    <TraceLine
+                        status={traceStatus(status === "failed" && !everyFailed ? "done" : status)}
+                        className="w-full min-w-0 flex-1 flex-col items-stretch gap-1 group-aria-expanded/trace-collapsible-trigger:gap-0"
                     >
-                        <span className="min-h-0 overflow-hidden">
-                            <RowSummary process={process} />
+                        <span className="flex min-w-0 items-center gap-2">
+                            <TraceIcon>{statusIcon(status, several)}</TraceIcon>
+                            <TraceTitle>{groupTitle(process)}</TraceTitle>
+                            {several ? <ProcessDuration process={process} /> : null}
                         </span>
-                    </TraceDescription>
-                </TraceLine>
-            </TraceCollapsibleTrigger>
-            <TraceCollapsibleContent className="flex flex-col gap-3 border-l-2 border-foreground/30">
+                        <TraceDescription
+                            aria-hidden={open}
+                            className={cn("w-full min-w-0 pl-6 whitespace-normal", open && "hidden")}
+                        >
+                            <RowSummary process={process} />
+                        </TraceDescription>
+                    </TraceLine>
+                </TraceCollapsibleTrigger>
+                {!several && only?.status === "running" ? <CancelRecalcButton runId={only.runId} className="self-start" /> : null}
+            </span>
+            <TraceCollapsibleContent className={cn("flex flex-col gap-3 border-l-2 border-foreground/30", open && "h-auto! overflow-visible!")}>
                 {several ? process.operations.map((operation) => (
                     <OperationStep key={operation.key} operation={operation} />
                 )) : (
@@ -247,9 +249,10 @@ function OperationCells({ operation, showScope }: { operation: JournalOperation;
 function OperationStep({ operation }: { operation: JournalOperation }) {
     return (
         <div className="flex min-w-0 flex-col gap-1">
-            <TraceLine status={lineStatus(operation)}>
+            <TraceLine status={lineStatus(operation)} className="w-full">
                 <TraceIcon>{statusIcon(operation.status, false)}</TraceIcon>
                 <TraceTitle>{stepTitle(operation)}</TraceTitle>
+                {operation.status === "running" ? <CancelRecalcButton runId={operation.runId} /> : null}
             </TraceLine>
             <div className="pl-6">
                 <OperationNote operation={operation} />
@@ -283,7 +286,6 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
                     <Elapsed startedAt={operation.startedAt} />
                 </p>
             ) : null}
-            {operation.status === "running" ? <CancelRecalcButton runId={operation.runId} /> : null}
             {operation.status === "success" && finished !== null && spent !== null ? (
                 <p>{`Конец в ${timeFormat.format(finished)}, заняло ${spent}${rows === null ? "" : `, ${rows}`}.`}</p>
             ) : null}
@@ -295,49 +297,47 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
     );
 }
 
-function CancelRecalcButton({ runId }: { runId: number | null }) {
+function CancelRecalcButton({ runId, className }: { runId: number | null; className?: string }) {
     const access = useAccess();
     const [pending, setPending] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     if (!access.has("recalc:cancel") || runId === null) {
         return null;
     }
     return (
-        <div className="flex flex-col gap-1">
-            <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={pending}
-                onClick={() => {
-                    void (async () => {
-                        setPending(true);
-                        setError(null);
-                        try {
-                            const response = await fetch("/api/recalc/cancel", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ id: runId }),
-                            });
-                            const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
-                            if (!json.success) {
-                                setError(json.error.message);
-                                return;
-                            }
-                            notifySuccess("Пересчёт отменён");
-                        } catch {
-                            setError("Не удалось отменить пересчёт");
-                        } finally {
-                            setPending(false);
+        <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn("shrink-0 self-center text-muted-foreground hover:text-destructive", className)}
+            aria-label="Отменить пересчёт"
+            title="Отменить пересчёт"
+            disabled={pending}
+            onClick={(event) => {
+                event.stopPropagation();
+                void (async () => {
+                    setPending(true);
+                    try {
+                        const response = await fetch("/api/recalc/cancel", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ id: runId }),
+                        });
+                        const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
+                        if (!json.success) {
+                            notifyError(json.error.message);
+                            return;
                         }
-                    })();
-                }}
-            >
-                {pending ? <ButtonSpinner /> : <SquareIcon />}
-                Отменить
-            </Button>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </div>
+                        notifySuccess("Пересчёт отменён");
+                    } catch {
+                        notifyError("Не удалось отменить пересчёт");
+                    } finally {
+                        setPending(false);
+                    }
+                })();
+            }}
+        >
+            {pending ? <LoaderCircleIcon className="animate-spin" /> : <SquareIcon />}
+        </Button>
     );
 }
 
@@ -354,6 +354,50 @@ function Elapsed({ startedAt }: { startedAt: string }) {
             {now === null ? "\u00a0" : formatDuration(now - new Date(startedAt).getTime())}
         </span>
     );
+}
+
+function ProcessDuration({ process }: { process: JournalProcess }) {
+    const span = processSpan(process);
+    if (!span) {
+        return null;
+    }
+    if (span.finishedAt === null) {
+        return (
+            <span className="shrink-0 text-muted-foreground tabular-nums">
+                {"всего идёт "}
+                <Elapsed startedAt={span.startedAt} />
+            </span>
+        );
+    }
+    const spent = formatDuration(new Date(span.finishedAt).getTime() - new Date(span.startedAt).getTime());
+    const stopped = process.operations.some((operation) => operation.status === "failed" || operation.status === "cancelled");
+    return (
+        <span className="shrink-0 text-muted-foreground tabular-nums">
+            {stopped ? `всего прошло ${spent}` : `всего заняло ${spent}`}
+        </span>
+    );
+}
+
+function processSpan(process: JournalProcess): { startedAt: string; finishedAt: string | null } | null {
+    const started = process.operations.filter((operation) => operation.status !== "pending" && operation.startedAt !== null);
+    const first = started[0];
+    if (!first?.startedAt) {
+        return null;
+    }
+    const startedAt = started.reduce((earliest, operation) => {
+        const at = operation.startedAt ?? earliest;
+        return at < earliest ? at : earliest;
+    }, first.startedAt);
+    const open = process.operations.some((operation) => operation.status === "running" || operation.status === "pending");
+    if (open) {
+        return { startedAt, finishedAt: null };
+    }
+    const finished = started.flatMap((operation) => operation.finishedAt === null ? [] : [operation.finishedAt]);
+    if (finished.length !== started.length) {
+        return { startedAt, finishedAt: null };
+    }
+    const finishedAt = finished.reduce((latest, at) => at > latest ? at : latest, finished[0]);
+    return { startedAt, finishedAt };
 }
 
 function groupStatus(process: JournalProcess): JournalOperation["status"] | "done" {
@@ -495,19 +539,13 @@ function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): Jou
     }
     const pending = pendingOperations(events, plan);
     for (const operation of pending) {
-        const live = [...processes].reverse().find((process) => {
-            const sample = process.operations[0];
-            return process.live
-                && sample !== undefined
-                && sample.period === operation.period
-                && sample.trigger === operation.trigger
-                && (operation.actor === "" || sample.actor.toLowerCase() === operation.actor.toLowerCase());
-        });
-        if (live) {
-            if (live.title === "" && plan?.title) {
-                live.title = plan.title;
+        const host = [...processes].reverse().find((process) => sameLaunch(process, operation, plan));
+        if (host) {
+            if (host.title === "" && plan?.title) {
+                host.title = plan.title;
             }
-            live.operations.push(operation);
+            host.operations.push(operation);
+            host.live = true;
             continue;
         }
         processes.push({
@@ -556,17 +594,32 @@ function appendWaitingBrigade(processes: JournalProcess[]): void {
     }
 }
 
+function sameLaunch(process: JournalProcess, operation: JournalOperation, plan: RecalcPlan | null): boolean {
+    const sample = process.operations.find((item) => item.startedAt !== null) ?? process.operations[0];
+    if (sample === undefined) {
+        return false;
+    }
+    if (sample.period.slice(0, 10) !== operation.period.slice(0, 10) || sample.trigger !== operation.trigger) {
+        return false;
+    }
+    if (operation.actor !== "" && sample.actor.toLowerCase() !== operation.actor.toLowerCase()) {
+        return false;
+    }
+    if (process.live) {
+        return true;
+    }
+    if (!plan) {
+        return false;
+    }
+    const started = new Date(plan.startedAt).getTime() - 1000;
+    return new Date(process.startedAt).getTime() >= started;
+}
+
 function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): JournalOperation[] {
     if (!plan) {
         return [];
     }
-    const started = new Date(plan.startedAt).getTime() - 5000;
-    const fresh = events.filter((event) => {
-        if (event.period !== plan.period || new Date(event.createdAt).getTime() < started) {
-            return false;
-        }
-        return plan.actor === "" || event.actor.toLowerCase() === plan.actor.toLowerCase();
-    });
+    const fresh = planLaunchEvents(plan, events);
     if (fresh.some((event) => event.status === "failed" || event.status === "cancelled")) {
         return [];
     }

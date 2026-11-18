@@ -17,6 +17,7 @@ const NO_SALE_CONNECTION = "Корзина продаж не подключен�
 const NO_TARIFF_AXIS = "У версии не выбран вид расчёта тарифов";
 const NO_SALE_STATISTICS = "Нет статистики";
 
+/** После тарифов в очередь встают продажа и общая премия. Доли бригады эта же очередь пишет следом за продажей. */
 export function enqueueSaleTariffPremium(
     actor: string,
     territoryUuid: string,

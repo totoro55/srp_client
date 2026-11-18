@@ -44,6 +44,7 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
         }
         setSaving(true);
         setError(null);
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch("/api/admin/stm-brands", {
                 method: "POST",
@@ -57,7 +58,7 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
             }
             setRows(json.data.brands);
             if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc);
+                showStartedRecalc(json.data.recalc, startedAt);
             }
             setName("");
             notifySuccess("Бренд добавлен");
@@ -70,6 +71,7 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
 
     async function remove(brand: string) {
         setError(null);
+        const startedAt = new Date().toISOString();
         const response = await fetch(`/api/admin/stm-brands?name=${encodeURIComponent(brand)}`, {
             method: "DELETE",
         });
@@ -80,7 +82,7 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
         }
         setRows(json.data.brands);
         if (json.data.recalc) {
-            showStartedRecalc(json.data.recalc);
+            showStartedRecalc(json.data.recalc, startedAt);
         }
         notifySuccess("Бренд удалён");
     }

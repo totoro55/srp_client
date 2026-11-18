@@ -127,6 +127,7 @@ export function BranchCoefficients() {
         }
         setSaving(true);
         setError(null);
+        const startedAt = new Date().toISOString();
         try {
             const response = await fetch(`/api/rrs/cards/${territoryUuid}/coefficients`, {
                 method: "PUT",
@@ -140,7 +141,7 @@ export function BranchCoefficients() {
                 return;
             }
             if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc);
+                showStartedRecalc(json.data.recalc, startedAt);
             }
             notifySuccess("Коэффициенты филиалов сохранены");
             setConfirmSave(false);

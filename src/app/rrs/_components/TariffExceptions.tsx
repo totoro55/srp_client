@@ -306,6 +306,7 @@ export function TariffExceptions({ embedded }: {
         }
         setSaving(true);
         setError(null);
+        const startedAt = new Date().toISOString();
         const response = await fetch(`/api/rrs/cards/${territoryUuid}/tariff-exceptions`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -324,7 +325,7 @@ export function TariffExceptions({ embedded }: {
             return;
         }
         if (json.data.recalc) {
-            showStartedRecalc(json.data.recalc);
+            showStartedRecalc(json.data.recalc, startedAt);
         }
         notifySuccess("Тарифы сохранены");
         setConfirmSave(false);
@@ -372,7 +373,7 @@ export function TariffExceptions({ embedded }: {
                         ? premiumSaveDescription(
                             `Тарифы по продажам для «${page.territory.name}» будут записаны за ${formatMonth(page.period)}.`,
                             page.period,
-                            "После сохранения будет пересчитана премия по корзине продаж для всей этой территории за тот же месяц.",
+                            "После сохранения для всей этой территории за тот же месяц пересчитаются продажа, общая премия и доли бригады.",
                         )
                         : ""}
                     confirmLabel="Сохранить"
