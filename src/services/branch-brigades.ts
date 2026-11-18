@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { db } from "@/services/db";
+import { moscowToday } from "@/services/segment-locks";
 
 const PERIOD = /^\d{4}-\d{2}-01$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,6 +18,8 @@ export interface BrigadeGroupRecord {
 export interface BrigadeSetupRecord {
     mode: BrigadeMode;
     groups: BrigadeGroupRecord[];
+    /** Месяц, с которого действует этот режим. null — строки ещё не было, режим выключен. */
+    since: string | null;
 }
 
 export class BrigadeSetupError extends Error {
@@ -26,7 +29,7 @@ export class BrigadeSetupError extends Error {
     }
 }
 
-const EMPTY_SETUP: BrigadeSetupRecord = { mode: "off", groups: [] };
+const EMPTY_SETUP: BrigadeSetupRecord = { mode: "off", groups: [], since: null };
 
 type PremiumQuery = <R extends QueryResultRow>(sql: string, params?: unknown[]) => Promise<R[]>;
 
@@ -34,25 +37,7 @@ export async function readBranchBrigadeSetup(branchId: string, period: string): 
     if (!UUID.test(branchId) || !PERIOD.test(period)) {
         return EMPTY_SETUP;
     }
-    const rows = await db.query<{ mode: string; groupId: string | null; name: string | null; employeeId: string | null }>(
-        `
-        SELECT setup.mode,
-               grp.id::text AS "groupId",
-               grp.name,
-               member.employee_uuid::text AS "employeeId"
-        FROM main.branch_brigades setup
-        LEFT JOIN main.branch_brigade_groups grp
-            ON grp.branch_uuid = setup.branch_uuid
-           AND grp.period = setup.period
-        LEFT JOIN main.branch_brigade_members member
-            ON member.group_id = grp.id
-        WHERE setup.branch_uuid = $1::uuid
-          AND setup.period = $2::date
-        ORDER BY grp.sort_order, member.employee_uuid
-        `,
-        [branchId, period],
-    );
-    return rowsToSetup(rows);
+    return readEffective((sql, params) => db.query(sql, params), branchId.toLowerCase(), period, true);
 }
 
 export function parseBrigadeSetup(value: unknown): BrigadeSetupRecord | null {
@@ -100,25 +85,39 @@ export function parseBrigadeSetup(value: unknown): BrigadeSetupRecord | null {
     if (groups.length > 40) {
         return null;
     }
-    return { mode: body.mode, groups };
+    return { mode: body.mode, groups, since: null };
 }
 
 export async function saveBranchBrigadeSetup(
     branchId: string,
     period: string,
     setup: BrigadeSetupRecord,
-): Promise<BrigadeSetupRecord> {
+): Promise<{ setup: BrigadeSetupRecord; periods: string[] }> {
     if (!UUID.test(branchId) || !PERIOD.test(period)) {
         throw new BrigadeSetupError("Укажите филиал и месяц");
     }
     const branch = branchId.toLowerCase();
-    await db.transaction(async (query) => {
-        await writeSetup(query, branch, period, setup);
-    });
-    return readBranchBrigadeSetup(branch, period);
+    const periods = await db.transaction(async (query) => storeEffective(query, branch, period, setup));
+    return { setup: await readBranchBrigadeSetup(branch, period), periods };
 }
 
-/** Читает режим бригады филиалов за месяц. Нет строки — off. */
+/** Месяцы от выбранного до текущего, пока режим не перекрыт более поздней записью. Будущий месяц в список не входит. */
+export function brigadeCarryMonths(start: string, nextPeriod: string | null, today: string): string[] {
+    if (!PERIOD.test(start) || !PERIOD.test(`${today.slice(0, 7)}-01`)) {
+        return [];
+    }
+    const current = `${today.slice(0, 7)}-01`;
+    const stop = nextPeriod && PERIOD.test(nextPeriod) && nextPeriod <= current ? nextPeriod : addMonth(current);
+    const months: string[] = [];
+    let cursor = start;
+    while (cursor < stop && cursor <= current) {
+        months.push(cursor);
+        cursor = addMonth(cursor);
+    }
+    return months;
+}
+
+/** Читает режим бригады филиалов, действующий в месяце. Нет более ранней строки — off. */
 export async function readBranchBrigadeModes(
     period: string,
     branchIds: readonly string[],
@@ -133,10 +132,13 @@ export async function readBranchBrigadeModes(
     }
     const rows = await db.query<{ branchId: string; mode: string }>(
         `
-        SELECT branch_uuid::text AS "branchId", mode
+        SELECT DISTINCT ON (branch_uuid)
+               branch_uuid::text AS "branchId",
+               mode
         FROM main.branch_brigades
-        WHERE period = $1::date
+        WHERE period <= $1::date
           AND branch_uuid = ANY($2::uuid[])
+        ORDER BY branch_uuid, period DESC
         `,
         [period, ids],
     );
@@ -150,37 +152,42 @@ export async function readBranchBrigadeModes(
 
 /**
  * Включает или выключает полную бригаду (режим all), группы не трогает.
- * false при режиме groups оставляет groups. Возвращает, сменился ли режим.
+ * false при режиме groups оставляет groups.
+ * Возвращает месяцы, в которых действующий режим изменился.
  */
 export async function writeBranchBrigadeFullMode(
     query: PremiumQuery,
     branchId: string,
     period: string,
     full: boolean,
-): Promise<boolean> {
+): Promise<string[]> {
     if (!UUID.test(branchId) || !PERIOD.test(period)) {
         throw new BrigadeSetupError("Укажите филиал и месяц");
     }
     const branch = branchId.toLowerCase();
-    const current = await readSetup(query, branch, period);
+    const current = await readEffective(query, branch, period, true);
     if (full) {
         if (current.mode === "all") {
-            return false;
+            return [];
         }
-        await writeSetup(query, branch, period, { mode: "all", groups: current.groups });
-        return true;
+        return storeEffective(query, branch, period, { mode: "all", groups: current.groups, since: current.since });
     }
     if (current.mode !== "all") {
-        return false;
+        return [];
     }
-    await writeSetup(query, branch, period, { mode: "off", groups: current.groups });
-    return true;
+    return storeEffective(query, branch, period, { mode: "off", groups: current.groups, since: current.since });
 }
 
-async function readSetup(query: PremiumQuery, branchId: string, period: string): Promise<BrigadeSetupRecord> {
-    const rows = await query<{ mode: string; groupId: string | null; name: string | null; employeeId: string | null }>(
+async function readEffective(
+    query: PremiumQuery,
+    branchId: string,
+    period: string,
+    inclusive: boolean,
+): Promise<BrigadeSetupRecord> {
+    const rows = await query<{ since: string; mode: string; groupId: string | null; name: string | null; employeeId: string | null }>(
         `
-        SELECT setup.mode,
+        SELECT to_char(setup.period, 'YYYY-MM-DD') AS since,
+               setup.mode,
                grp.id::text AS "groupId",
                grp.name,
                member.employee_uuid::text AS "employeeId"
@@ -191,12 +198,80 @@ async function readSetup(query: PremiumQuery, branchId: string, period: string):
         LEFT JOIN main.branch_brigade_members member
             ON member.group_id = grp.id
         WHERE setup.branch_uuid = $1::uuid
-          AND setup.period = $2::date
+          AND setup.period = (
+              SELECT earlier.period
+              FROM main.branch_brigades earlier
+              WHERE earlier.branch_uuid = $1::uuid
+                AND earlier.period ${inclusive ? "<=" : "<"} $2::date
+              ORDER BY earlier.period DESC
+              LIMIT 1
+          )
         ORDER BY grp.sort_order, member.employee_uuid
         `,
         [branchId, period],
     );
     return rowsToSetup(rows);
+}
+
+/** Пишет границу месяца, только если режим отличается от уже действующего. Совпадение с предыдущей границей стирает запись этого месяца. */
+async function storeEffective(
+    query: PremiumQuery,
+    branchId: string,
+    period: string,
+    next: BrigadeSetupRecord,
+): Promise<string[]> {
+    const effective = await readEffective(query, branchId, period, true);
+    if (sameSetup(next, effective)) {
+        return [];
+    }
+    const predecessor = await readEffective(query, branchId, period, false);
+    const boundary = await query<{ period: string }>(
+        `
+        SELECT to_char(period, 'YYYY-MM-DD') AS period
+        FROM main.branch_brigades
+        WHERE branch_uuid = $1::uuid
+          AND period > $2::date
+        ORDER BY period
+        LIMIT 1
+        `,
+        [branchId, period],
+    );
+    const periods = brigadeCarryMonths(period, boundary[0]?.period ?? null, moscowToday());
+    if (sameSetup(next, predecessor)) {
+        await query(
+            `
+            DELETE FROM main.branch_brigades
+            WHERE branch_uuid = $1::uuid
+              AND period = $2::date
+            `,
+            [branchId, period],
+        );
+        return periods;
+    }
+    await writeSetup(query, branchId, period, next);
+    return periods;
+}
+
+function sameSetup(left: BrigadeSetupRecord, right: BrigadeSetupRecord): boolean {
+    if (left.mode !== right.mode || left.groups.length !== right.groups.length) {
+        return false;
+    }
+    return left.groups.every((group, index) => {
+        const other = right.groups[index];
+        if (!other || group.name !== other.name || group.memberIds.length !== other.memberIds.length) {
+            return false;
+        }
+        const members = [...group.memberIds].sort();
+        const rest = [...other.memberIds].sort();
+        return members.every((id, memberIndex) => id === rest[memberIndex]);
+    });
+}
+
+function addMonth(period: string): string {
+    const [year, month] = period.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month, 1));
+    const nextMonth = String(date.getUTCMonth() + 1).padStart(2, "0");
+    return `${date.getUTCFullYear()}-${nextMonth}-01`;
 }
 
 async function writeSetup(
@@ -244,11 +319,12 @@ async function writeSetup(
     }
 }
 
-function rowsToSetup(rows: { mode: string; groupId: string | null; name: string | null; employeeId: string | null }[]): BrigadeSetupRecord {
+function rowsToSetup(rows: { since?: string; mode: string; groupId: string | null; name: string | null; employeeId: string | null }[]): BrigadeSetupRecord {
     const mode = rows[0]?.mode;
     if (mode !== "off" && mode !== "all" && mode !== "groups") {
         return EMPTY_SETUP;
     }
+    const since = rows[0]?.since && PERIOD.test(rows[0].since) ? rows[0].since : null;
     const groups = new Map<string, BrigadeGroupRecord>();
     for (const row of rows) {
         if (!row.groupId || !row.name) {
@@ -260,5 +336,5 @@ function rowsToSetup(rows: { mode: string; groupId: string | null; name: string 
         }
         groups.set(row.groupId, group);
     }
-    return { mode, groups: [...groups.values()] };
+    return { mode, groups: [...groups.values()], since };
 }

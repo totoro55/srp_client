@@ -17,7 +17,7 @@ export interface BranchStaffPayload {
     branches: BranchOption[];
     employees: BranchStaffRow[];
     roleOverrides: Record<string, string | null>;
-    brigades: { mode: "off" | "all" | "groups"; groups: { id: string; name: string; memberIds: string[] }[] };
+    brigades: { mode: "off" | "all" | "groups"; groups: { id: string; name: string; memberIds: string[] }[]; since: string | null };
     indicators: ConnectedBasketIndicator[];
     salePremiums: Record<string, number>;
     releasePremiums: Record<string, number>;
@@ -59,7 +59,7 @@ export async function GET(request: Request): Promise<NextResponse<ApiResponse<Br
         const data = await readBranchStaff(access, period, branch);
         const visible = Boolean(branch && data.branches.some((item) => item.id.toLowerCase() === branch.toLowerCase()));
         const roleOverrides = visible && branch ? await readBranchRoleOverrides(branch, period) : {};
-        const brigades = visible && branch ? await readBranchBrigadeSetup(branch, period) : { mode: "off" as const, groups: [] };
+        const brigades = visible && branch ? await readBranchBrigadeSetup(branch, period) : { mode: "off" as const, groups: [], since: null };
         const sharedPremiumRoleIds = visible && branch ? await readBranchSharedPremiumRoleIds(branch) : [];
         const [viewer, placement, branchSettings] = await Promise.all([
             cabinetViewer(access),

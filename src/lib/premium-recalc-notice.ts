@@ -4,9 +4,11 @@ const MONTH_KEY = /^(\d{4})-(\d{2})/;
 
 export type PremiumRecalcKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | "shared";
 
+export type AnnouncedRecalcKind = PremiumRecalcKind | "brigade";
+
 export interface StartedPremiumRecalc {
     period: string;
-    kinds: PremiumRecalcKind[];
+    kinds: AnnouncedRecalcKind[];
     scopeLevel: RecalcScopeLevel;
     scopeLabel: string;
     trigger: string;

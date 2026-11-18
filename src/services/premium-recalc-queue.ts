@@ -1,5 +1,5 @@
 import { formatScopeLabel, type RecalcScopeLevel } from "@/lib/recalc-reasons";
-import { premiumMonthHasStarted, type PremiumRecalcKind, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
+import { premiumMonthHasStarted, type AnnouncedRecalcKind, type PremiumRecalcKind, type StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
 import { recalcTimeoutMs } from "@/lib/recalc-timeout";
@@ -11,6 +11,7 @@ import {
     PremiumRecalcBusyError,
     PremiumRecalcCancelledError,
 } from "@/services/basket-updates";
+import { BRIGADE_INDICATORS } from "@/lib/brigade-shares";
 import { brigadeIndicatorOf, flushQueuedBrigades, queueBrigadeIndicator, type QueuedBrigade } from "@/services/brigade-recalc";
 import { db } from "@/services/db";
 import { calculateKassaPremium } from "@/services/kassa-premium";
@@ -51,6 +52,8 @@ export interface PremiumScopePlan {
     territoryId: string | null;
     territoryKinds: readonly PremiumRecalcKind[];
     branchKinds: ReadonlyMap<PremiumRecalcKind, readonly string[]>;
+    /** Филиалы, чьи доли бригады нужно посчитать, даже если корзины по ним не стоят в очереди. */
+    brigadeBranches?: readonly string[];
 }
 
 interface KindScope {
@@ -66,6 +69,7 @@ interface Job {
     origin: "manual" | "system";
     route: string;
     scopes: Map<PremiumRecalcKind, KindScope>;
+    extraBrigadeBranches: Set<string>;
     cachedBranches?: string[];
 }
 
@@ -91,13 +95,14 @@ export async function enqueuePremiumScopes(plan: PremiumScopePlan): Promise<Star
             }
         }
     }
-    if (territoryKinds.length === 0 && branchKinds.size === 0) {
+    const brigadeBranches = [...new Set((plan.brigadeBranches ?? []).map((id) => id.toLowerCase()))].filter((id) => UUID.test(id));
+    if (territoryKinds.length === 0 && branchKinds.size === 0 && brigadeBranches.length === 0) {
         return null;
     }
     if (!await premiumRecalcEligible(plan.period)) {
         return null;
     }
-    const job = absorbPlan(plan, territoryId, territoryKinds, branchKinds);
+    const job = absorbPlan(plan, territoryId, territoryKinds, branchKinds, brigadeBranches);
     void pump();
     return describe(job);
 }
@@ -115,11 +120,16 @@ function absorbPlan(
     territoryId: string | null,
     territoryKinds: PremiumRecalcKind[],
     branchKinds: Map<PremiumRecalcKind, string[]>,
+    brigadeBranches: string[],
 ): Job {
     const queue = state();
+    for (const queued of queue.jobs) {
+        queued.extraBrigadeBranches ??= new Set();
+    }
     const division = territoryId === null;
     if (division) {
         const covered = new Set<PremiumRecalcKind>([...territoryKinds, "shared"]);
+        const coversBrigade = territoryKinds.some((kind) => brigadeIndicatorOf(kind));
         queue.jobs = queue.jobs.flatMap((job) => {
             if (job.period !== plan.period || job.territoryId === null) {
                 return [job];
@@ -127,12 +137,16 @@ function absorbPlan(
             for (const kind of covered) {
                 job.scopes.delete(kind);
             }
-            return job.scopes.size > 0 ? [job] : [];
+            if (coversBrigade) {
+                job.extraBrigadeBranches.clear();
+            }
+            return job.scopes.size > 0 || job.extraBrigadeBranches.size > 0 ? [job] : [];
         });
     }
     const needed: PremiumRecalcKind[] = [...territoryKinds, ...branchKinds.keys(), "shared"];
     const divisionJob = queue.jobs.find((job) => job.period === plan.period && job.territoryId === null);
-    if (!division && divisionJob && needed.every((kind) => divisionJob.scopes.get(kind)?.all)) {
+    const divisionBrigade = divisionJob ? [...divisionJob.scopes.keys()].some((kind) => brigadeIndicatorOf(kind)) : false;
+    if (!division && divisionJob && needed.every((kind) => divisionJob.scopes.get(kind)?.all) && (brigadeBranches.length === 0 || divisionBrigade)) {
         divisionJob.actor = plan.actor;
         divisionJob.trigger = plan.trigger;
         divisionJob.origin = plan.origin ?? divisionJob.origin;
@@ -149,8 +163,12 @@ function absorbPlan(
             origin: plan.origin ?? "manual",
             route: plan.route ?? "",
             scopes: new Map(),
+            extraBrigadeBranches: new Set(),
         };
         queue.jobs.push(job);
+    }
+    for (const id of brigadeBranches) {
+        job.extraBrigadeBranches.add(id);
     }
     for (const kind of territoryKinds) {
         job.scopes.set(kind, { all: true, branches: new Set() });
@@ -168,17 +186,19 @@ function absorbPlan(
             job.scopes.set(kind, { all: false, branches });
         }
     }
-    const widenShared = division || territoryKinds.length > 0 || [...job.scopes.values()].some((scope) => scope.all);
-    if (widenShared) {
-        job.scopes.set("shared", { all: true, branches: new Set() });
-    } else {
-        const shared = job.scopes.get("shared") ?? { all: false, branches: new Set<string>() };
-        for (const ids of branchKinds.values()) {
-            for (const id of ids) {
-                shared.branches.add(id);
+    if (territoryKinds.length > 0 || branchKinds.size > 0) {
+        const widenShared = division || territoryKinds.length > 0 || [...job.scopes.values()].some((scope) => scope.all);
+        if (widenShared) {
+            job.scopes.set("shared", { all: true, branches: new Set() });
+        } else {
+            const shared = job.scopes.get("shared") ?? { all: false, branches: new Set<string>() };
+            for (const ids of branchKinds.values()) {
+                for (const id of ids) {
+                    shared.branches.add(id);
+                }
             }
+            job.scopes.set("shared", shared);
         }
-        job.scopes.set("shared", shared);
     }
     job.actor = plan.actor;
     job.trigger = plan.trigger;
@@ -227,6 +247,7 @@ async function pump(): Promise<void> {
 }
 
 async function runJob(job: Job): Promise<void> {
+    job.extraBrigadeBranches ??= new Set();
     const kinds = ORDER.filter((kind) => job.scopes.has(kind));
     const brigadeFollows = kinds.some((kind) => brigadeIndicatorOf(kind));
     const brigades = new Map<string, QueuedBrigade>();
@@ -298,6 +319,7 @@ async function runJob(job: Job): Promise<void> {
             return;
         }
         try {
+            attachExtraBrigades(job, brigades);
             await flushQueuedBrigades({
                 batches: brigades,
                 period: job.period,
@@ -307,6 +329,7 @@ async function runJob(job: Job): Promise<void> {
                 route,
                 announce: false,
             });
+            job.extraBrigadeBranches.clear();
         } catch (flushError) {
             if (!(flushError instanceof PremiumRecalcCancelledError)) {
                 console.error("Не удалось записать доли бригады после прерванного пересчёта", flushError);
@@ -314,6 +337,7 @@ async function runJob(job: Job): Promise<void> {
         }
         throw error;
     }
+    attachExtraBrigades(job, brigades);
     await flushQueuedBrigades({
         batches: brigades,
         period: job.period,
@@ -323,6 +347,35 @@ async function runJob(job: Job): Promise<void> {
         route,
         announce: true,
     });
+    job.extraBrigadeBranches.clear();
+}
+
+function attachExtraBrigades(job: Job, brigades: Map<string, QueuedBrigade>): void {
+    const uncovered = [...job.extraBrigadeBranches].filter((id) => {
+        return ![...brigades.values()].some((batch) => brigadeBatchCovers(batch, id));
+    });
+    if (uncovered.length === 0) {
+        return;
+    }
+    for (const indicator of BRIGADE_INDICATORS) {
+        queueBrigadeIndicator(brigades, {
+            indicator,
+            scopeLevel: "branch",
+            scopeIds: uncovered,
+            run: { branches: uncovered, timeoutMs: recalcTimeoutMs("branch") },
+        });
+    }
+}
+
+function brigadeBatchCovers(batch: QueuedBrigade, branchId: string): boolean {
+    const run = batch.run;
+    if (!run?.branch && !run?.branches) {
+        return true;
+    }
+    if (run.branch?.toLowerCase() === branchId) {
+        return true;
+    }
+    return run.branches?.some((id) => id.toLowerCase() === branchId) ?? false;
 }
 
 async function resolveBranches(job: Job, scope: KindScope): Promise<string[] | null> {
@@ -395,7 +448,11 @@ function calculate(
 }
 
 async function describe(job: Job): Promise<StartedPremiumRecalc> {
-    const kinds = ORDER.filter((kind) => job.scopes.has(kind));
+    const kinds: AnnouncedRecalcKind[] = ORDER.filter((kind) => job.scopes.has(kind));
+    job.extraBrigadeBranches ??= new Set();
+    if (job.extraBrigadeBranches.size > 0 || kinds.some((kind) => kind !== "shared")) {
+        kinds.push("brigade");
+    }
     const division = job.territoryId === null;
     const territoryWide = !division && [...job.scopes.values()].some((scope) => scope.all);
     const scopeLevel: RecalcScopeLevel = division ? "division" : territoryWide ? "territory" : "branch";
@@ -412,6 +469,9 @@ async function describe(job: Job): Promise<StartedPremiumRecalc> {
             for (const id of scope.branches) {
                 ids.add(id);
             }
+        }
+        for (const id of job.extraBrigadeBranches) {
+            ids.add(id);
         }
         if (ids.size > 0) {
             const rows = await db.query<{ name: string }>(

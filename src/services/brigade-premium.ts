@@ -497,14 +497,16 @@ async function readSetups(
 ): Promise<BrigadeSetupRow[]> {
     const rows = await query<{ branchId: string; mode: string; territoryId: string | null }>(
         `
-        SELECT setup.branch_uuid::text AS "branchId",
+        SELECT DISTINCT ON (setup.branch_uuid)
+               setup.branch_uuid::text AS "branchId",
                setup.mode,
                branch.territory_uuid::text AS "territoryId"
         FROM main.branch_brigades setup
         JOIN branches branch ON branch.uuid = setup.branch_uuid
-        WHERE setup.period = $1::date
+        WHERE setup.period <= $1::date
           AND ($2::uuid IS NULL OR setup.branch_uuid = $2::uuid)
           AND ($3::uuid[] IS NULL OR setup.branch_uuid = ANY($3::uuid[]))
+        ORDER BY setup.branch_uuid, setup.period DESC
         `,
         [period, branchId, listed],
     );
@@ -527,11 +529,18 @@ async function readMembers(
         SELECT grp.branch_uuid::text AS "branchId",
                grp.id::text AS "groupId",
                member.employee_uuid::text AS "employeeId"
-        FROM main.branch_brigade_groups grp
+        FROM (
+            SELECT DISTINCT ON (branch_uuid) branch_uuid, period
+            FROM main.branch_brigades
+            WHERE period <= $1::date
+              AND ($2::uuid IS NULL OR branch_uuid = $2::uuid)
+              AND ($3::uuid[] IS NULL OR branch_uuid = ANY($3::uuid[]))
+            ORDER BY branch_uuid, period DESC
+        ) effective
+        JOIN main.branch_brigade_groups grp
+            ON grp.branch_uuid = effective.branch_uuid
+           AND grp.period = effective.period
         JOIN main.branch_brigade_members member ON member.group_id = grp.id
-        WHERE grp.period = $1::date
-          AND ($2::uuid IS NULL OR grp.branch_uuid = $2::uuid)
-          AND ($3::uuid[] IS NULL OR grp.branch_uuid = ANY($3::uuid[]))
         ORDER BY grp.sort_order
         `,
         [period, branchId, listed],

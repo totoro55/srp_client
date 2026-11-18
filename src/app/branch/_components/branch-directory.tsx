@@ -357,7 +357,8 @@ function readBrigades(value: BrigadeSetup | undefined): BrigadeSetup {
             memberIds: group.memberIds.filter((id) => typeof id === "string"),
         }];
     });
-    return { mode: value.mode, groups };
+    const since = typeof value.since === "string" && /^\d{4}-\d{2}-01$/.test(value.since) ? value.since : null;
+    return { mode: value.mode, groups, since };
 }
 
 function readRoleIds(value: string[] | undefined): string[] {

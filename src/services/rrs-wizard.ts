@@ -7,7 +7,7 @@ import { parseRrsSaveInput, type RrsCoefficientPage, type RrsCoefficientValue, t
 import type { AccessView } from "@/server/authz/resolve-access";
 import { getAppSettings } from "@/services/app-settings";
 import { applyRrsMonth, changedConnectionKinds, getRrsMonth, guardRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
-import { prepareBranchMotivation, triggerBrigadeRecalc, writeBranchMotivation, writeMotivationBrigades } from "@/services/branch-motivation";
+import { prepareBranchMotivation, writeBranchMotivation, writeMotivationBrigades } from "@/services/branch-motivation";
 import { coefficientBranchChanges, getBranchCoefficients, replacePeriodCoefficients } from "@/services/basket-coefficients";
 import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
@@ -189,7 +189,7 @@ export async function commitRrsWizard(
             }
         }
     }
-    const brigadeChanged = await db.transaction(async (query) => {
+    const brigadeByPeriod = await db.transaction(async (query) => {
         onProgress("baskets");
         await applyRrsMonth(query, access, input.territoryUuid, input.period, input.items);
         onProgress("motivation");
@@ -203,25 +203,34 @@ export async function commitRrsWizard(
         return changed;
     });
     onProgress("recalc");
-    if (brigadeChanged.length > 0) {
-        await triggerBrigadeRecalc({
-            period: input.period,
-            branchIds: brigadeChanged,
-            actor: access.username,
-            trigger: "rrs.wizard",
-            route: "/api/rrs/wizard",
-            editable: true,
-        });
-    }
-    return enqueuePremiumScopes({
+    const route = "/api/rrs/wizard";
+    let notice = await enqueuePremiumScopes({
         period: input.period,
         actor: access.username,
         trigger: "rrs.wizard",
         territoryId: input.territoryUuid.toLowerCase(),
         territoryKinds,
         branchKinds,
-        route: "/api/rrs/wizard",
+        brigadeBranches: brigadeByPeriod.get(input.period) ?? [],
+        route,
     });
+    for (const [laterPeriod, branches] of brigadeByPeriod) {
+        if (laterPeriod === input.period) {
+            continue;
+        }
+        const extra = await enqueuePremiumScopes({
+            period: laterPeriod,
+            actor: access.username,
+            trigger: "rrs.wizard",
+            territoryId: input.territoryUuid.toLowerCase(),
+            territoryKinds: [],
+            branchKinds: new Map(),
+            brigadeBranches: branches,
+            route,
+        });
+        notice ??= extra;
+    }
+    return notice;
 }
 
 async function wizardCoefficients(access: AccessView, territoryUuid: string, period: string): Promise<RrsCoefficientPage> {

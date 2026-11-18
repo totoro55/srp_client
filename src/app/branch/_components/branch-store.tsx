@@ -9,7 +9,7 @@ import {
 } from "./mock";
 import type { StaffEmployee } from "./staff";
 
-const EMPTY_BRIGADES: BrigadeSetup = { mode: "off", groups: [] };
+const EMPTY_BRIGADES: BrigadeSetup = { mode: "off", groups: [], since: null };
 
 interface BranchState {
     savedRoles: Record<string, Record<string, string | null>>;
@@ -55,6 +55,7 @@ function keyOf(branchId: string, period: string): string {
 function cloneSetup(setup: BrigadeSetup): BrigadeSetup {
     return {
         mode: setup.mode,
+        since: setup.since ?? null,
         groups: setup.groups.map((group) => ({ ...group, memberIds: [...group.memberIds] })),
     };
 }

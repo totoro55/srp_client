@@ -519,7 +519,41 @@ function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): Jou
             operations: [operation],
         });
     }
+    appendWaitingBrigade(processes);
     return processes;
+}
+
+const BRIGADE_BASKET_KINDS = new Set<BasketUpdateKind>(["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection"]);
+
+function appendWaitingBrigade(processes: JournalProcess[]): void {
+    for (const process of processes) {
+        if (!process.live || process.operations.some((operation) => operation.kind === "brigade")) {
+            continue;
+        }
+        const sample = process.operations.find((operation) => BRIGADE_BASKET_KINDS.has(operation.kind));
+        if (!sample) {
+            continue;
+        }
+        process.operations.push({
+            key: `${process.id}-brigade-waiting`,
+            runId: null,
+            kind: "brigade",
+            period: sample.period,
+            status: "pending",
+            origin: sample.origin,
+            trigger: sample.trigger,
+            actor: sample.actor,
+            actorPerson: sample.actorPerson,
+            lines: null,
+            error: "",
+            errorDetail: null,
+            startedAt: null,
+            finishedAt: null,
+            scope: sample.scope,
+            detail: "Пойдёт одним шагом после корзин этой записи.",
+            conditions: sample.conditions,
+        });
+    }
 }
 
 function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): JournalOperation[] {

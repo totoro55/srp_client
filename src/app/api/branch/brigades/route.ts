@@ -65,19 +65,21 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
         const saved = await saveBranchBrigadeSetup(branchId, period, setup);
         let recalculated = false;
         let recalcMessage: string | null = null;
-        if (!skipRecalc) {
+        if (!skipRecalc && saved.periods.length > 0) {
             try {
-                await runBrigadeJournal({
-                    period,
-                    indicators: BRIGADE_INDICATORS,
-                    actor: access.username,
-                    trigger: "branch.brigades",
-                    origin: "manual",
-                    scopeLevel: "branch",
-                    scopeIds: [branchId],
-                    route: "/api/branch/brigades",
-                    run: { branch: branchId.toLowerCase() },
-                });
+                for (const changedPeriod of saved.periods) {
+                    await runBrigadeJournal({
+                        period: changedPeriod,
+                        indicators: BRIGADE_INDICATORS,
+                        actor: access.username,
+                        trigger: "branch.brigades",
+                        origin: "manual",
+                        scopeLevel: "branch",
+                        scopeIds: [branchId],
+                        route: "/api/branch/brigades",
+                        run: { branch: branchId.toLowerCase() },
+                    });
+                }
                 recalculated = true;
             } catch (error) {
                 recalcMessage = error instanceof SalePremiumError || error instanceof PremiumRecalcBusyError
@@ -91,7 +93,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
             success: true,
             data: {
                 saved: true,
-                brigades: saved,
+                brigades: saved.setup,
                 recalculated,
                 recalcMessage,
                 salePremiums: fresh?.salePremiums ?? {},

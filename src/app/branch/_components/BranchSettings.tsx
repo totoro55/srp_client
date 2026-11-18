@@ -423,7 +423,7 @@ function Staff({
                     const scopeLabel = branchScopeLabel(directory.branches, branchId);
                     openRecalcConsole({
                         period,
-                        kinds: ["sale", "release", "kassa", "shared"],
+                        kinds: ["sale", "release", "kassa", "shared", "brigade"],
                         reason: "branch.roles",
                         actor,
                         scopeLevel: "branch",
@@ -860,6 +860,13 @@ function Brigades({
                 <ModeButton current={setup.mode} mode="all" disabled={closed} onClick={() => store.setBrigadeMode(branchId, period, "all")}><Users />Общая бригада</ModeButton>
                 <ModeButton current={setup.mode} mode="groups" disabled={closed} onClick={() => store.setBrigadeMode(branchId, period, "groups")}><LayoutGrid />Отдельные группы</ModeButton>
             </div>
+            {setup.since ? (
+                <p className="text-sm text-muted-foreground">
+                    {setup.since === period
+                        ? `Начало режима — ${monthLabel(setup.since)} Дальше он действует, пока его не изменят.`
+                        : `Начало режима — ${monthLabel(setup.since)} В этом месяце он не менялся.`}
+                </p>
+            ) : null}
             {slice.rolesDirty ? <Notice>Роли ещё не сохранены. Список участников смотрит на роли, которые сейчас на экране.</Notice> : null}
             {setup.mode === "off" ? <Notice>Бригада на филиале выключена. Расчёт выполняется по сотрудникам.</Notice> : null}
             {setup.mode === "all" ? (
@@ -1322,7 +1329,7 @@ function BrigadeHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Режим</h3>
                 <p className="text-muted-foreground">
-                    По умолчанию бригада филиала выключена. Доступны режимы «Выключена», «Общая бригада» и «Отдельные группы». Одновременно может действовать только один режим. Выбранный режим применяется после сохранения. Кнопка «Отменить» восстанавливает режим и состав, действовавшие до сохранения. В закрытом месяце изменение не допускается.
+                    По умолчанию бригада филиала выключена. Доступны режимы «Выключена», «Общая бригада» и «Отдельные группы». Одновременно может действовать только один режим. Внутри месяца режим один на весь месяц. Запись действует с выбранного месяца, пока для более позднего месяца не сохранят другой режим. Если переключатель и состав совпадают с уже действующим режимом, новый месяц не записывается и доли не пересчитываются. Кнопка «Отменить» восстанавливает режим и состав, действовавшие до правки. В закрытом месяце изменение не допускается.
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">

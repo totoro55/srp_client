@@ -79,6 +79,8 @@ export interface BrigadeGroup {
 export interface BrigadeSetup {
     mode: BrigadeMode;
     groups: BrigadeGroup[];
+    /** Месяц, с которого действует режим. Пусто — бригада ещё не задавалась. */
+    since?: string | null;
 }
 
 export interface BranchMonth {

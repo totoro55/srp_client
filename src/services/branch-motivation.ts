@@ -2,11 +2,9 @@ import { buildChangeEvents, snapshotsFromRows, type StoredChangeRow } from "@/li
 import { buildRrsEditPolicy, closedPeriodMessage, monthIsOpen, type RrsEditPolicy } from "@/lib/rrs-edit-window";
 import type { RrsFieldChangeEvent, RrsMotivationItem, RrsMotivationPage, RrsTerritory } from "@/lib/rrs";
 import type { PremiumRecalcKind, StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
-import { BRIGADE_INDICATORS } from "@/lib/brigade-shares";
 import { getAppSettings } from "@/services/app-settings";
 import { getRrsCard, getRrsMonth, listRrsTerritories, RrsRuleError } from "@/services/basket-connections";
 import { readBranchBrigadeModes, writeBranchBrigadeFullMode } from "@/services/branch-brigades";
-import { runBrigadeJournal } from "@/services/brigade-recalc";
 import { enqueuePremiumScopes, premiumKindOf } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
 import { branchListedInPeriod, PERIOD_MOTIVATION_SQL } from "@/services/directory-visibility";
@@ -113,44 +111,52 @@ export async function saveBranchMotivation(
     items: RrsMotivationItem[],
 ): Promise<StartedPremiumRecalc | null> {
     const prepared = await prepareBranchMotivation(access, territoryUuid, period, items);
-    const brigadeChanged = await db.transaction(async (query) => {
+    const brigadeByPeriod = await db.transaction(async (query) => {
         await writeBranchMotivation(query, access.username, territoryUuid, prepared.period, prepared.items);
         return writeMotivationBrigades(query, prepared.period, prepared.items);
     });
-    if (brigadeChanged.length > 0) {
-        await triggerBrigadeRecalc({
-            period: prepared.period,
-            branchIds: brigadeChanged,
-            actor: access.username,
-            trigger: "rrs.motivation",
-            route: "/api/rrs/cards/[territoryUuid]/motivation",
-            editable: true,
-        });
-    }
-    if (prepared.changedBranchIds.length === 0) {
-        return null;
-    }
-    const month = await getRrsMonth(access, territoryUuid, prepared.period);
     const branchKinds = new Map<PremiumRecalcKind, string[]>();
-    for (const connection of month.connections) {
-        if (connection.versionId === null) {
-            continue;
-        }
-        const basket = month.baskets.find((item) => item.id === connection.basketId);
-        const kind = basket ? premiumKindOf(basket.indicatorName) : null;
-        if (kind) {
-            branchKinds.set(kind, prepared.changedBranchIds);
+    if (prepared.changedBranchIds.length > 0) {
+        const month = await getRrsMonth(access, territoryUuid, prepared.period);
+        for (const connection of month.connections) {
+            if (connection.versionId === null) {
+                continue;
+            }
+            const basket = month.baskets.find((item) => item.id === connection.basketId);
+            const kind = basket ? premiumKindOf(basket.indicatorName) : null;
+            if (kind) {
+                branchKinds.set(kind, prepared.changedBranchIds);
+            }
         }
     }
-    return enqueuePremiumScopes({
+    const route = "/api/rrs/cards/[territoryUuid]/motivation";
+    let notice = await enqueuePremiumScopes({
         period: prepared.period,
         actor: access.username,
         trigger: "rrs.motivation",
         territoryId: territoryUuid.toLowerCase(),
         territoryKinds: [],
         branchKinds,
-        route: "/api/rrs/cards/[territoryUuid]/motivation",
+        brigadeBranches: brigadeByPeriod.get(prepared.period) ?? [],
+        route,
     });
+    for (const [laterPeriod, branches] of brigadeByPeriod) {
+        if (laterPeriod === prepared.period) {
+            continue;
+        }
+        const extra = await enqueuePremiumScopes({
+            period: laterPeriod,
+            actor: access.username,
+            trigger: "rrs.motivation",
+            territoryId: territoryUuid.toLowerCase(),
+            territoryKinds: [],
+            branchKinds: new Map(),
+            brigadeBranches: branches,
+            route,
+        });
+        notice ??= extra;
+    }
+    return notice;
 }
 
 export async function prepareBranchMotivation(
@@ -314,52 +320,26 @@ function participationLabel(enabled: boolean): string {
     return enabled ? "Включена" : "Выключена";
 }
 
-/** Пишет полную бригаду для филиалов, у которых в items передано поле brigade. */
+/** Пишет полную бригаду для филиалов, у которых в items передано поле brigade. Ключ — месяц, с которого режим изменился. */
 export async function writeMotivationBrigades(
     query: Sql,
     period: string,
     items: RrsMotivationItem[],
-): Promise<string[]> {
-    const changed: string[] = [];
+): Promise<Map<string, string[]>> {
+    const byPeriod = new Map<string, string[]>();
     for (const item of items) {
         if (typeof item.brigade !== "boolean") {
             continue;
         }
         const full = item.enabled && item.brigade;
-        if (await writeBranchBrigadeFullMode(query, item.branchUuid, period, full)) {
-            changed.push(item.branchUuid.toLowerCase());
+        const periods = await writeBranchBrigadeFullMode(query, item.branchUuid, period, full);
+        for (const changedPeriod of periods) {
+            const branches = byPeriod.get(changedPeriod) ?? [];
+            branches.push(item.branchUuid.toLowerCase());
+            byPeriod.set(changedPeriod, branches);
         }
     }
-    return changed;
-}
-
-export async function triggerBrigadeRecalc(input: {
-    period: string;
-    branchIds: readonly string[];
-    actor: string;
-    trigger: string;
-    route: string;
-    editable: boolean;
-}): Promise<void> {
-    const ids = [...new Set(input.branchIds.map((id) => id.toLowerCase()))];
-    if (!input.editable || ids.length === 0) {
-        return;
-    }
-    try {
-        await runBrigadeJournal({
-            period: input.period,
-            indicators: BRIGADE_INDICATORS,
-            actor: input.actor,
-            trigger: input.trigger,
-            origin: "manual",
-            scopeLevel: "branch",
-            scopeIds: ids,
-            route: input.route,
-            run: { branches: ids },
-        });
-    } catch (error) {
-        console.error("Не удалось пересчитать доли бригады после настройки РРС", error);
-    }
+    return byPeriod;
 }
 
 async function branchesWithBaseBonus(period: string, branchUuids: string[]): Promise<Map<string, string>> {

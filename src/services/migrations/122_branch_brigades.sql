@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS main.branch_brigades (
 );
 
 COMMENT ON TABLE main.branch_brigades IS
-    'Режим бригады филиала на месяц: выключена, общая или отдельные группы.';
+    'Режим бригады филиала с месяца period до следующей записи этого филиала: выключена, общая или отдельные группы.';
 
 COMMENT ON COLUMN main.branch_brigades.mode IS
     'off — личная премия. all — все, кто в расчёте. groups — только сотрудники групп.';
