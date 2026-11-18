@@ -63,6 +63,7 @@ export async function readBranchReleasePremiumDays(period: string, branchId: str
         JOIN indicators indicator ON indicator.id = basket.indicator_id
         WHERE day.period = $1::date
           AND day.branch_uuid = $2::uuid
+          AND day.author_kind = 'staff'
           AND indicator.name = 'Выдача товара'
         `,
         [period, branchId],

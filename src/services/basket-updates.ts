@@ -168,6 +168,7 @@ async function snapshotFor(indicator: string): Promise<SnapshotRow[]> {
         JOIN baskets basket ON basket.id = day.basket_id
         JOIN indicators indicator ON indicator.id = basket.indicator_id
         WHERE indicator.name = $1
+          AND day.author_kind = 'staff'
         GROUP BY day.period
     `, [indicator]);
 }

@@ -43,6 +43,7 @@ EXISTS (
     WHERE day.period = $3::date
       AND day.branch_uuid = branch.uuid
       AND day.employee_uuid = home.employee_id
+      AND day.author_kind = 'staff'
 )
 OR EXISTS (
     SELECT 1

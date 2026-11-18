@@ -4,7 +4,8 @@
 -- $3 — филиал, $4 и $5 — отрезок дат. Для записи месяца они пустые.
 -- $6 — начисление с сохранённым kassa_coef. Пусто — текущий коэффициент филиала.
 -- $7 — список филиалов. Пусто — без ограничения списком.
--- Запись дней этим файлом не выполняется: пересчёт суммирует результат по дате документа.
+-- Одинаковые минуты одного автора, дня и филиала документа сходятся до штатного расписания.
+-- Премия строки по-прежнему округляется до умножения на число таких операций.
 --
 -- Уже входит в формулу:
 --   корзина с показателем «Кассовые операции», версия со скриптом kassa.minutes;
@@ -51,58 +52,73 @@ rates AS MATERIALIZED (
     WHERE tariff.rate IS NOT NULL
 ),
 operation_hits AS (
-    SELECT operation.*
+    SELECT operation.author AS employee_uuid,
+           COALESCE(operation.date::date, $1::date) AS document_day,
+           operation."Фирма" AS firm_uuid,
+           operation.minute::numeric AS minute
     FROM raw.kassa_oper operation
     WHERE $2::uuid IS NOT NULL
       AND operation.period = $1::timestamp
       AND operation.author = $2::uuid
+      AND operation.minute IS NOT NULL
+      AND operation.minute <> 0
+      AND (
+          $4::date IS NULL
+          OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
+      )
     UNION ALL
-    SELECT operation.*
+    SELECT operation.author,
+           COALESCE(operation.date::date, $1::date),
+           operation."Фирма",
+           operation.minute::numeric
     FROM raw.kassa_oper operation
     WHERE $2::uuid IS NULL
       AND operation.period = $1::timestamp
       AND operation.author IS NOT NULL
+      AND operation.minute IS NOT NULL
+      AND operation.minute <> 0
       AND (
           $4::date IS NULL
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
 ),
-worked AS (
+minutes AS (
+    SELECT employee_uuid,
+           document_day,
+           firm_uuid,
+           minute,
+           COUNT(*)::numeric AS copies
+    FROM operation_hits
+    GROUP BY employee_uuid, document_day, firm_uuid, minute
+),
+worked AS MATERIALIZED (
     SELECT $1::date AS period,
            branch.territory_uuid,
            assignment.branch_uuid,
            assignment.author_kind,
-           issuer.employee_uuid,
-           operation.date AS document_date,
-           operation.minute::numeric AS minute,
+           minutes.employee_uuid,
+           minutes.document_day::timestamp AS document_date,
+           minutes.minute,
+           minutes.copies,
            rates.rate AS tariff
-    FROM operation_hits operation
-    CROSS JOIN LATERAL (
-        SELECT operation.author AS employee_uuid
-    ) issuer
+    FROM minutes
     JOIN main.author_days author_day
         ON author_day.period = $1::date
-       AND author_day.employee_uuid = issuer.employee_uuid
-       AND author_day.day = COALESCE(operation.date::date, $1::date)
+       AND author_day.employee_uuid = minutes.employee_uuid
+       AND author_day.day = minutes.document_day
     CROSS JOIN LATERAL (
         SELECT CASE
-                   WHEN author_day.author_kind = 'system' THEN operation."Фирма"
+                   WHEN author_day.author_kind = 'system' THEN minutes.firm_uuid
                    ELSE author_day.branch_uuid
                END AS branch_uuid,
                author_day.author_kind
     ) assignment
     JOIN dictionaries.branches branch ON branch.uuid = assignment.branch_uuid
     JOIN rates ON rates.territory_uuid = branch.territory_uuid
-    WHERE issuer.employee_uuid IS NOT NULL
-      AND operation.minute IS NOT NULL
-      AND operation.minute <> 0
+    WHERE minutes.employee_uuid IS NOT NULL
       AND assignment.branch_uuid IS NOT NULL
       AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
       AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
-      AND (
-          $4::date IS NULL
-          OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
-      )
 ),
 coefficients AS (
     SELECT branch.territory_uuid,
@@ -143,10 +159,10 @@ SELECT worked.period,
        worked.author_kind,
        worked.employee_uuid,
        worked.document_date,
-       worked.minute,
+       worked.minute * worked.copies AS minute,
        worked.tariff,
        coefficients.kassa_coef::numeric AS coefficient,
-       ROUND(worked.minute * worked.tariff * coefficients.kassa_coef, 2) AS premium
+       ROUND(worked.minute * worked.tariff * coefficients.kassa_coef, 2) * worked.copies AS premium
 FROM worked
 JOIN coefficients
     ON coefficients.territory_uuid = worked.territory_uuid

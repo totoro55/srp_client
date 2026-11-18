@@ -694,6 +694,7 @@ async function readPremiumDays(
           AND indicator.name = ANY($2::text[])
           AND ($3::uuid IS NULL OR day.branch_uuid = $3::uuid)
           AND ($4::uuid[] IS NULL OR day.branch_uuid = ANY($4::uuid[]))
+          AND day.author_kind = 'staff'
         `,
         [period, indicators, branchId, listed],
     );

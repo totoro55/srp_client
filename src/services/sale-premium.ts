@@ -85,7 +85,7 @@ export function premiumDayInsertSql(selectSql: string, indicatorName: string): s
     const indicator = indicatorName.replaceAll("'", "''");
     return `
         INSERT INTO main.basket_premium_days (
-            period, territory_uuid, branch_uuid, employee_uuid, basket_id, day, premium
+            period, territory_uuid, branch_uuid, employee_uuid, basket_id, day, premium, author_kind
         )
         SELECT priced_line.period,
                priced_line.territory_uuid,
@@ -93,7 +93,8 @@ export function premiumDayInsertSql(selectSql: string, indicatorName: string): s
                priced_line.employee_uuid,
                basket.id,
                COALESCE(priced_line.document_date::date, priced_line.period),
-               ROUND(SUM(priced_line.premium), 2)
+               ROUND(SUM(priced_line.premium), 2),
+               priced_line.author_kind
         FROM (
 ${selectSql}
         ) priced_line
@@ -104,7 +105,7 @@ ${selectSql}
             WHERE indicator.name = '${indicator}'
             LIMIT 1
         )
-        WHERE priced_line.author_kind = 'staff'
+        WHERE priced_line.author_kind IN ('staff', 'promoter', 'system')
           AND NOT EXISTS (
             SELECT 1
             FROM main.premium_accruals accrual
@@ -123,6 +124,7 @@ ${selectSql}
                AND existing.branch_uuid = priced_line.branch_uuid
                AND existing.employee_uuid = priced_line.employee_uuid
                AND existing.day = COALESCE(priced_line.document_date::date, priced_line.period)
+               AND existing.author_kind = priced_line.author_kind
             WHERE closed.employee_uuid = priced_line.employee_uuid
               AND closed.branch_uuid = priced_line.branch_uuid
               AND COALESCE(priced_line.document_date::date, priced_line.period)
@@ -132,6 +134,7 @@ ${selectSql}
                  priced_line.territory_uuid,
                  priced_line.branch_uuid,
                  priced_line.employee_uuid,
+                 priced_line.author_kind,
                  basket.id,
                  COALESCE(priced_line.document_date::date, priced_line.period)
     `;
@@ -367,6 +370,7 @@ export async function readBranchSalePremiumDays(period: string, branchId: string
         JOIN indicators indicator ON indicator.id = basket.indicator_id
         WHERE day.period = $1::date
           AND day.branch_uuid = $2::uuid
+          AND day.author_kind = 'staff'
           AND indicator.name = 'Продажа товара'
         `,
         [period, branchId],
