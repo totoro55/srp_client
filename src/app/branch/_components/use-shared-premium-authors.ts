@@ -13,6 +13,7 @@ export interface SharedPremiumAuthor {
     osnt: number;
     warehouse: number;
     unloading: number;
+    selection: number;
     activeFrom: string;
 }
 

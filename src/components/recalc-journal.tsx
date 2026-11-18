@@ -812,6 +812,9 @@ function kindName(kind: BasketUpdateKind): string {
     if (kind === "unloading") {
         return "Разгрузка";
     }
+    if (kind === "selection") {
+        return "Набор";
+    }
     if (kind === "tariffs") {
         return "Тарифы";
     }

@@ -343,6 +343,7 @@ function Staff({
                     osntPremiums?: Record<string, number>;
                     warehousePremiums?: Record<string, number>;
                     unloadingPremiums?: Record<string, number>;
+                    selectionPremiums?: Record<string, number>;
                     shares?: Record<string, number>;
                 };
                 error?: { message?: string };
@@ -366,6 +367,7 @@ function Staff({
                     osntPremiums: json.data.osntPremiums ?? {},
                     warehousePremiums: json.data.warehousePremiums ?? {},
                     unloadingPremiums: json.data.unloadingPremiums ?? {},
+                    selectionPremiums: json.data.selectionPremiums ?? {},
                     sharedPremiums: json.data.shares,
                 });
             }
@@ -725,6 +727,7 @@ function Brigades({
                     osntPremiums?: Record<string, number>;
                     warehousePremiums?: Record<string, number>;
                     unloadingPremiums?: Record<string, number>;
+                    selectionPremiums?: Record<string, number>;
                     shares?: Record<string, number>;
                 };
                 error?: { message?: string };
@@ -743,6 +746,7 @@ function Brigades({
                     osntPremiums: json.data.osntPremiums ?? {},
                     warehousePremiums: json.data.warehousePremiums ?? {},
                     unloadingPremiums: json.data.unloadingPremiums ?? {},
+                    selectionPremiums: json.data.selectionPremiums ?? {},
                     sharedPremiums: json.data.shares,
                 });
             }

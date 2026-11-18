@@ -19,6 +19,7 @@ import { OsntBonusDetail } from "./OsntBonusDetail";
 import { ReleaseBonusDetail } from "./ReleaseBonusDetail";
 import { SalesBonusDetail } from "./SalesBonusDetail";
 import { ServiceBonusDetail } from "./ServiceBonusDetail";
+import { SelectionBonusDetail } from "./SelectionBonusDetail";
 import { UnloadBonusDetail } from "./UnloadBonusDetail";
 import { WarehouseBonusDetail } from "./WarehouseBonusDetail";
 import {
@@ -46,8 +47,9 @@ export function BonusLines() {
     const osntIndicator = directory.indicators.find((indicator) => indicator.title === "ОСНТ");
     const warehouseIndicator = directory.indicators.find((indicator) => indicator.title === "Складские операции");
     const unloadingIndicator = directory.indicators.find((indicator) => indicator.title === "Разгрузка ТС");
+    const selectionIndicator = directory.indicators.find((indicator) => indicator.title === "Набор товара");
     const mockBaskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
-    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator, osntIndicator, warehouseIndicator, unloadingIndicator]
+    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator, osntIndicator, warehouseIndicator, unloadingIndicator, selectionIndicator]
         .flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
     const baskets = month?.calculated && mockBaskets.length > 0 ? mockBaskets : liveBaskets;
     const knownPart = part !== null && baskets.some(([basketId]) => basketId === part);
@@ -210,6 +212,8 @@ export function BonusLines() {
                     <WarehouseBonusDetail employeeId={personId} period={period} />
                 ) : tab === unloadingIndicator?.id || tab === "unload" ? (
                     <UnloadBonusDetail employeeId={personId} period={period} />
+                ) : tab === selectionIndicator?.id ? (
+                    <SelectionBonusDetail employeeId={personId} period={period} />
                 ) : tab === "issue" ? (
                     <IssueBonusDetail employeeId={personId} period={period} />
                 ) : tab === "picking" ? (

@@ -393,6 +393,7 @@ export function BranchBonuses() {
             "ОСНТ": directory.osntPremiums[key],
             "Складские операции": directory.warehousePremiums[key],
             "Разгрузка ТС": directory.unloadingPremiums[key],
+            "Набор товара": directory.selectionPremiums[key],
         });
         const shared = directory.sharedPremiums[key] ?? 0;
         const earned = earnedPremium([...Object.values(premiums), ...Object.values(services), shared]);
@@ -425,6 +426,7 @@ export function BranchBonuses() {
         directory.salePremiums,
         directory.sharedPremiums,
         directory.unloadingPremiums,
+        directory.selectionPremiums,
         directory.warehousePremiums,
         services,
         settings,

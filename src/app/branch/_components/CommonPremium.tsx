@@ -27,13 +27,15 @@ export function CommonPremium() {
     const osnt = directory.indicators.find((indicator) => indicator.title === "ОСНТ");
     const warehouse = directory.indicators.find((indicator) => indicator.title === "Складские операции");
     const unloading = directory.indicators.find((indicator) => indicator.title === "Разгрузка ТС");
+    const selection = directory.indicators.find((indicator) => indicator.title === "Набор товара");
     const saleAmount = authors.reduce((sum, author) => sum + author.sale, 0);
     const releaseAmount = authors.reduce((sum, author) => sum + author.release, 0);
     const kassaAmount = authors.reduce((sum, author) => sum + author.kassa, 0);
     const osntAmount = authors.reduce((sum, author) => sum + author.osnt, 0);
     const warehouseAmount = authors.reduce((sum, author) => sum + author.warehouse, 0);
     const unloadingAmount = authors.reduce((sum, author) => sum + author.unloading, 0);
-    const pool = Math.round((saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount) * 100) / 100;
+    const selectionAmount = authors.reduce((sum, author) => sum + author.selection, 0);
+    const pool = Math.round((saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount + selectionAmount) * 100) / 100;
     const hours = directory.employees.reduce((sum, employee) => {
         const roleId = slice.savedRoles[roleKey(employee)] ?? null;
         if (!inCalculation(employee, roleId)) {
@@ -59,6 +61,9 @@ export function CommonPremium() {
     }
     if (unloading && unloadingAmount > 0) {
         groups.push({ basketId: unloading.id, title: unloading.title, amount: unloadingAmount, facts: [] });
+    }
+    if (selection && selectionAmount > 0) {
+        groups.push({ basketId: selection.id, title: selection.title, amount: selectionAmount, facts: [] });
     }
 
     if ((directory.loading && directory.employees.length === 0) || authorsState.loading) {
@@ -163,6 +168,13 @@ export function CommonPremium() {
                                         amount={author.unloading}
                                     />
                                 ) : null}
+                                {selection && author.selection > 0 ? (
+                                    <AuthorLine
+                                        href={authorHref(author.id, author.kind === "staff" ? author.activeFrom : null, branchId, period, selection.id)}
+                                        label={selection.title}
+                                        amount={author.selection}
+                                    />
+                                ) : null}
                             </CardContent>
                         </Card>
                     ))}
@@ -172,8 +184,8 @@ export function CommonPremium() {
     );
 }
 
-function authorTotal(author: { sale: number; release: number; kassa: number; osnt: number; warehouse: number; unloading: number }): number {
-    return author.sale + author.release + author.kassa + author.osnt + author.warehouse + author.unloading;
+function authorTotal(author: { sale: number; release: number; kassa: number; osnt: number; warehouse: number; unloading: number; selection: number }): number {
+    return author.sale + author.release + author.kassa + author.osnt + author.warehouse + author.unloading + author.selection;
 }
 
 function authorHref(id: string, activeFrom: string | null, branchId: string, period: string, part: string): string {

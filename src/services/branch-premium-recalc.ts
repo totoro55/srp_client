@@ -19,6 +19,7 @@ import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, SalePremiumError, type PremiumRun } from "@/services/sale-premium";
 import { moscowToday } from "@/services/segment-locks";
 import { calculateSharedPremium } from "@/services/shared-premium";
+import { calculateSelectionPremium } from "@/services/product-selection-premium";
 import { calculateUnloadingPremium } from "@/services/unloading-premium";
 import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
@@ -44,6 +45,7 @@ export async function recalculateBranchPremiums(input: {
         { kind: "osnt", calculate: () => calculateOsntPremium(input.period, false, run) },
         { kind: "warehouse", calculate: () => calculateWarehousePremium(input.period, false, run) },
         { kind: "unloading", calculate: () => calculateUnloadingPremium(input.period, false, run) },
+        { kind: "selection", calculate: () => calculateSelectionPremium(input.period, false, run) },
         { kind: "shared", calculate: () => calculateSharedPremium(input.period, run) },
     ];
     const brigadeFollows = steps.some((step) => brigadeIndicatorOf(step.kind));
@@ -229,8 +231,9 @@ function selectionSteps(
     const osnt = { kind: "osnt" as const, calculate: () => calculateOsntPremium(period, false, run) };
     const warehouse = { kind: "warehouse" as const, calculate: () => calculateWarehousePremium(period, false, run) };
     const unloading = { kind: "unloading" as const, calculate: () => calculateUnloadingPremium(period, false, run) };
+    const selection = { kind: "selection" as const, calculate: () => calculateSelectionPremium(period, false, run) };
     if (target === "baskets") {
-        return [sale, release, kassa, osnt, warehouse, unloading];
+        return [sale, release, kassa, osnt, warehouse, unloading, selection];
     }
     if (target === "sale") {
         return [sale];
@@ -249,6 +252,9 @@ function selectionSteps(
     }
     if (target === "unloading") {
         return [unloading];
+    }
+    if (target === "selection") {
+        return [selection];
     }
     return [{ kind: "shared", calculate: () => calculateSharedPremium(period, run) }];
 }

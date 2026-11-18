@@ -18,6 +18,7 @@ const INDICATOR_BY_KIND: Partial<Record<BasketUpdateKind, BrigadeIndicator>> = {
     osnt: "ОСНТ",
     warehouse: "Складские операции",
     unloading: "Разгрузка ТС",
+    selection: "Набор товара",
 };
 
 export function brigadeIndicatorOf(kind: BasketUpdateKind): BrigadeIndicator | null {

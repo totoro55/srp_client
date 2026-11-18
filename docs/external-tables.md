@@ -306,3 +306,17 @@ period: 2026-10-01
 | branch_uuid | uuid | да | Филиал |
 | date | timestamp | да | День графика |
 
+## raw.product_selection
+
+Набор товара. Внешних ключей нет. `count_tovar` — количество, `volume` — объём м³, `type_nabor` — вид набора. Премия строки — `(тариф quantity × count_tovar + тариф volume × volume) × selection_coef`. Филиал премии — `main.author_days`; у системной учётки — `branch_uuid`. Запрос: `src/services/product-selection-premium-v1.sql`.
+
+| Поле | Тип | Пусто | Смысл |
+| --- | --- | --- | --- |
+| period | date | да | Месяц, первое число |
+| branch_uuid | uuid | да | Филиал документа |
+| author | uuid | да | Автор набора |
+| date | date | да | Дата набора |
+| type_nabor | text | да | Вид набора |
+| count_tovar | float8 | да | Количество |
+| volume | float8 | да | Объём, м³ |
+

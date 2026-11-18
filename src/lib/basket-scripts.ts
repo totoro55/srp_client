@@ -53,6 +53,14 @@ export const BASKET_SCRIPTS: readonly BasketScript[] = [
         file: "unloading-premium-v1.sql",
         summary: "Доля объёма приёмки на участника умножается на ставку volume и коэффициент филиала unloading_coef.",
     },
+    {
+        id: "selection.quantity-volume",
+        title: "Количество и объём набора",
+        indicator: "Набор товара",
+        parameters: ["quantity", "volume"],
+        file: "product-selection-premium-v1.sql",
+        summary: "Ставка quantity умножается на количество, ставка volume — на объём. Обе умножаются на коэффициент филиала selection_coef.",
+    },
 ];
 
 export function basketScriptsFor(indicator: string): BasketScript[] {

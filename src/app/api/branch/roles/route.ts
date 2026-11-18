@@ -27,6 +27,7 @@ interface BranchRolesPayload {
     osntPremiums: Record<string, number>;
     warehousePremiums: Record<string, number>;
     unloadingPremiums: Record<string, number>;
+    selectionPremiums: Record<string, number>;
     shares: Record<string, number>;
 }
 
@@ -102,6 +103,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
                 osntPremiums: fresh?.osntPremiums ?? {},
                 warehousePremiums: fresh?.warehousePremiums ?? {},
                 unloadingPremiums: fresh?.unloadingPremiums ?? {},
+                selectionPremiums: fresh?.selectionPremiums ?? {},
                 shares: fresh?.sharedPremiums ?? {},
             },
         });

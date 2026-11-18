@@ -8,7 +8,7 @@ import { db } from "@/services/db";
 import type { ApiResponse } from "@/types/api";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "shared", "tariffs", "brigade"];
+const KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "shared", "tariffs", "brigade"];
 const SCOPES: RecalcScopeLevel[] = ["division", "territory", "branch"];
 
 /** Временная фикстура для проверки оверлея. Не для продакшена. */

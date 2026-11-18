@@ -93,6 +93,7 @@ interface AuthorInsert {
     osnt: number;
     warehouse: number;
     unloading: number;
+    selection: number;
 }
 
 interface OutsideAuthor {
@@ -105,6 +106,7 @@ interface OutsideAuthor {
     osnt: number;
     warehouse: number;
     unloading: number;
+    selection: number;
 }
 
 export async function writeSharedPremiums(
@@ -194,7 +196,7 @@ async function readStoredBranchPool(
         SELECT COALESCE((
                    SELECT SUM(
                        author.sale + author.release + author.kassa
-                       + author.osnt + author.warehouse + author.unloading
+                       + author.osnt + author.warehouse + author.unloading + author.selection
                    )
                    FROM main.shared_premium_authors author
                    WHERE author.period = $1::date
@@ -327,6 +329,7 @@ export interface SharedPremiumAuthorRow {
     osnt: number;
     warehouse: number;
     unloading: number;
+    selection: number;
     activeFrom: string;
 }
 
@@ -358,6 +361,7 @@ export async function readSharedPremiumAuthors(
         osnt: number | string;
         warehouse: number | string;
         unloading: number | string;
+        selection: number | string;
         name: string;
         title: string;
     }>(
@@ -371,6 +375,7 @@ export async function readSharedPremiumAuthors(
                author.osnt::float8 AS osnt,
                author.warehouse::float8 AS warehouse,
                author.unloading::float8 AS unloading,
+               author.selection::float8 AS selection,
                COALESCE(
                    NULLIF(btrim(person.name), ''),
                    NULLIF(btrim(promoter.name_employees), ''),
@@ -413,7 +418,8 @@ export async function readSharedPremiumAuthors(
         const osnt = amount(row.osnt);
         const warehouse = amount(row.warehouse);
         const unloading = amount(row.unloading);
-        if (sale === null || release === null || kassa === null || osnt === null || warehouse === null || unloading === null) {
+        const selection = amount(row.selection);
+        if (sale === null || release === null || kassa === null || osnt === null || warehouse === null || unloading === null || selection === null) {
             return [];
         }
         const kind = authorKind(row.kind);
@@ -432,11 +438,12 @@ export async function readSharedPremiumAuthors(
             osnt,
             warehouse,
             unloading,
+            selection,
             activeFrom: row.activeFrom,
         }];
     }).sort((left, right) => (
-        (right.sale + right.release + right.kassa + right.osnt + right.warehouse + right.unloading)
-        - (left.sale + left.release + left.kassa + left.osnt + left.warehouse + left.unloading)
+        (right.sale + right.release + right.kassa + right.osnt + right.warehouse + right.unloading + right.selection)
+        - (left.sale + left.release + left.kassa + left.osnt + left.warehouse + left.unloading + left.selection)
     ) || left.name.localeCompare(right.name, "ru"));
 }
 
@@ -584,6 +591,7 @@ function sharesToWrite(
     const osntByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const warehouseByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const unloadingByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
+    const selectionByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     for (const day of premiumDays) {
         const target = day.indicator === "Выдача товара"
             ? releaseByBranch
@@ -595,7 +603,9 @@ function sharesToWrite(
                         ? warehouseByBranch
                         : day.indicator === "Разгрузка ТС"
                             ? unloadingByBranch
-                            : saleByBranch;
+                            : day.indicator === "Набор товара"
+                                ? selectionByBranch
+                                : saleByBranch;
         const list = target.get(day.branchId) ?? [];
         list.push({ id: day.id, day: day.day, amount: day.amount });
         target.set(day.branchId, list);
@@ -619,6 +629,7 @@ function sharesToWrite(
             && outsideAuthor.osnt === 0
             && outsideAuthor.warehouse === 0
             && outsideAuthor.unloading === 0
+            && outsideAuthor.selection === 0
         ) {
             continue;
         }
@@ -633,6 +644,7 @@ function sharesToWrite(
             osnt: outsideAuthor.osnt,
             warehouse: outsideAuthor.warehouse,
             unloading: outsideAuthor.unloading,
+            selection: outsideAuthor.selection,
         });
     }
     for (const [branchId, employeeIds] of employeesByBranch) {
@@ -663,6 +675,7 @@ function sharesToWrite(
         const osnt = premiumsBySegment(segments, osntByBranch.get(branchId) ?? []);
         const warehouse = premiumsBySegment(segments, warehouseByBranch.get(branchId) ?? []);
         const unloading = premiumsBySegment(segments, unloadingByBranch.get(branchId) ?? []);
+        const selection = premiumsBySegment(segments, selectionByBranch.get(branchId) ?? []);
         let pool = outside.pools.get(branchId) ?? outside.pools.get(branchId.toLowerCase()) ?? 0;
         for (const segment of segments) {
             if (participates(segment.ktu, roleOf(branchId, segment.id, segment.title, segment.ktu, overrides, settings))) {
@@ -674,7 +687,8 @@ function sharesToWrite(
             const osntAmount = osnt[segment.rowKey] ?? 0;
             const warehouseAmount = warehouse[segment.rowKey] ?? 0;
             const unloadingAmount = unloading[segment.rowKey] ?? 0;
-            pool += saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount;
+            const selectionAmount = selection[segment.rowKey] ?? 0;
+            pool += saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount + selectionAmount;
             if (
                 saleAmount !== 0
                 || releaseAmount !== 0
@@ -682,6 +696,7 @@ function sharesToWrite(
                 || osntAmount !== 0
                 || warehouseAmount !== 0
                 || unloadingAmount !== 0
+                || selectionAmount !== 0
             ) {
                 authors.push({
                     branch: branchId,
@@ -694,6 +709,7 @@ function sharesToWrite(
                     osnt: osntAmount,
                     warehouse: warehouseAmount,
                     unloading: unloadingAmount,
+                    selection: selectionAmount,
                 });
             }
         }
@@ -825,7 +841,7 @@ async function replaceAuthors(
             `
             INSERT INTO main.shared_premium_authors (
                 period, branch_uuid, employee_uuid, author_kind, active_from,
-                sale, release, kassa, osnt, warehouse, unloading
+                sale, release, kassa, osnt, warehouse, unloading, selection
             )
             SELECT $1::date,
                    item.branch::uuid,
@@ -837,11 +853,12 @@ async function replaceAuthors(
                    item.kassa::numeric,
                    item.osnt::numeric,
                    item.warehouse::numeric,
-                   item.unloading::numeric
+                   item.unloading::numeric,
+                   item.selection::numeric
             FROM unnest(
                 $2::text[], $3::text[], $4::text[], $5::text[],
-                $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[]
-            ) AS item(branch, employee, kind, active_from, sale, release, kassa, osnt, warehouse, unloading)
+                $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[]
+            ) AS item(branch, employee, kind, active_from, sale, release, kassa, osnt, warehouse, unloading, selection)
             `,
             [
                 period,
@@ -855,6 +872,7 @@ async function replaceAuthors(
                 chunk.map((item) => item.osnt.toFixed(2)),
                 chunk.map((item) => item.warehouse.toFixed(2)),
                 chunk.map((item) => item.unloading.toFixed(2)),
+                chunk.map((item) => item.selection.toFixed(2)),
             ],
         );
     }
@@ -973,6 +991,16 @@ ${selectSql}
       AND ($2::uuid IS NULL OR unloaders.employee_uuid = $2::uuid)`,
         );
     });
+    await addOutsideBasket(query, byAuthor, period, branchId, asOf, "product-selection-premium-v1.sql", "selection", (sql) => {
+        const marker = "picked.period = $1::date";
+        if (!sql.includes(marker)) {
+            throw new SalePremiumError("Не найден период набора товара в запросе премии");
+        }
+        return sql.replaceAll(
+            marker,
+            `${marker} AND picked.author IN (SELECT outside_author.id FROM outside_authors outside_author)`,
+        );
+    });
     await query(`SET LOCAL enable_seqscan = on`);
     const authors = [...byAuthor.values()];
     const pools = new Map<string, number>();
@@ -985,7 +1013,8 @@ ${selectSql}
                 + author.kassa
                 + author.osnt
                 + author.warehouse
-                + author.unloading,
+                + author.unloading
+                + author.selection,
         );
     }
     return { pools, authors };
@@ -1002,6 +1031,7 @@ function emptyOutside(branchId: string, employeeId: string, kind: "promoter" | "
         osnt: 0,
         warehouse: 0,
         unloading: 0,
+        selection: 0,
     };
 }
 
@@ -1012,7 +1042,7 @@ async function addOutsideBasket(
     branchId: string | null,
     asOf: string,
     file: string,
-    field: "kassa" | "osnt" | "warehouse" | "unloading",
+    field: "kassa" | "osnt" | "warehouse" | "unloading" | "selection",
     rewrite: (sql: string) => string,
 ): Promise<void> {
     const selectSql = rewrite(await readPremiumSql(file));
@@ -1208,7 +1238,7 @@ async function dbRows(query: PremiumQuery, period: string, asOf: string, branchI
           AND ($3::uuid IS NULL OR day.branch_uuid = $3::uuid)
           AND indicator.name IN (
               'Продажа товара', 'Выдача товара', 'Кассовые операции',
-              'ОСНТ', 'Складские операции', 'Разгрузка ТС'
+              'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара'
           )
         `,
         [period, asOf, branchId],

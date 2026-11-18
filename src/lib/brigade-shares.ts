@@ -8,6 +8,7 @@ export const BRIGADE_INDICATORS = [
     "ОСНТ",
     "Складские операции",
     "Разгрузка ТС",
+    "Набор товара",
 ] as const;
 
 export type BrigadeIndicator = (typeof BRIGADE_INDICATORS)[number];

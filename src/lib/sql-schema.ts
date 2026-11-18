@@ -39,6 +39,7 @@ const EXTERNAL_TABLES = new Set([
     "wh_operations",
     "unloading_car",
     "grafik_otgruzok",
+    "product_selection",
 ]);
 
 const QUALIFIED = /(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Za-z_][A-Za-z0-9_]*)/;

@@ -8,6 +8,7 @@ import { readBranchReleasePremiumDays } from "@/services/release-premium";
 import { readBranchSalePremiumDays } from "@/services/sale-premium";
 import { applyBrigadeShares, readBranchBrigadeShares } from "@/services/brigade-premium";
 import { readBranchSharedPremiums } from "@/services/shared-premium";
+import { readBranchSelectionPremiumDays } from "@/services/product-selection-premium";
 import { readBranchUnloadingPremiumDays } from "@/services/unloading-premium";
 import { readBranchWarehousePremiumDays } from "@/services/warehouse-premium";
 import { premiumsBySegment, staffSegments, type BranchStaffRow, type HourDay, type StaffVersion } from "@/services/staff-segments";
@@ -49,6 +50,7 @@ export async function readBranchStaff(
     osntPremiums: Record<string, number>;
     warehousePremiums: Record<string, number>;
     unloadingPremiums: Record<string, number>;
+    selectionPremiums: Record<string, number>;
     sharedPremiums: Record<string, number>;
     baseBonus: number | null;
     priceGrowth: number;
@@ -95,6 +97,7 @@ export async function readBranchStaff(
             osntPremiums: {},
             warehousePremiums: {},
             unloadingPremiums: {},
+            selectionPremiums: {},
             sharedPremiums: {},
             baseBonus: null,
             priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,
@@ -122,6 +125,7 @@ export async function readBranchStaff(
             osntPremiums: {},
             warehousePremiums: {},
             unloadingPremiums: {},
+            selectionPremiums: {},
             sharedPremiums: {},
             baseBonus: await readBaseBonus(period, selected.id),
             priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,
@@ -130,7 +134,7 @@ export async function readBranchStaff(
     }
 
     const carried = rosterPeriod !== period;
-    const [versions, days, premiumDays, releaseDays, kassaDays, osntDays, warehouseDays, unloadingDays, sharedPremiums, brigadeShares] = await Promise.all([
+    const [versions, days, premiumDays, releaseDays, kassaDays, osntDays, warehouseDays, unloadingDays, selectionDays, sharedPremiums, brigadeShares] = await Promise.all([
         db.query<StaffVersion>(
             `
             -- Состав последнего загруженного месяца, не позже выбранного.
@@ -184,6 +188,7 @@ export async function readBranchStaff(
         carried ? Promise.resolve([]) : readBranchOsntPremiumDays(period, selected.id),
         carried ? Promise.resolve([]) : readBranchWarehousePremiumDays(period, selected.id),
         carried ? Promise.resolve([]) : readBranchUnloadingPremiumDays(period, selected.id),
+        carried ? Promise.resolve([]) : readBranchSelectionPremiumDays(period, selected.id),
         carried ? Promise.resolve({}) : readBranchSharedPremiums(period, selected.id),
         carried ? Promise.resolve(null) : readBranchBrigadeShares(period, selected.id),
     ]);
@@ -200,6 +205,7 @@ export async function readBranchStaff(
         osntPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : osntDays), brigade?.["ОСНТ"] ?? {}),
         warehousePremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : warehouseDays), brigade?.["Складские операции"] ?? {}),
         unloadingPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : unloadingDays), brigade?.["Разгрузка ТС"] ?? {}),
+        selectionPremiums: applyBrigadeShares(premiumsBySegment(employees, carried ? [] : selectionDays), brigade?.["Набор товара"] ?? {}),
         sharedPremiums: carried ? {} : sharedPremiums,
         baseBonus: selected ? await readBaseBonus(period, selected.id) : null,
         priceGrowth: (await priceGrowthAllowanceFor(period)) ?? 0,

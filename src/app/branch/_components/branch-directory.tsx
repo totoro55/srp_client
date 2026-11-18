@@ -29,6 +29,7 @@ interface BranchDirectoryValue {
     osntPremiums: Record<string, number>;
     warehousePremiums: Record<string, number>;
     unloadingPremiums: Record<string, number>;
+    selectionPremiums: Record<string, number>;
     sharedPremiums: Record<string, number>;
     sharedPremiumRoleIds: string[];
     baseBonus: number | null;
@@ -52,6 +53,7 @@ interface BranchDirectoryValue {
         osntPremiums: Record<string, number>;
         warehousePremiums: Record<string, number>;
         unloadingPremiums: Record<string, number>;
+        selectionPremiums: Record<string, number>;
         sharedPremiums: Record<string, number>;
     }) => void;
 }
@@ -90,6 +92,7 @@ interface StaffResponse {
         osntPremiums?: Record<string, number>;
         warehousePremiums?: Record<string, number>;
         unloadingPremiums?: Record<string, number>;
+        selectionPremiums?: Record<string, number>;
         sharedPremiums?: Record<string, number>;
         sharedPremiumRoleIds?: string[];
         baseBonus: number | null;
@@ -130,6 +133,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         osntPremiums: {},
         warehousePremiums: {},
         unloadingPremiums: {},
+        selectionPremiums: {},
         sharedPremiums: {},
         sharedPremiumRoleIds: [],
         baseBonus: null,
@@ -158,6 +162,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
         osntPremiums: Record<string, number>;
         warehousePremiums: Record<string, number>;
         unloadingPremiums: Record<string, number>;
+        selectionPremiums: Record<string, number>;
         sharedPremiums: Record<string, number>;
     }) => {
         setValue((current) => ({ ...current, ...premiums }));
@@ -213,6 +218,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     osntPremiums: readPremiums(body.data.osntPremiums),
                     warehousePremiums: readPremiums(body.data.warehousePremiums),
                     unloadingPremiums: readPremiums(body.data.unloadingPremiums),
+                    selectionPremiums: readPremiums(body.data.selectionPremiums),
                     sharedPremiums: readPremiums(body.data.sharedPremiums),
                     sharedPremiumRoleIds: readRoleIds(body.data.sharedPremiumRoleIds),
                     baseBonus: body.data.baseBonus,
@@ -271,6 +277,7 @@ export function BranchDirectoryProvider({ children }: { children: ReactNode }) {
                     osntPremiums: current.osntPremiums,
                     warehousePremiums: current.warehousePremiums,
                     unloadingPremiums: current.unloadingPremiums,
+                    selectionPremiums: current.selectionPremiums,
                     sharedPremiums: current.sharedPremiums,
                     sharedPremiumRoleIds: current.sharedPremiumRoleIds,
                     baseBonus: current.baseBonus,
