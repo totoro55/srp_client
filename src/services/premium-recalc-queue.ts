@@ -22,6 +22,7 @@ import { calculateSharedPremium } from "@/services/shared-premium";
 import { calculateDisplayPremium } from "@/services/display-premium";
 import { calculateSelectionPremium } from "@/services/product-selection-premium";
 import { calculateUnloadingPremium } from "@/services/unloading-premium";
+import { withPremiumTurn } from "@/services/premium-lock";
 import { calculateWarehousePremium } from "@/services/warehouse-premium";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -249,6 +250,10 @@ async function pump(): Promise<void> {
 }
 
 async function runJob(job: Job): Promise<void> {
+    await withPremiumTurn(() => executeJob(job));
+}
+
+async function executeJob(job: Job): Promise<void> {
     job.extraBrigadeBranches ??= new Set();
     const kinds = ORDER.filter((kind) => job.scopes.has(kind));
     const brigadeFollows = kinds.some((kind) => brigadeIndicatorOf(kind));

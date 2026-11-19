@@ -63,79 +63,122 @@ export function showStartedRecalc(notice: StartedPremiumRecalc, startedAt?: stri
     });
 }
 
-export function openRecalcConsole(input: Omit<RecalcPlan, "startedAt" | "detail"> & { detail?: string; startedAt?: string }): void {
+export function openRecalcConsole(input: Omit<RecalcPlan, "startedAt" | "detail"> & { detail?: string; startedAt?: string }): RecalcPlan {
     const plan: RecalcPlan = { ...input, detail: input.detail ?? "", startedAt: input.startedAt ?? new Date().toISOString() };
-    sessionStorage.setItem(RECALC_PLAN_KEY, JSON.stringify(plan));
+    writePlans([...readRecalcPlans(), plan]);
     window.dispatchEvent(new CustomEvent(RECALC_CONSOLE_EVENT, { detail: { open: true } }));
+    return plan;
 }
 
-export function clearRecalcPlan(): void {
-    sessionStorage.removeItem(RECALC_PLAN_KEY);
+/** Без startedAt снимает только последний запуск: более ранний месяц в очереди остаётся. */
+export function clearRecalcPlan(startedAt?: string): void {
+    const plans = readRecalcPlans();
+    const next = startedAt
+        ? plans.filter((plan) => plan.startedAt !== startedAt)
+        : plans.slice(0, -1);
+    writePlans(next);
     window.dispatchEvent(new CustomEvent(RECALC_CONSOLE_EVENT, { detail: { open: false } }));
+}
+
+export function readRecalcPlans(): RecalcPlan[] {
+    const raw = sessionStorage.getItem(RECALC_PLAN_KEY);
+    if (!raw) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        const list = Array.isArray(parsed) ? parsed : [parsed];
+        const plans = list.flatMap((item) => {
+            const plan = normalizePlan(item);
+            return plan ? [plan] : [];
+        });
+        if (plans.length !== list.length) {
+            writePlans(plans);
+        }
+        return plans;
+    } catch {
+        sessionStorage.removeItem(RECALC_PLAN_KEY);
+        return [];
+    }
 }
 
 export function readRecalcPlan(): RecalcPlan | null {
-    const raw = sessionStorage.getItem(RECALC_PLAN_KEY);
-    if (!raw) {
-        return null;
+    return readRecalcPlans()[0] ?? null;
+}
+
+export function syncRecalcPlans(events: PlanEvent[]): RecalcPlan[] {
+    const current = readRecalcPlans();
+    if (current.length === 0) {
+        return [];
     }
-    try {
-        const plan = JSON.parse(raw) as Partial<RecalcPlan>;
-        if (typeof plan.period !== "string" || typeof plan.startedAt !== "string" || !Array.isArray(plan.kinds) || !startedOnMoscowToday(plan.startedAt)) {
-            sessionStorage.removeItem(RECALC_PLAN_KEY);
-            return null;
+    let changed = false;
+    const next = current.flatMap((plan) => {
+        const fresh = planLaunchEvents(plan, events);
+        const blocked = fresh.some((event) => event.status === "failed" || event.status === "cancelled");
+        const kinds = blocked ? [] : plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind));
+        if (kinds.length === plan.kinds.length && !blocked) {
+            return [plan];
         }
-        const kinds = plan.kinds.filter(isRecalcKind);
-        if (kinds.length === 0) {
-            sessionStorage.removeItem(RECALC_PLAN_KEY);
-            return null;
-        }
-        return {
-            period: plan.period,
-            kinds,
-            startedAt: plan.startedAt,
-            reason: typeof plan.reason === "string" ? plan.reason : "",
-            actor: typeof plan.actor === "string" ? plan.actor : "",
-            scopeLevel: plan.scopeLevel === "territory" || plan.scopeLevel === "branch" ? plan.scopeLevel : "division",
-            scopeLabel: typeof plan.scopeLabel === "string" ? plan.scopeLabel : "",
-            title: typeof plan.title === "string" ? plan.title : "",
-            detail: typeof plan.detail === "string" ? plan.detail : "",
-        };
-    } catch {
-        sessionStorage.removeItem(RECALC_PLAN_KEY);
-        return null;
+        changed = true;
+        return kinds.length === 0 ? [] : [{ ...plan, kinds }];
+    });
+    if (changed) {
+        writePlans(next);
+        window.dispatchEvent(new CustomEvent(RECALC_CONSOLE_EVENT, { detail: { open: false } }));
     }
+    return next;
 }
 
 export function syncRecalcPlan(events: PlanEvent[]): RecalcPlan | null {
-    const plan = readRecalcPlan();
-    if (!plan) {
-        return null;
-    }
-    const fresh = planLaunchEvents(plan, events);
-    const blocked = fresh.some((event) => event.status === "failed" || event.status === "cancelled");
-    const kinds = blocked ? [] : plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind));
-    if (!blocked && kinds.length === plan.kinds.length) {
-        return plan;
-    }
-    if (kinds.length === 0) {
-        sessionStorage.removeItem(RECALC_PLAN_KEY);
-    } else {
-        sessionStorage.setItem(RECALC_PLAN_KEY, JSON.stringify({ ...plan, kinds }));
-    }
-    window.dispatchEvent(new CustomEvent(RECALC_CONSOLE_EVENT, { detail: { open: false } }));
-    return kinds.length === 0 ? null : { ...plan, kinds };
+    return syncRecalcPlans(events)[0] ?? null;
 }
 
-export function useRecalcPlan(): RecalcPlan | null {
-    const [plan, setPlan] = useState<RecalcPlan | null>(null);
+export function useRecalcPlans(): RecalcPlan[] {
+    const [plans, setPlans] = useState<RecalcPlan[]>([]);
     useEffect(() => {
-        const read = () => setPlan(readRecalcPlan());
+        const read = () => setPlans(readRecalcPlans());
         read();
         window.addEventListener(RECALC_CONSOLE_EVENT, read);
         return () => window.removeEventListener(RECALC_CONSOLE_EVENT, read);
     }, []);
-    return plan;
+    return plans;
+}
+
+export function useRecalcPlan(): RecalcPlan | null {
+    return useRecalcPlans()[0] ?? null;
+}
+
+function writePlans(plans: RecalcPlan[]): void {
+    if (plans.length === 0) {
+        sessionStorage.removeItem(RECALC_PLAN_KEY);
+        return;
+    }
+    sessionStorage.setItem(RECALC_PLAN_KEY, JSON.stringify(plans));
+}
+
+function normalizePlan(value: unknown): RecalcPlan | null {
+    if (typeof value !== "object" || value === null) {
+        return null;
+    }
+    const plan = value as Partial<RecalcPlan>;
+    if (typeof plan.period !== "string" || typeof plan.startedAt !== "string" || !Array.isArray(plan.kinds) || !startedOnMoscowToday(plan.startedAt)) {
+        return null;
+    }
+    const kinds = plan.kinds.filter(isRecalcKind);
+    if (kinds.length === 0) {
+        return null;
+    }
+    return {
+        period: plan.period,
+        kinds,
+        startedAt: plan.startedAt,
+        reason: typeof plan.reason === "string" ? plan.reason : "",
+        actor: typeof plan.actor === "string" ? plan.actor : "",
+        scopeLevel: plan.scopeLevel === "territory" || plan.scopeLevel === "branch" ? plan.scopeLevel : "division",
+        scopeLabel: typeof plan.scopeLabel === "string" ? plan.scopeLabel : "",
+        title: typeof plan.title === "string" ? plan.title : "",
+        detail: typeof plan.detail === "string" ? plan.detail : "",
+    };
 }
 
 function startedOnMoscowToday(iso: string): boolean {

@@ -7,7 +7,7 @@ import { RecalcJournalLog, recalcConsoleStatus, type RecalcConsoleStatus } from 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAccess } from "@/hooks/useAccess";
-import { RECALC_CONSOLE_EVENT, syncRecalcPlan, useRecalcPlan } from "@/lib/recalc-plan";
+import { RECALC_CONSOLE_EVENT, syncRecalcPlans, useRecalcPlans } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
 import type { BasketRecalcRun } from "@/services/basket-updates";
 import type { ApiResponse } from "@/types/api";
@@ -21,7 +21,7 @@ const STATUS_LABEL: Record<Exclude<RecalcConsoleStatus, "idle">, string> = {
 };
 
 export function RecalcJournalButton() {
-    const plan = useRecalcPlan();
+    const plans = useRecalcPlans();
     const access = useAccess();
     const canOpenJournal = access.has("monitoring:read");
     const [events, setEvents] = useState<BasketRecalcRun[]>([]);
@@ -30,7 +30,7 @@ export function RecalcJournalButton() {
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     const closing = useRef(false);
-    const status = recalcConsoleStatus(events, plan);
+    const status = recalcConsoleStatus(events, plans);
 
     function collapse() {
         if (closing.current) {
@@ -85,7 +85,7 @@ export function RecalcJournalButton() {
         let timer = 0;
         const controller = new AbortController();
         // Свёрнутый журнал не опрашивает сервер, пока нет идущего или ожидающего шага.
-        let live = open || plan !== null;
+        let live = open || plans.length > 0;
 
         function arm() {
             window.clearTimeout(timer);
@@ -104,9 +104,9 @@ export function RecalcJournalButton() {
                 const json = (await response.json()) as ApiResponse<BasketRecalcRun[]>;
                 if (!stopped && json.success) {
                     setEvents((current) => sameEvents(current, json.data) ? current : json.data);
-                    const nextPlan = syncRecalcPlan(json.data);
+                    const nextPlans = syncRecalcPlans(json.data);
                     const running = json.data.some((event) => event.status === "running");
-                    live = nextPlan !== null || running;
+                    live = nextPlans.length > 0 || running;
                     arm();
                     return;
                 }
@@ -132,9 +132,9 @@ export function RecalcJournalButton() {
             window.clearTimeout(timer);
             document.removeEventListener("visibilitychange", onVisible);
         };
-    }, [open, plan]);
+    }, [open, plans]);
 
-    const startedToday = (plan !== null) || events.length > 0;
+    const startedToday = plans.length > 0 || events.length > 0;
     if (!canOpenJournal && !startedToday && !open) {
         return null;
     }
@@ -175,7 +175,8 @@ export function RecalcJournalButton() {
                         ref={popupRef}
                         showCloseButton={false}
                         data-recalc-journal=""
-                        className="flex h-[min(70vh,40rem)] flex-col gap-4 data-closed:animate-none! sm:max-w-3xl"
+                        overlayClassName="z-[70]"
+                        className="z-[70] flex h-[min(70vh,40rem)] flex-col gap-4 data-closed:animate-none! sm:max-w-3xl"
                     >
                         <DialogHeader className="flex-row items-center gap-1 pr-28">
                             <DialogTitle>Журнал пересчёта</DialogTitle>
@@ -195,7 +196,7 @@ export function RecalcJournalButton() {
                                 Свернуть
                             </Button>
                         </DialogHeader>
-                        <RecalcJournalLog events={events} plan={plan} />
+                        <RecalcJournalLog events={events} plans={plans} />
                     </DialogContent>
                 </Dialog>
             ) : null}

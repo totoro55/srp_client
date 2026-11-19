@@ -78,7 +78,7 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
         const request = form;
         setForm(null);
         setError(null);
-        openRecalcConsole({
+        const plan = openRecalcConsole({
             period: request.period,
             kinds: request.target === "baskets"
                 ? ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display", "shared", "brigade"]
@@ -98,7 +98,7 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
             }
             setError(result.message);
             if (result.clearPlan) {
-                clearRecalcPlan();
+                clearRecalcPlan(plan.startedAt);
             }
         });
     }

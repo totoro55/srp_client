@@ -17,6 +17,7 @@ import { calculateKassaPremium } from "@/services/kassa-premium";
 import { calculateOsntPremium } from "@/services/osnt-premium";
 import { calculateReleasePremium } from "@/services/release-premium";
 import { calculateSalePremium, SalePremiumError, type PremiumRun } from "@/services/sale-premium";
+import { withPremiumTurn } from "@/services/premium-lock";
 import { moscowToday } from "@/services/segment-locks";
 import { calculateSharedPremium } from "@/services/shared-premium";
 import { calculateDisplayPremium } from "@/services/display-premium";
@@ -37,6 +38,16 @@ export async function recalculateBranchPremiums(input: {
     if (!UUID.test(input.branchId)) {
         throw new SalePremiumError("Укажите филиал");
     }
+    return withPremiumTurn(() => runBranchPremiums(input));
+}
+
+async function runBranchPremiums(input: {
+    period: string;
+    branchId: string;
+    actor: string;
+    trigger: string;
+    route: string;
+}): Promise<void> {
     const timeoutMs = recalcTimeoutMs("branch");
     const run: PremiumRun = { branch: input.branchId.toLowerCase(), timeoutMs };
     const steps: { kind: BasketUpdateKind; calculate: () => Promise<number> }[] = [
@@ -138,6 +149,16 @@ export async function recalculateMonthSelection(input: RecalcWindow & {
     if (!monthIsOpen(input.period.slice(0, 7), policy)) {
         throw new SalePremiumError(closedPeriodMessage(policy));
     }
+    return withPremiumTurn(() => runMonthSelection(input));
+}
+
+async function runMonthSelection(input: RecalcWindow & {
+    target: MonthRecalcTarget;
+    actor: string;
+    trigger: string;
+    origin: "manual" | "system";
+    route: string;
+}): Promise<void> {
     const protect = protectReasons(input);
     const conditions = formatRecalcConditions(input);
     const singleBasket = input.target !== "baskets" && input.target !== "shared";

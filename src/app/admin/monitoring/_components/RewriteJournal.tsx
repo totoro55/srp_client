@@ -14,7 +14,7 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/componen
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { parseJournalQuery } from "@/lib/journal-query";
-import { useRecalcPlan } from "@/lib/recalc-plan";
+import { useRecalcPlans } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
 import { JOURNAL_REFRESH_INTERVALS, readJournalRefresh, writeJournalRefresh, type JournalRefreshId } from "./journal-refresh";
 import type { BasketRecalcRun, BasketUpdateKind, RecalcRunStatus } from "@/services/basket-updates";
@@ -77,7 +77,7 @@ export function RewriteJournal({
     const [olderPending, setOlderPending] = useState(false);
     const olderLock = useRef(false);
     const generation = useRef(0);
-    const plan = useRecalcPlan();
+    const plans = useRecalcPlans();
 
     const reload = useCallback(async (manual: boolean) => {
         const ticket = generation.current;
@@ -380,7 +380,7 @@ export function RewriteJournal({
                 <RecalcJournalLog
                     key={`${basket ?? "all"}:${status ?? "all"}:${query ?? ""}:${from ?? ""}:${to ?? ""}`}
                     events={events}
-                    plan={preview ? null : plan}
+                    plans={preview ? [] : plans}
                     preview={preview}
                     olderPending={olderPending}
                     onNearTop={preview ? undefined : () => void loadOlder()}

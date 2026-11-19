@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { compactBranchScopeLabel, recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
-import { planLaunchEvents, syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
+import { planLaunchEvents, syncRecalcPlans, type RecalcPlan } from "@/lib/recalc-plan";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -60,8 +60,8 @@ const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "num
 const dayFormat = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" });
 const timeFormat = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-export function recalcConsoleStatus(events: BasketRecalcRun[], plan: RecalcPlan | null): RecalcConsoleStatus {
-    const processes = buildProcesses(events, plan);
+export function recalcConsoleStatus(events: BasketRecalcRun[], plans: readonly RecalcPlan[]): RecalcConsoleStatus {
+    const processes = buildProcesses(events, plans);
     if (processes.some((process) => process.operations.some((operation) => operation.status === "running"))) {
         return "running";
     }
@@ -83,7 +83,7 @@ export function recalcConsoleStatus(events: BasketRecalcRun[], plan: RecalcPlan 
 
 export function RecalcJournalLog({
     events,
-    plan,
+    plans = [],
     preview = false,
     notice,
     olderPending = false,
@@ -91,7 +91,7 @@ export function RecalcJournalLog({
     emptyLabel = "Запусков ещё не было.",
 }: {
     events: BasketRecalcRun[];
-    plan: RecalcPlan | null;
+    plans?: readonly RecalcPlan[];
     preview?: boolean;
     notice?: ReactNode;
     olderPending?: boolean;
@@ -101,7 +101,7 @@ export function RecalcJournalLog({
     const logRef = useRef<HTMLDivElement>(null);
     const stickToEnd = useRef(true);
     const snapshot = useRef({ firstId: null as number | null, height: 0, top: 0 });
-    const processes = preview ? rrsQueueExample() : buildProcesses(events, plan);
+    const processes = preview ? rrsQueueExample() : buildProcesses(events, plans);
     const onNearTopRef = useRef(onNearTop);
     onNearTopRef.current = onNearTop;
 
@@ -109,7 +109,7 @@ export function RecalcJournalLog({
         if (preview) {
             return;
         }
-        syncRecalcPlan(events);
+        syncRecalcPlans(events);
     }, [events, preview]);
 
     useLayoutEffect(() => {
@@ -125,7 +125,7 @@ export function RecalcJournalLog({
             node.scrollTop = node.scrollHeight;
         }
         snapshot.current = { firstId: first, height: node.scrollHeight, top: node.scrollTop };
-    }, [events, plan, preview]);
+    }, [events, plans, preview]);
 
     useEffect(() => {
         const node = logRef.current;
@@ -136,6 +136,7 @@ export function RecalcJournalLog({
     }, [events, preview]);
 
     let lastDay = "";
+    let liveLabelShown = false;
 
     return (
         <div
@@ -157,11 +158,17 @@ export function RecalcJournalLog({
                 <p className="text-sm text-muted-foreground max-sm:text-xs">{emptyLabel}</p>
             ) : processes.map((process) => {
                 const day = process.startedAt.slice(0, 10);
-                const showDay = !process.live && !process.queued && day !== lastDay;
-                if (!process.live && !process.queued) {
+                const current = process.live || process.queued;
+                const showDay = !current && day !== lastDay;
+                if (!current) {
                     lastDay = day;
                 }
-                const label = process.live ? "Сейчас" : showDay ? formatDay(process.startedAt) : null;
+                const label = current
+                    ? (liveLabelShown ? null : "Сейчас")
+                    : showDay ? formatDay(process.startedAt) : null;
+                if (current) {
+                    liveLabelShown = true;
+                }
                 const latest = process.id === processes.at(-1)?.id;
                 return (
                     <section key={process.id} className="flex w-full min-w-0 flex-col gap-2" aria-label={label ?? groupTitle(process)}>
@@ -491,6 +498,10 @@ function groupTitle(process: JournalProcess): string {
         const month = formatMonth(process.operations[0].period);
         title = `${process.live ? "Сейчас" : month} · ${operationsLabel(process.operations.length)}`;
     }
+    const month = formatMonth(process.operations[0]?.period ?? "");
+    if (month !== "" && !title.toLocaleLowerCase("ru-RU").includes(month.toLocaleLowerCase("ru-RU"))) {
+        title = `${title} · ${month}`;
+    }
     return compactBranchScopeLabel(title) ?? title;
 }
 
@@ -518,7 +529,7 @@ function stepTitle(operation: JournalOperation): string {
     return name;
 }
 
-function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): JournalProcess[] {
+function buildProcesses(events: BasketRecalcRun[], plans: readonly RecalcPlan[]): JournalProcess[] {
     const sorted = [...events].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id - right.id);
     const processes: JournalProcess[] = [];
     for (const event of sorted) {
@@ -543,12 +554,12 @@ function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): Jou
             operations: [operation],
         });
     }
-    const pending = pendingOperations(events, plan);
+    const pending = pendingOperations(events, plans);
     for (const operation of pending) {
-        const host = [...processes].reverse().find((process) => sameLaunch(process, operation, plan));
+        const host = [...processes].reverse().find((process) => sameLaunch(process, operation));
         if (host) {
-            if (host.title === "" && plan?.title) {
-                host.title = plan.title;
+            if (host.title === "" && operation.scope !== "") {
+                host.title = inferTitle([operation, ...host.operations]);
             }
             host.operations.push(operation);
             host.live = true;
@@ -558,8 +569,8 @@ function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): Jou
             id: operation.key,
             live: true,
             queued: true,
-            title: plan?.title ?? inferTitle([operation]),
-            startedAt: plan?.startedAt ?? new Date(0).toISOString(),
+            title: inferTitle([operation]),
+            startedAt: operation.startedAt ?? new Date(0).toISOString(),
             operations: [operation],
         });
     }
@@ -600,8 +611,8 @@ function appendWaitingBrigade(processes: JournalProcess[]): void {
     }
 }
 
-function sameLaunch(process: JournalProcess, operation: JournalOperation, plan: RecalcPlan | null): boolean {
-    const sample = process.operations.find((item) => item.startedAt !== null) ?? process.operations[0];
+function sameLaunch(process: JournalProcess, operation: JournalOperation): boolean {
+    const sample = process.operations.find((item) => item.runId !== null) ?? process.operations[0];
     if (sample === undefined) {
         return false;
     }
@@ -611,46 +622,38 @@ function sameLaunch(process: JournalProcess, operation: JournalOperation, plan: 
     if (operation.actor !== "" && sample.actor.toLowerCase() !== operation.actor.toLowerCase()) {
         return false;
     }
-    if (process.live) {
-        return true;
-    }
-    if (!plan) {
-        return false;
-    }
-    const started = new Date(plan.startedAt).getTime() - 1000;
-    return new Date(process.startedAt).getTime() >= started;
+    return process.live || process.queued;
 }
 
-function pendingOperations(events: BasketRecalcRun[], plan: RecalcPlan | null): JournalOperation[] {
-    if (!plan) {
-        return [];
-    }
-    const fresh = planLaunchEvents(plan, events);
-    if (fresh.some((event) => event.status === "failed" || event.status === "cancelled")) {
-        return [];
-    }
-    const person = plan.actor === ""
-        ? null
-        : events.find((event) => event.actor.toLowerCase() === plan.actor.toLowerCase())?.actorPerson ?? null;
-    return plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind)).map((kind) => ({
-        key: `queue-${plan.period}-${kind}`,
-        runId: null,
-        kind,
-        period: plan.period,
-        status: "pending" as const,
-        origin: "manual" as const,
-        trigger: plan.reason,
-        actor: plan.actor,
-        actorPerson: person,
-        lines: null,
-        error: "",
-        errorDetail: null,
-        startedAt: null,
-        finishedAt: null,
-        scope: plan.scopeLabel,
-        detail: "Ждёт, пока закончится предыдущая операция.",
-        conditions: plan.detail,
-    }));
+function pendingOperations(events: BasketRecalcRun[], plans: readonly RecalcPlan[]): JournalOperation[] {
+    return plans.flatMap((plan) => {
+        const fresh = planLaunchEvents(plan, events);
+        if (fresh.some((event) => event.status === "failed" || event.status === "cancelled")) {
+            return [];
+        }
+        const person = plan.actor === ""
+            ? null
+            : events.find((event) => event.actor.toLowerCase() === plan.actor.toLowerCase())?.actorPerson ?? null;
+        return plan.kinds.filter((kind) => !fresh.some((event) => event.kind === kind)).map((kind) => ({
+            key: `queue-${plan.startedAt}-${plan.period}-${kind}`,
+            runId: null,
+            kind,
+            period: plan.period,
+            status: "pending" as const,
+            origin: "manual" as const,
+            trigger: plan.reason,
+            actor: plan.actor,
+            actorPerson: person,
+            lines: null,
+            error: "",
+            errorDetail: null,
+            startedAt: plan.startedAt,
+            finishedAt: null,
+            scope: plan.scopeLabel,
+            detail: "Ждёт своей очереди. Пока идёт другой пересчёт, этот шаг не начинается.",
+            conditions: plan.detail,
+        }));
+    });
 }
 
 function toOperation(event: BasketRecalcRun): JournalOperation {
@@ -742,9 +745,12 @@ function OriginLine({ operation }: { operation: JournalOperation }) {
     const reason = recalcReasonLabel(operation.trigger, operation.origin);
     const person = actorLabel(operation);
     if (operation.origin === "manual") {
+        const manual = operation.trigger === "manual";
         return (
             <p>
-                {person === "" ? `${reason}, вручную` : <>{reason}, вручную, <ActorName operation={operation} /></>}
+                {person === ""
+                    ? (manual ? reason : `${reason}, вручную`)
+                    : <>{manual ? reason : `${reason}, вручную`}, <ActorName operation={operation} /></>}
             </p>
         );
     }
