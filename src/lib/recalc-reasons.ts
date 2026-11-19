@@ -73,3 +73,36 @@ export function formatScopeLabel(level: RecalcScopeLevel, names: string[]): stri
     }
     return quoted === "" ? "Филиал" : `Филиал ${quoted}`;
 }
+
+/** Имена в кавычках «…» из подписи охвата. */
+export function parseQuotedNames(label: string): string[] {
+    const names: string[] = [];
+    const pattern = /«([^»]*)»/g;
+    let match = pattern.exec(label);
+    while (match) {
+        names.push(match[1]);
+        match = pattern.exec(label);
+    }
+    return names;
+}
+
+/**
+ * Длинный список филиалов сжимает до «Филиалы «Первый» и ещё N».
+ * Хвост после списка (причина запуска) сохраняет.
+ * Одного или двух имён не трогает.
+ */
+export function compactBranchScopeLabel(label: string): string | null {
+    if (!label.startsWith("Филиалы ")) {
+        return null;
+    }
+    const names = parseQuotedNames(label);
+    if (names.length <= 2) {
+        return null;
+    }
+    const lastQuote = label.lastIndexOf("»");
+    if (lastQuote < 0) {
+        return null;
+    }
+    const suffix = label.slice(lastQuote + 1);
+    return `Филиалы «${names[0]}» и ещё ${names.length - 1}${suffix}`;
+}

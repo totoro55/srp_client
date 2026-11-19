@@ -16,7 +16,7 @@ import { ButtonSpinner } from "@/components/loading-state";
 interface ConfirmDialogProps {
     open: boolean;
     title: string;
-    description: string;
+    description?: string | null;
     confirmLabel?: string;
     cancelLabel?: string;
     confirmVariant?: "default" | "destructive";
@@ -81,43 +81,45 @@ export function ConfirmDialog({
             <AlertDialogContent>
                 <AlertDialogHeader>
                     <AlertDialogTitle>{title}</AlertDialogTitle>
-                    <AlertDialogDescription>{description}</AlertDialogDescription>
+                    {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
                 </AlertDialogHeader>
                 {progress}
-                <AlertDialogFooter>
-                    {showCancel && (
-                        <AlertDialogCancel disabled={isPending}>{cancelLabel}</AlertDialogCancel>
-                    )}
-                    {extraLabel && onExtra ? (
+                {isPending && progress ? null : (
+                    <AlertDialogFooter>
+                        {showCancel && (
+                            <AlertDialogCancel disabled={isPending}>{cancelLabel}</AlertDialogCancel>
+                        )}
+                        {extraLabel && onExtra ? (
+                            <AlertDialogAction
+                                variant="outline"
+                                disabled={isPending || waiting}
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    if (waiting) {
+                                        return;
+                                    }
+                                    void onExtra();
+                                }}
+                            >
+                                {extraLabel}
+                            </AlertDialogAction>
+                        ) : null}
                         <AlertDialogAction
-                            variant="outline"
+                            variant={confirmVariant}
                             disabled={isPending || waiting}
                             onClick={(event) => {
                                 event.preventDefault();
                                 if (waiting) {
                                     return;
                                 }
-                                void onExtra();
+                                void handleConfirm();
                             }}
                         >
-                            {extraLabel}
+                            {isPending ? <ButtonSpinner /> : null}
+                            {label}
                         </AlertDialogAction>
-                    ) : null}
-                    <AlertDialogAction
-                        variant={confirmVariant}
-                        disabled={isPending || waiting}
-                        onClick={(event) => {
-                            event.preventDefault();
-                            if (waiting) {
-                                return;
-                            }
-                            void handleConfirm();
-                        }}
-                    >
-                        {isPending ? <ButtonSpinner /> : null}
-                        {label}
-                    </AlertDialogAction>
-                </AlertDialogFooter>
+                    </AlertDialogFooter>
+                )}
             </AlertDialogContent>
         </AlertDialog>
     );

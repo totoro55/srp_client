@@ -67,6 +67,12 @@ export interface QueuedBrigade {
     run?: PremiumRun;
 }
 
+const SCOPE_RANK: Record<RecalcScopeLevel, number> = {
+    branch: 0,
+    territory: 1,
+    division: 2,
+};
+
 /** Копит показатели одного охвата, чтобы посчитать их одним запуском. */
 export function queueBrigadeIndicator(
     batches: Map<string, QueuedBrigade>,
@@ -85,10 +91,16 @@ export function queueBrigadeIndicator(
             ? [...item.run.branches].map((id) => id.toLowerCase()).sort().join(",")
             : "*";
     const window = item.run?.from && item.run.until ? `${item.run.from}..${item.run.until}` : "";
-    const key = `${item.scopeLevel}|${scopeIds.join(",")}|${branches}|${window}|${item.conditions ?? ""}`;
+    // Сливаем по фактическим филиалам расчёта, не по подписи журнала: иначе одна и та же
+    // пачка филиалов даёт два запуска «Доли бригады» (РРС и список филиалов).
+    const key = `${branches}|${window}|${item.conditions ?? ""}`;
     const existing = batches.get(key);
     if (existing) {
         existing.indicators.push(item.indicator);
+        if (SCOPE_RANK[item.scopeLevel] > SCOPE_RANK[existing.scopeLevel]) {
+            existing.scopeLevel = item.scopeLevel;
+            existing.scopeIds = scopeIds;
+        }
         return;
     }
     batches.set(key, {

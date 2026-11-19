@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
+import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
-import { recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
+import { compactBranchScopeLabel, recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
 import { planLaunchEvents, syncRecalcPlan, type RecalcPlan } from "@/lib/recalc-plan";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -235,7 +235,11 @@ function OperationCells({ operation, showScope }: { operation: JournalOperation;
             <span className={cn("min-w-0", alert && "text-destructive")}>
                 {time !== null ? <span className="tabular-nums">{time}</span> : null}
                 {operation.status === "running" && operation.startedAt !== null ? <Elapsed startedAt={operation.startedAt} /> : null}
-                {showScope && operation.scope !== "" ? <span className="mt-0.5 block">{operation.scope}</span> : null}
+                {showScope && operation.scope !== "" ? (
+                    <span className="mt-0.5 block">
+                        <JournalScopeLabel scope={operation.scope} />
+                    </span>
+                ) : null}
                 {actorLabel(operation) !== "" ? (
                     <span className="mt-0.5 block">
                         <JournalActorLabel actor={operation.actor} person={operation.actorPerson} focusable={false} />
@@ -277,7 +281,7 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
     return (
         <div className="flex flex-col gap-1">
             {operation.conditions !== "" ? <p>{operation.conditions}</p> : null}
-            {operation.scope !== "" ? <p>{operation.scope}</p> : null}
+            {operation.scope !== "" ? <JournalScopeLabel scope={operation.scope} /> : null}
             <OriginLine operation={operation} />
             <p>{`Начало в ${timeFormat.format(started)}.`}</p>
             {operation.status === "running" ? (
@@ -478,14 +482,16 @@ function statusIcon(status: JournalOperation["status"] | "done", several: boolea
 }
 
 function groupTitle(process: JournalProcess): string {
+    let title = "";
     if (process.title !== "") {
-        return process.title;
+        title = process.title;
+    } else if (process.operations.length === 1) {
+        title = stepTitle(process.operations[0]);
+    } else {
+        const month = formatMonth(process.operations[0].period);
+        title = `${process.live ? "Сейчас" : month} · ${operationsLabel(process.operations.length)}`;
     }
-    if (process.operations.length === 1) {
-        return stepTitle(process.operations[0]);
-    }
-    const month = formatMonth(process.operations[0].period);
-    return `${process.live ? "Сейчас" : month} · ${operationsLabel(process.operations.length)}`;
+    return compactBranchScopeLabel(title) ?? title;
 }
 
 function stepTitle(operation: JournalOperation): string {
@@ -678,7 +684,32 @@ function inferTitle(operations: JournalOperation[]): string {
     if (!same) {
         return "";
     }
-    return `${first.scope}, ${recalcReasonPhrase(first.trigger, first.origin)}`;
+    const title = `${first.scope}, ${recalcReasonPhrase(first.trigger, first.origin)}`;
+    return compactBranchScopeLabel(title) ?? title;
+}
+
+function JournalScopeLabel({ scope }: { scope: string }) {
+    const compact = compactBranchScopeLabel(scope);
+    const [open, setOpen] = useState(false);
+    if (!compact) {
+        return <p>{scope}</p>;
+    }
+    return (
+        <div className="min-w-0">
+            <button
+                type="button"
+                className="inline-flex max-w-full items-start gap-1 rounded-sm text-left transition-colors hover:text-foreground"
+                aria-expanded={open}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    setOpen((current) => !current);
+                }}
+            >
+                <span className="min-w-0 whitespace-normal">{open ? scope : compact}</span>
+                <ChevronDownIcon className={cn("mt-0.5 size-3.5 shrink-0 opacity-70 transition-transform", open && "rotate-180")} />
+            </button>
+        </div>
+    );
 }
 
 function continues(operations: JournalOperation[], next: JournalOperation): boolean {
