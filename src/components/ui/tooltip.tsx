@@ -49,7 +49,7 @@ function TooltipContent({
         sideOffset={sideOffset}
         positionMethod={positionMethod}
         collisionBoundary={collisionBoundary}
-        className="isolate z-50"
+        className="isolate z-[80]"
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"

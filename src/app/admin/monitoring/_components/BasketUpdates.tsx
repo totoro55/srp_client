@@ -91,6 +91,14 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
             scopeLabel: "Дивизион",
             title: consoleTitle(request),
             detail: formatRecalcConditions(request),
+            request: {
+                from: request.from,
+                until: request.until,
+                target: request.target,
+                dismissal: request.dismissal,
+                transfer: request.transfer,
+                title: request.title,
+            },
         });
         void runSelection(request).then((result) => {
             if (!result) {

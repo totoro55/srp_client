@@ -317,7 +317,7 @@ async function executeJob(job: Job): Promise<void> {
                 scopeIds,
                 run: {
                     ...(branches === null ? {} : { branches }),
-                    timeoutMs: recalcTimeoutMs(scopeLevel),
+                    timeoutMs: recalcTimeoutMs(scopeLevel, branches?.length ?? 1),
                 },
             });
         }
@@ -369,7 +369,7 @@ function attachExtraBrigades(job: Job, brigades: Map<string, QueuedBrigade>): vo
             indicator,
             scopeLevel: "branch",
             scopeIds: uncovered,
-            run: { branches: uncovered, timeoutMs: recalcTimeoutMs("branch") },
+            run: { branches: uncovered, timeoutMs: recalcTimeoutMs("branch", uncovered.length) },
         });
     }
 }
@@ -428,7 +428,7 @@ function calculate(
 ): Promise<number> {
     const run: PremiumRun = {
         ...(branches === null ? {} : { branches }),
-        timeoutMs: recalcTimeoutMs(scopeLevel),
+        timeoutMs: recalcTimeoutMs(scopeLevel, branches?.length ?? 1),
     };
     if (kind === "sale") {
         return calculateSalePremium(period, false, run);

@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
+import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { compactBranchScopeLabel, recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
-import { planLaunchEvents, syncRecalcPlans, type RecalcPlan } from "@/lib/recalc-plan";
+import { clearRecalcPlan, monthRequestOf, openRecalcConsole, planLaunchEvents, syncRecalcPlans, type RecalcPlan } from "@/lib/recalc-plan";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,6 +42,7 @@ interface JournalOperation {
     scope: string;
     detail: string;
     conditions: string;
+    queueStartedAt?: string;
 }
 
 interface JournalProcess {
@@ -50,7 +51,16 @@ interface JournalProcess {
     queued: boolean;
     title: string;
     startedAt: string;
+    queueStartedAt?: string;
+    source?: RecalcPlan;
     operations: JournalOperation[];
+}
+
+interface LaunchFacts {
+    scope: string | null;
+    conditions: string | null;
+    originKey: string | null;
+    sample: JournalOperation | null;
 }
 
 export type RecalcConsoleStatus = "idle" | "running" | "pending" | "failed" | "cancelled" | "done";
@@ -187,6 +197,7 @@ function ProcessGroup({ process, defaultOpen }: { process: JournalProcess; defau
     const several = process.operations.length > 1;
     const everyFailed = process.operations.every((operation) => operation.status === "failed");
     const only = process.operations[0];
+    const facts = launchFacts(process);
     return (
         <TraceCollapsible open={open} onOpenChange={setOpen}>
             <span className="flex w-full min-w-0 items-start gap-1">
@@ -204,42 +215,71 @@ function ProcessGroup({ process, defaultOpen }: { process: JournalProcess; defau
                             aria-hidden={open}
                             className={cn("w-full min-w-0 pl-6 whitespace-normal", open && "hidden")}
                         >
-                            <RowSummary process={process} />
+                            <RowSummary process={process} facts={facts} />
                         </TraceDescription>
                     </TraceLine>
                 </TraceCollapsibleTrigger>
-                {!several && only?.status === "running" ? <CancelRecalcButton runId={only.runId} className="self-start" /> : null}
+                {canSteerLaunch(process) ? <GroupLaunchActions process={process} className="self-start" /> : null}
             </span>
             <TraceCollapsibleContent className={cn("flex flex-col gap-3 border-l-2 border-foreground/30", open && "h-auto! overflow-visible!")}>
+                <LaunchInfo process={process} facts={facts} />
                 {several ? process.operations.map((operation) => (
-                    <OperationStep key={operation.key} operation={operation} />
-                )) : (
-                    <OperationNote operation={process.operations[0]} />
-                )}
+                    <OperationStep key={operation.key} operation={operation} facts={facts} />
+                )) : only ? (
+                    <>
+                        {process.title !== "" ? <BasketHeading operation={only} /> : null}
+                        <OperationNote operation={only} facts={facts} indent={process.title !== ""} />
+                    </>
+                ) : null}
             </TraceCollapsibleContent>
         </TraceCollapsible>
     );
 }
 
-function RowSummary({ process }: { process: JournalProcess }) {
-    const showScope = process.title === "";
+function RowSummary({ process, facts }: { process: JournalProcess; facts: LaunchFacts }) {
+    const actor = facts.sample !== null && facts.originKey !== null ? actorLabel(facts.sample) : "";
     return (
-        <span className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
-            {process.operations.map((operation) => (
-                <OperationCells key={operation.key} operation={operation} showScope={showScope} />
-            ))}
+        <span className="flex w-full min-w-0 flex-col gap-1">
+            {facts.sample !== null && actor !== "" ? (
+                <JournalActorLabel actor={facts.sample.actor} person={facts.sample.actorPerson} focusable={false} />
+            ) : null}
+            <span className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
+                {process.operations.map((operation) => (
+                    <OperationCells
+                        key={operation.key}
+                        operation={operation}
+                        showScope={facts.scope === null}
+                        showActor={facts.originKey === null}
+                    />
+                ))}
+            </span>
         </span>
     );
 }
 
-function OperationCells({ operation, showScope }: { operation: JournalOperation; showScope: boolean }) {
+function OperationCells({
+    operation,
+    showScope,
+    showActor,
+}: {
+    operation: JournalOperation;
+    showScope: boolean;
+    showActor: boolean;
+}) {
     const time = operationTime(operation);
     const alert = operation.status === "failed" || operation.status === "cancelled";
+    const running = operation.status === "running";
     return (
-        <>
-            <span className={cn("whitespace-nowrap", alert && "text-destructive")}>{kindName(operation.kind)}</span>
-            <span className={cn("whitespace-nowrap", alert && "text-destructive")}>{statusLabel(operation.status)}</span>
-            <span className={cn("min-w-0", alert && "text-destructive")}>
+        <span className={cn("col-span-3 grid grid-cols-subgrid items-baseline", running && "relative")}>
+            {running ? (
+                <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 -inset-x-1 animate-pulse rounded-sm bg-primary/15 motion-reduce:animate-none"
+                />
+            ) : null}
+            <span className={cn("relative whitespace-nowrap", alert && "text-destructive")}>{kindName(operation.kind)}</span>
+            <span className={cn("relative whitespace-nowrap", alert && "text-destructive")}>{statusLabel(operation.status)}</span>
+            <span className={cn("relative min-w-0", alert && "text-destructive")}>
                 {time !== null ? <span className="tabular-nums">{time}</span> : null}
                 {operation.status === "running" && operation.startedAt !== null ? <Elapsed startedAt={operation.startedAt} /> : null}
                 {showScope && operation.scope !== "" ? (
@@ -247,37 +287,62 @@ function OperationCells({ operation, showScope }: { operation: JournalOperation;
                         <JournalScopeLabel scope={operation.scope} />
                     </span>
                 ) : null}
-                {actorLabel(operation) !== "" ? (
+                {showActor && actorLabel(operation) !== "" ? (
                     <span className="mt-0.5 block">
                         <JournalActorLabel actor={operation.actor} person={operation.actorPerson} focusable={false} />
                     </span>
                 ) : null}
             </span>
-        </>
+        </span>
     );
 }
 
-function OperationStep({ operation }: { operation: JournalOperation }) {
+function OperationStep({ operation, facts }: { operation: JournalOperation; facts: LaunchFacts }) {
+    const note = <OperationNote operation={operation} facts={facts} />;
     return (
         <div className="flex min-w-0 flex-col gap-1">
             <TraceLine status={lineStatus(operation)} className="w-full">
                 <TraceIcon>{statusIcon(operation.status, false)}</TraceIcon>
-                <TraceTitle>{stepTitle(operation)}</TraceTitle>
-                {operation.status === "running" ? <CancelRecalcButton runId={operation.runId} /> : null}
+                <TraceTitle>{stepTitle(operation, false)}</TraceTitle>
             </TraceLine>
-            <div className="pl-6">
-                <OperationNote operation={operation} />
-            </div>
+            {note}
         </div>
     );
 }
 
-function OperationNote({ operation }: { operation: JournalOperation }) {
+function BasketHeading({ operation }: { operation: JournalOperation }) {
+    return (
+        <TraceLine status={lineStatus(operation)} className="w-full">
+            <TraceIcon>{statusIcon(operation.status, false)}</TraceIcon>
+            <TraceTitle>{stepTitle(operation, false)}</TraceTitle>
+        </TraceLine>
+    );
+}
+
+function OperationNote({
+    operation,
+    facts,
+    indent = true,
+}: {
+    operation: JournalOperation;
+    facts: LaunchFacts;
+    indent?: boolean;
+}) {
+    const showConditions = operation.conditions !== "" && facts.conditions === null;
+    const showScope = operation.scope !== "" && facts.scope === null;
+    const showOrigin = facts.originKey === null;
+    const className = cn("flex flex-col gap-1", indent && "pl-6");
     if (operation.status === "pending" || operation.startedAt === null) {
+        const detail = operation.detail !== "" && operation.detail !== "в очереди" ? operation.detail : "";
+        if (!showConditions && !showScope && !showOrigin && detail === "") {
+            return null;
+        }
         return (
-            <div className="flex flex-col gap-1">
-                {operation.conditions !== "" ? <p>{operation.conditions}</p> : null}
-                <p>{operation.detail !== "" ? operation.detail : "Ждёт, пока закончится предыдущая операция."}</p>
+            <div className={className}>
+                {showConditions ? <p>{operation.conditions}</p> : null}
+                {showScope ? <JournalScopeLabel scope={operation.scope} /> : null}
+                {showOrigin ? <OriginLine operation={operation} /> : null}
+                {detail !== "" ? <p>{detail}</p> : null}
             </div>
         );
     }
@@ -286,10 +351,10 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
     const spent = finished === null ? null : formatDuration(finished.getTime() - started.getTime());
     const rows = operation.lines === null ? null : `${countFormat.format(operation.lines)} строк`;
     return (
-        <div className="flex flex-col gap-1">
-            {operation.conditions !== "" ? <p>{operation.conditions}</p> : null}
-            {operation.scope !== "" ? <JournalScopeLabel scope={operation.scope} /> : null}
-            <OriginLine operation={operation} />
+        <div className={className}>
+            {showConditions ? <p>{operation.conditions}</p> : null}
+            {showScope ? <JournalScopeLabel scope={operation.scope} /> : null}
+            {showOrigin ? <OriginLine operation={operation} /> : null}
             <p>{`Начало в ${timeFormat.format(started)}.`}</p>
             {operation.status === "running" ? (
                 <p>
@@ -308,48 +373,184 @@ function OperationNote({ operation }: { operation: JournalOperation }) {
     );
 }
 
-function CancelRecalcButton({ runId, className }: { runId: number | null; className?: string }) {
+/** Идущая группа или очередь ещё не началась: обе кнопки на заголовке. */
+function canSteerLaunch(process: JournalProcess): boolean {
+    if (process.operations.some((operation) => operation.status === "running")) {
+        return true;
+    }
+    return process.queued && process.operations.every((operation) => operation.status === "pending");
+}
+
+function GroupLaunchActions({ process, className }: { process: JournalProcess; className?: string }) {
     const access = useAccess();
-    const [pending, setPending] = useState(false);
-    if (!access.has("recalc:cancel") || runId === null) {
+    const [pending, setPending] = useState<"cancel" | "restart" | null>(null);
+    if (!access.has("recalc:cancel")) {
         return null;
     }
+    const source = process.source;
+    const request = source ? monthRequestOf(source) : null;
     return (
-        <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={cn("shrink-0 self-center text-destructive hover:bg-destructive/10", className)}
-            aria-label="Отменить пересчёт"
-            title="Отменить пересчёт"
-            disabled={pending}
-            onClick={(event) => {
-                event.stopPropagation();
-                void (async () => {
-                    setPending(true);
-                    try {
-                        const response = await fetch("/api/recalc/cancel", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ id: runId }),
-                        });
-                        const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
-                        if (!json.success) {
-                            notifyError(json.error.message);
-                            return;
-                        }
-                        notifySuccess("Пересчёт отменён");
-                    } catch {
-                        notifyError("Не удалось отменить пересчёт");
-                    } finally {
-                        setPending(false);
-                    }
-                })();
-            }}
-        >
-            {pending ? <LoaderCircleIcon className="animate-spin" /> : <SquareIcon className="fill-current" />}
-        </Button>
+        <span className={cn("flex shrink-0 items-center", className)}>
+            <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-muted-foreground"
+                aria-label="Перезапустить"
+                title="Перезапустить"
+                disabled={pending !== null}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    void restartLaunch(process, request, setPending);
+                }}
+            >
+                {pending === "restart" ? <LoaderCircleIcon className="animate-spin" /> : <RotateCcwIcon />}
+            </Button>
+            <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-destructive hover:bg-destructive/10"
+                aria-label="Отменить пересчёт"
+                title="Отменить пересчёт"
+                disabled={pending !== null}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    void stopLaunch(process, setPending);
+                }}
+            >
+                {pending === "cancel" ? <LoaderCircleIcon className="animate-spin" /> : <SquareIcon className="fill-current" />}
+            </Button>
+        </span>
     );
+}
+
+async function stopLaunch(process: JournalProcess, setPending: (value: "cancel" | "restart" | null) => void): Promise<void> {
+    setPending("cancel");
+    try {
+        const stopped = await stopRunning(process);
+        if (stopped === "failed") {
+            return;
+        }
+        if (stopped === "idle" && process.source) {
+            if (await releaseQueue(process.source)) {
+                notifySuccess("Очередь снята");
+            }
+            return;
+        }
+        notifySuccess("Пересчёт отменён");
+    } catch {
+        notifyError("Не удалось отменить пересчёт");
+    } finally {
+        setPending(null);
+    }
+}
+
+async function restartLaunch(
+    process: JournalProcess,
+    request: ReturnType<typeof monthRequestOf>,
+    setPending: (value: "cancel" | "restart" | null) => void,
+): Promise<void> {
+    if (!process.source || request === null) {
+        notifyError("Этот запуск нельзя повторить из журнала");
+        return;
+    }
+    setPending("restart");
+    try {
+        const stopped = await stopRunning(process);
+        if (stopped === "failed") {
+            return;
+        }
+        await restartQueuedLaunch(process.source, request);
+    } catch {
+        notifyError("Не удалось перезапустить пересчёт");
+    } finally {
+        setPending(null);
+    }
+}
+
+async function stopRunning(process: JournalProcess): Promise<"stopped" | "idle" | "failed"> {
+    const running = process.operations.find((operation) => operation.status === "running" && operation.runId !== null);
+    if (!running?.runId) {
+        return "idle";
+    }
+    const response = await fetch("/api/recalc/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: running.runId }),
+    });
+    const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
+    if (!json.success) {
+        notifyError(json.error.message);
+        return "failed";
+    }
+    return "stopped";
+}
+
+async function releaseQueue(source: RecalcPlan): Promise<boolean> {
+    const response = await fetch("/api/recalc/cancel-queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: source.period.slice(0, 10) }),
+    });
+    const json = (await response.json()) as ApiResponse<{ cancelled: boolean }>;
+    if (!json.success) {
+        notifyError(json.error.message);
+        return false;
+    }
+    clearRecalcPlan(source.startedAt);
+    return true;
+}
+
+async function restartQueuedLaunch(source: RecalcPlan, request: NonNullable<ReturnType<typeof monthRequestOf>>): Promise<void> {
+    try {
+        const released = await fetch("/api/recalc/cancel-queue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ period: source.period.slice(0, 10) }),
+        });
+        const releasedJson = (await released.json()) as ApiResponse<{ cancelled: boolean }>;
+        if (!releasedJson.success) {
+            notifyError(releasedJson.error.message);
+            return;
+        }
+        clearRecalcPlan(source.startedAt);
+        const plan = openRecalcConsole({
+            period: source.period,
+            kinds: source.kinds,
+            reason: source.reason,
+            actor: source.actor,
+            scopeLevel: source.scopeLevel,
+            scopeLabel: source.scopeLabel,
+            title: source.title,
+            detail: source.detail,
+            request,
+        });
+        const response = await fetch("/api/branch/month-premium/recalculate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                period: source.period.slice(0, 10),
+                from: request.from,
+                until: request.until,
+                target: request.target,
+                dismissal: request.dismissal,
+                transfer: request.transfer,
+                title: request.title,
+            }),
+        });
+        const json = (await response.json()) as ApiResponse<{ period: string }>;
+        if (!json.success) {
+            notifyError(json.error.message);
+            if (response.status < 500) {
+                clearRecalcPlan(plan.startedAt);
+            }
+            return;
+        }
+        notifySuccess("Пересчёт запущен снова");
+    } catch {
+        notifyError("Не удалось перезапустить пересчёт");
+    }
 }
 
 function Elapsed({ startedAt }: { startedAt: string }) {
@@ -375,16 +576,14 @@ function ProcessDuration({ process }: { process: JournalProcess }) {
     if (span.finishedAt === null) {
         return (
             <span className="shrink-0 text-muted-foreground tabular-nums">
-                {"всего идёт "}
                 <Elapsed startedAt={span.startedAt} />
             </span>
         );
     }
     const spent = formatDuration(new Date(span.finishedAt).getTime() - new Date(span.startedAt).getTime());
-    const stopped = process.operations.some((operation) => operation.status === "failed" || operation.status === "cancelled");
     return (
         <span className="shrink-0 text-muted-foreground tabular-nums">
-            {stopped ? `всего прошло ${spent}` : `всего заняло ${spent}`}
+            {spent}
         </span>
     );
 }
@@ -505,8 +704,10 @@ function groupTitle(process: JournalProcess): string {
     return compactBranchScopeLabel(title) ?? title;
 }
 
-function stepTitle(operation: JournalOperation): string {
-    const name = `${kindName(operation.kind)} за ${formatMonth(operation.period)}`;
+function stepTitle(operation: JournalOperation, withMonth = true): string {
+    const month = formatMonth(operation.period);
+    const named = kindName(operation.kind);
+    const name = withMonth && month !== "" ? `${named} за ${month}` : named;
     if (operation.status === "pending") {
         return `${name} в очереди`;
     }
@@ -517,8 +718,8 @@ function stepTitle(operation: JournalOperation): string {
                 ? "тарифов продажи"
                 : operation.kind === "brigade"
                     ? "долей бригады"
-                    : kindName(operation.kind).toLowerCase();
-        return `Пересчёт ${label} за ${formatMonth(operation.period)}`;
+                    : named.toLowerCase();
+        return withMonth && month !== "" ? `Пересчёт ${label} за ${month}` : `Пересчёт ${label}`;
     }
     if (operation.status === "failed") {
         return operation.kind === "tariffs" || operation.kind === "brigade" ? `${name} не записаны` : `${name} не записана`;
@@ -563,6 +764,10 @@ function buildProcesses(events: BasketRecalcRun[], plans: readonly RecalcPlan[])
             }
             host.operations.push(operation);
             host.live = true;
+            if (!host.source) {
+                host.source = plans.find((plan) => plan.startedAt === operation.queueStartedAt);
+                host.queueStartedAt = operation.queueStartedAt;
+            }
             continue;
         }
         processes.push({
@@ -571,6 +776,8 @@ function buildProcesses(events: BasketRecalcRun[], plans: readonly RecalcPlan[])
             queued: true,
             title: inferTitle([operation]),
             startedAt: operation.startedAt ?? new Date(0).toISOString(),
+            queueStartedAt: operation.queueStartedAt,
+            source: plans.find((plan) => plan.startedAt === operation.queueStartedAt),
             operations: [operation],
         });
     }
@@ -605,7 +812,7 @@ function appendWaitingBrigade(processes: JournalProcess[]): void {
             startedAt: null,
             finishedAt: null,
             scope: sample.scope,
-            detail: "Пойдёт одним шагом после корзин этой записи.",
+            detail: "в очереди",
             conditions: sample.conditions,
         });
     }
@@ -650,8 +857,9 @@ function pendingOperations(events: BasketRecalcRun[], plans: readonly RecalcPlan
             startedAt: plan.startedAt,
             finishedAt: null,
             scope: plan.scopeLabel,
-            detail: "Ждёт своей очереди. Пока идёт другой пересчёт, этот шаг не начинается.",
+            detail: "в очереди",
             conditions: plan.detail,
+            queueStartedAt: plan.startedAt,
         }));
     });
 }
@@ -691,7 +899,7 @@ function inferTitle(operations: JournalOperation[]): string {
     return compactBranchScopeLabel(title) ?? title;
 }
 
-function JournalScopeLabel({ scope }: { scope: string }) {
+function JournalScopeLabel({ scope, summary }: { scope: string; summary?: string }) {
     const compact = compactBranchScopeLabel(scope);
     const [open, setOpen] = useState(false);
     if (!compact) {
@@ -708,7 +916,7 @@ function JournalScopeLabel({ scope }: { scope: string }) {
                     setOpen((current) => !current);
                 }}
             >
-                <span className="min-w-0 whitespace-normal">{open ? scope : compact}</span>
+                <span className="min-w-0 whitespace-normal">{open ? scope : summary ?? compact}</span>
                 <ChevronDownIcon className={cn("mt-0.5 size-3.5 shrink-0 opacity-70 transition-transform", open && "rotate-180")} />
             </button>
         </div>
@@ -735,6 +943,86 @@ function continues(operations: JournalOperation[], next: JournalOperation): bool
     const previousEnd = new Date(previous.finishedAt ?? previous.startedAt).getTime();
     const gap = new Date(next.startedAt).getTime() - previousEnd;
     return gap >= -1000 && gap <= PROCESS_GAP_MS;
+}
+
+function launchFacts(process: JournalProcess): LaunchFacts {
+    const sample = process.operations[0] ?? null;
+    if (!sample) {
+        return { scope: null, conditions: null, originKey: null, sample: null };
+    }
+    return {
+        sample,
+        scope: uniform(process.operations, (operation) => operation.scope),
+        conditions: uniform(process.operations, (operation) => operation.conditions),
+        originKey: uniform(process.operations, (operation) => `${operation.origin ?? ""}\0${operation.trigger}\0${operation.actor.toLowerCase()}`),
+    };
+}
+
+function uniform<T>(operations: readonly JournalOperation[], pick: (operation: JournalOperation) => T): T | null {
+    const first = operations[0];
+    if (!first) {
+        return null;
+    }
+    const value = pick(first);
+    return operations.every((operation) => Object.is(pick(operation), value)) ? value : null;
+}
+
+function LaunchInfo({ process, facts }: { process: JournalProcess; facts: LaunchFacts }) {
+    const sample = facts.sample;
+    if (!sample) {
+        return null;
+    }
+    const scope = facts.scope ?? "";
+    const scopeInTitle = scope !== "" && scopeCoveredByTitle(process, scope);
+    const showScope = scope !== "" && (!scopeInTitle || compactBranchScopeLabel(scope) !== null);
+    const showConditions = facts.conditions !== null && facts.conditions !== "";
+    const showOrigin = facts.originKey !== null && launchOriginVisible(process, sample);
+    if (!showScope && !showConditions && !showOrigin) {
+        return null;
+    }
+    return (
+        <div className="flex flex-col gap-1">
+            {showScope ? <JournalScopeLabel scope={scope} summary={scopeInTitle ? "Список филиалов" : undefined} /> : null}
+            {showConditions ? <p>{facts.conditions}</p> : null}
+            {showOrigin ? <LaunchOrigin process={process} operation={sample} /> : null}
+        </div>
+    );
+}
+
+function scopeCoveredByTitle(process: JournalProcess, scope: string): boolean {
+    const title = groupTitle(process).toLocaleLowerCase("ru-RU");
+    const full = scope.toLocaleLowerCase("ru-RU");
+    const compact = compactBranchScopeLabel(scope)?.toLocaleLowerCase("ru-RU") ?? "";
+    return full !== "" && (title.includes(full) || (compact !== "" && title.includes(compact)));
+}
+
+function reasonCovered(process: JournalProcess, operation: JournalOperation): boolean {
+    const phrase = recalcReasonPhrase(operation.trigger, operation.origin).toLocaleLowerCase("ru-RU");
+    return phrase !== "" && groupTitle(process).toLocaleLowerCase("ru-RU").includes(phrase);
+}
+
+function launchOriginVisible(process: JournalProcess, operation: JournalOperation): boolean {
+    if (!reasonCovered(process, operation)) {
+        return true;
+    }
+    if (actorLabel(operation) !== "") {
+        return true;
+    }
+    return operation.origin !== "manual" || operation.trigger !== "manual";
+}
+
+function LaunchOrigin({ process, operation }: { process: JournalProcess; operation: JournalOperation }) {
+    if (!reasonCovered(process, operation)) {
+        return <OriginLine operation={operation} />;
+    }
+    const person = actorLabel(operation);
+    if (operation.origin === "manual" && operation.trigger === "manual") {
+        return person === "" ? null : <p><ActorName operation={operation} /></p>;
+    }
+    if (operation.origin === "manual") {
+        return <p>{person === "" ? "Вручную" : <>Вручную, <ActorName operation={operation} /></>}</p>;
+    }
+    return <p>{person === "" ? "Система" : <>Система, <ActorName operation={operation} /></>}</p>;
 }
 
 function actorLabel(operation: JournalOperation): string {
@@ -782,7 +1070,7 @@ export function JournalActorLabel({
     }
     return (
         <Tooltip>
-            <TooltipTrigger render={<span tabIndex={focusable ? 0 : undefined} className="cursor-help underline decoration-dotted underline-offset-4" />}>
+            <TooltipTrigger render={<span tabIndex={focusable ? 0 : undefined} className="w-fit cursor-help underline decoration-dotted underline-offset-4" />}>
                 {label}
             </TooltipTrigger>
             <TooltipContent className="flex! w-72 max-w-xs flex-col items-start! gap-1 whitespace-normal text-left">
@@ -801,6 +1089,23 @@ export function JournalActorLabel({
     );
 }
 
+function errorHeading(detail: RecalcErrorDetail): string {
+    if (detail.type === "cancelled" || detail.name === "PremiumRecalcCancelledError" || detail.message.toLowerCase().includes("пересчёт отменён")) {
+        return "Отмена";
+    }
+    return RECALC_ERROR_TYPE_LABELS[detail.type];
+}
+
+function errorSource(route: string | null): [string, string] | null {
+    if (route === null || route === "отмена" || route === "таймаут") {
+        return null;
+    }
+    if (route.startsWith("/")) {
+        return ["Запрос", route];
+    }
+    return ["Откуда", route];
+}
+
 function ErrorReport({ operation }: { operation: JournalOperation }) {
     const detail = operation.errorDetail;
     if (!detail) {
@@ -809,7 +1114,7 @@ function ErrorReport({ operation }: { operation: JournalOperation }) {
     const place = [detail.schema, detail.table, detail.column].filter((item) => item !== null).join(".");
     const source = [detail.file, detail.line].filter((item) => item !== null).join(":");
     const rows = [
-        ["Маршрут", detail.route],
+        errorSource(detail.route),
         ["Класс", detail.name],
         ["Код", detail.code],
         ["Уровень", detail.severity],
@@ -823,10 +1128,16 @@ function ErrorReport({ operation }: { operation: JournalOperation }) {
         ["Функция", detail.routine],
         ["Файл", source === "" ? null : source],
         ["Причина", detail.cause],
-    ].flatMap(([label, value]) => (label && value ? [{ label, value }] : []));
+    ].flatMap((row) => {
+        if (!row) {
+            return [];
+        }
+        const [label, value] = row;
+        return label && value ? [{ label, value }] : [];
+    });
     return (
         <div className="flex flex-col gap-1 text-destructive">
-            <p>{RECALC_ERROR_TYPE_LABELS[detail.type]}</p>
+            <p>{errorHeading(detail)}</p>
             <p>{detail.message}</p>
             {rows.map((row) => (
                 <p key={row.label} className="break-words">

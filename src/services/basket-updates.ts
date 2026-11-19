@@ -6,6 +6,7 @@ import { decideAccess } from "@/server/authz/match-access";
 import { buildRrsEditPolicy, monthIsOpen } from "@/lib/rrs-edit-window";
 import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
+import { interruptPremiumTurn } from "@/services/premium-lock";
 import { notifyRecalc } from "@/services/notifications";
 
 export type BasketUpdateKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | "display" | "shared" | "tariffs" | "brigade";
@@ -605,8 +606,40 @@ export async function failPremiumRecalc(id: number, error: unknown, route?: stri
     }
 }
 
+const MONTH = /^\d{4}-\d{2}-01$/;
+
+/** Снимает месяц, который ещё в очереди: гасит ожидание блокировки и идущие строки этого месяца. */
+export async function cancelQueuedPremium(period: string, actor: string): Promise<void> {
+    const month = period.slice(0, 10);
+    if (!MONTH.test(month)) {
+        throw new Error("Укажите месяц");
+    }
+    const running = await db.query<{ id: number }>(
+        `
+        SELECT id
+        FROM premium_recalc_runs
+        WHERE status = 'running'
+          AND period = $1::date
+        `,
+        [month],
+    );
+    for (const row of running) {
+        await cancelPremiumRecalc(row.id, actor);
+    }
+    const others = await db.query<{ id: number }>(
+        `
+        SELECT id
+        FROM premium_recalc_runs
+        WHERE status = 'running'
+          AND period <> $1::date
+        `,
+        [month],
+    );
+    await interruptPremiumTurn({ releaseHolder: others.length === 0 });
+}
+
 export async function cancelPremiumRecalc(id: number, actor: string): Promise<boolean> {
-    const described = describeRecalcError(new PremiumRecalcCancelledError(`Пересчёт отменён: ${actor}`), "отмена");
+    const described = describeRecalcError(new PremiumRecalcCancelledError(`Пересчёт отменён: ${actor}`));
     const rows = await db.query<RunNoticeRow>(CANCEL_RETURNING, [id, described.summary, JSON.stringify(described.detail)]);
     if (!rows[0]) {
         return false;
@@ -618,23 +651,22 @@ export async function cancelPremiumRecalc(id: number, actor: string): Promise<bo
 
 /** Закрывает зависшие running-строки и снимает блокировку уникального индекса. */
 export async function expireStalePremiumRecalcs(): Promise<number> {
-    const rows = await db.query<{ id: number; scope_level: RecalcScopeLevel; created_at: Date }>(
+    const rows = await db.query<{ id: number; scope_level: RecalcScopeLevel; scope_ids: unknown; created_at: Date }>(
         `
-        SELECT id, scope_level, created_at
+        SELECT id, scope_level, scope_ids, created_at
         FROM premium_recalc_runs
         WHERE status = 'running'
         `,
     );
     let closed = 0;
     for (const row of rows) {
-        const limitMs = recalcTimeoutMs(row.scope_level);
+        const limitMs = recalcTimeoutMs(row.scope_level, readIds(row.scope_ids).length);
         if (Date.now() - row.created_at.getTime() < limitMs) {
             continue;
         }
         const minutes = Math.round(limitMs / 60_000);
         const described = describeRecalcError(
             new PremiumRecalcTimeoutError(`Пересчёт остановлен по таймауту ${minutes} мин`),
-            "таймаут",
         );
         const updated = await db.query<RunNoticeRow>(CANCEL_RETURNING, [row.id, described.summary, JSON.stringify(described.detail)]);
         if (updated[0]) {

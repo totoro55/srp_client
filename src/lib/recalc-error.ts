@@ -1,4 +1,4 @@
-export const RECALC_ERROR_TYPES = ["database", "timeout", "connection", "check", "busy", "internal"] as const;
+export const RECALC_ERROR_TYPES = ["database", "timeout", "connection", "check", "cancelled", "busy", "internal"] as const;
 
 export type RecalcErrorType = (typeof RECALC_ERROR_TYPES)[number];
 
@@ -6,7 +6,8 @@ export const RECALC_ERROR_TYPE_LABELS: Record<RecalcErrorType, string> = {
     database: "База данных",
     timeout: "Таймаут",
     connection: "Соединение",
-    check: "Проверка",
+    check: "Условие не выполнено",
+    cancelled: "Отмена",
     busy: "Занято",
     internal: "Внутренняя ошибка",
 };
@@ -140,7 +141,7 @@ function classify(error: unknown, postgres: PostgresFacts | null): RecalcErrorTy
         return "busy";
     }
     if (name === "PremiumRecalcCancelledError" || message.includes("пересчёт отменён")) {
-        return "check";
+        return "cancelled";
     }
     if (code.startsWith("08") || code === "57P01" || code === "57P02" || code === "57P03" || message.includes("econnrefused") || message.includes("connection terminated") || message.includes("connect econn")) {
         return "connection";

@@ -213,8 +213,8 @@ export const PERMISSION_CATALOG = [
     {
         code: "recalc:cancel",
         group: "Мониторинг",
-        title: "Отмена пересчётов",
-        description: "Остановка идущего пересчёта в журнале",
+        title: "Отмена и перезапуск пересчётов",
+        description: "Остановка и повтор идущего пересчёта в журнале",
     },
     {
         code: "recalc-schedule:write",

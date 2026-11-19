@@ -161,8 +161,7 @@ async function runMonthSelection(input: RecalcWindow & {
 }): Promise<void> {
     const protect = protectReasons(input);
     const conditions = formatRecalcConditions(input);
-    const singleBasket = input.target !== "baskets" && input.target !== "shared";
-    const timeoutMs = recalcTimeoutMs("division", { singleBasket });
+    const timeoutMs = recalcTimeoutMs("division");
     const run: PremiumRun = { from: input.from, until: input.until, protect, timeoutMs };
     if (input.target !== "shared" && wholeMonth(input)) {
         await db.transaction(async (query) => {

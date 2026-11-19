@@ -3,10 +3,20 @@
 import { useEffect, useState } from "react";
 import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { recalcReasonLabel, type RecalcScopeLevel } from "@/lib/recalc-reasons";
+import { monthLastDay, recalcWindowError } from "@/lib/recalc-window";
 import type { BasketUpdateKind } from "@/services/basket-updates";
 
 export const RECALC_PLAN_KEY = "srp-monitoring-recalc-queue";
 export const RECALC_CONSOLE_EVENT = "srp-recalc-console";
+
+export interface MonthRecalcRequest {
+    from: string;
+    until: string;
+    target: "baskets" | BasketUpdateKind;
+    dismissal: boolean;
+    transfer: boolean;
+    title: boolean;
+}
 
 export interface RecalcPlan {
     period: string;
@@ -18,7 +28,13 @@ export interface RecalcPlan {
     scopeLabel: string;
     title: string;
     detail: string;
+    request?: MonthRecalcRequest;
 }
+
+const MONTH_TARGETS = new Set<MonthRecalcRequest["target"]>([
+    "baskets", "sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display", "shared",
+]);
+const DIVISION_BASKETS = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display"] as const;
 
 interface PlanEvent {
     period: string;
@@ -168,6 +184,7 @@ function normalizePlan(value: unknown): RecalcPlan | null {
     if (kinds.length === 0) {
         return null;
     }
+    const request = normalizeRequest(plan.request, plan.period);
     return {
         period: plan.period,
         kinds,
@@ -178,7 +195,85 @@ function normalizePlan(value: unknown): RecalcPlan | null {
         scopeLabel: typeof plan.scopeLabel === "string" ? plan.scopeLabel : "",
         title: typeof plan.title === "string" ? plan.title : "",
         detail: typeof plan.detail === "string" ? plan.detail : "",
+        ...(request ? { request } : {}),
     };
+}
+
+/** Повтор ручного пересчёта дивизиона. Для уже открытой очереди без тела запроса берётся весь месяц. */
+export function monthRequestOf(plan: Pick<RecalcPlan, "period" | "kinds" | "reason" | "scopeLevel" | "detail" | "request">): MonthRecalcRequest | null {
+    if (plan.request) {
+        return plan.request;
+    }
+    if (plan.reason !== "manual" || plan.scopeLevel !== "division") {
+        return null;
+    }
+    const period = plan.period.slice(0, 10);
+    const whole = plan.detail === "" || plan.detail.startsWith("Весь ");
+    if (!whole) {
+        return null;
+    }
+    const target = divisionTarget(plan.kinds);
+    if (target === null) {
+        return null;
+    }
+    const request: MonthRecalcRequest = {
+        from: period,
+        until: monthLastDay(period),
+        target,
+        dismissal: staffFlag(plan.detail, "увольнение"),
+        transfer: staffFlag(plan.detail, "перевод"),
+        title: staffFlag(plan.detail, "смена должности"),
+    };
+    return recalcWindowError({ period, ...request }) === null ? request : null;
+}
+
+function divisionTarget(kinds: readonly BasketUpdateKind[]): MonthRecalcRequest["target"] | null {
+    const present = new Set(kinds);
+    if (DIVISION_BASKETS.every((kind) => present.has(kind))) {
+        return "baskets";
+    }
+    const baskets = DIVISION_BASKETS.filter((kind) => present.has(kind));
+    if (baskets.length === 0 && present.has("shared")) {
+        return "shared";
+    }
+    if (baskets.length === 1 && [...present].every((kind) => kind === baskets[0] || kind === "brigade")) {
+        return baskets[0];
+    }
+    return null;
+}
+
+function staffFlag(detail: string, word: string): boolean {
+    const sentence = detail.split(". ").find((part) => part.toLocaleLowerCase("ru-RU").includes(word));
+    if (sentence === undefined) {
+        return true;
+    }
+    return !sentence.includes("не пересчитыва");
+}
+
+function normalizeRequest(value: unknown, period: string): MonthRecalcRequest | undefined {
+    if (typeof value !== "object" || value === null) {
+        return undefined;
+    }
+    const request = value as Partial<MonthRecalcRequest>;
+    if (!isMonthTarget(request.target) || typeof request.from !== "string" || typeof request.until !== "string") {
+        return undefined;
+    }
+    if (typeof request.dismissal !== "boolean" || typeof request.transfer !== "boolean" || typeof request.title !== "boolean") {
+        return undefined;
+    }
+    const next: MonthRecalcRequest = {
+        from: request.from,
+        until: request.until,
+        target: request.target,
+        dismissal: request.dismissal,
+        transfer: request.transfer,
+        title: request.title,
+    };
+    return recalcWindowError({ period: period.slice(0, 10), ...next }) === null ? next : undefined;
+}
+
+function isMonthTarget(value: unknown): value is MonthRecalcRequest["target"] {
+    return typeof value === "string" && MONTH_TARGETS.has(value as MonthRecalcRequest["target"]);
 }
 
 function startedOnMoscowToday(iso: string): boolean {

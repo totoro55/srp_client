@@ -2,19 +2,16 @@ import type { RecalcScopeLevel } from "@/lib/recalc-reasons";
 
 const MINUTE = 60_000;
 
-/** Автозагрузка и полный пересчёт дивизиона. */
-export const DIVISION_RECALC_TIMEOUT_MS = 60 * MINUTE;
-/** Пересчёт одной РРС. */
-export const TERRITORY_RECALC_TIMEOUT_MS = 15 * MINUTE;
-/** Пересчёт филиала или одной корзины. */
-export const BRANCH_RECALC_TIMEOUT_MS = 10 * MINUTE;
+/** Автозагрузка и пересчёт дивизиона. Лимит одного запроса корзины. */
+export const DIVISION_RECALC_TIMEOUT_MS = 6 * MINUTE;
+/** Пересчёт одной РРС и списка филиалов. */
+export const TERRITORY_RECALC_TIMEOUT_MS = 4 * MINUTE;
+/** Пересчёт одного филиала. */
+export const BRANCH_RECALC_TIMEOUT_MS = 2 * MINUTE;
 
-export function recalcTimeoutMs(
-    scopeLevel: RecalcScopeLevel,
-    options?: { singleBasket?: boolean },
-): number {
-    if (options?.singleBasket || scopeLevel === "branch") {
-        return BRANCH_RECALC_TIMEOUT_MS;
+export function recalcTimeoutMs(scopeLevel: RecalcScopeLevel, branchCount = 1): number {
+    if (scopeLevel === "branch") {
+        return branchCount > 1 ? TERRITORY_RECALC_TIMEOUT_MS : BRANCH_RECALC_TIMEOUT_MS;
     }
     if (scopeLevel === "territory") {
         return TERRITORY_RECALC_TIMEOUT_MS;

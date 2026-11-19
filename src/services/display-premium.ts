@@ -28,6 +28,9 @@ export async function calculateDisplayPremium(period: string, refreshSchedule = 
     return db.transaction(async (query) => {
         await query("SET LOCAL work_mem = '512MB'");
         await query(run?.timeoutMs ? `SET LOCAL statement_timeout = ${Math.trunc(run.timeoutMs)}` : "SET LOCAL statement_timeout = 0");
+        // Отрезок дат оценивается как одна строка, и доли зон соединяются вложенным циклом.
+        // На месяце это десятки миллионов проверок. Хеш-соединение считает тот же месяц за секунды.
+        await query("SET LOCAL enable_nestloop = off");
         if (refreshSchedule) {
             await replaceAuthorDays(query, period, asOf);
         }

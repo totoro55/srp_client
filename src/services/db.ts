@@ -150,6 +150,7 @@ class DbService {
         await this.ready();
 
         const client = await this.pool.connect();
+        let broken = false;
         try {
             await client.query("BEGIN");
             const result = await fn(async <R extends QueryResultRow>(text: string, params?: unknown[]) => {
@@ -159,10 +160,14 @@ class DbService {
             await client.query("COMMIT");
             return result;
         } catch (error) {
-            await client.query("ROLLBACK");
+            try {
+                await client.query("ROLLBACK");
+            } catch {
+                broken = true;
+            }
             throw error;
         } finally {
-            client.release();
+            client.release(broken);
         }
     }
 
