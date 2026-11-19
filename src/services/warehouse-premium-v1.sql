@@ -68,7 +68,7 @@ operation_hits AS (
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
 ),
-worked AS (
+worked AS MATERIALIZED (
     SELECT $1::date AS period,
            branch.territory_uuid,
            assignment.branch_uuid,
@@ -116,7 +116,7 @@ worked AS (
           OR COALESCE(operation.date::date, $1::date) BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
 ),
-coefficients AS (
+coefficients AS MATERIALIZED (
     SELECT branch.territory_uuid,
            branch.branch_uuid,
            COALESCE(MAX(coefficient.value), 1) AS warehouse_coef

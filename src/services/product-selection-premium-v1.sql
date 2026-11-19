@@ -68,7 +68,7 @@ selection_hits AS (
           OR (picked.date IS NULL AND $1::date BETWEEN $4::date AND COALESCE($5::date, $4::date))
       )
 ),
-worked AS (
+worked AS MATERIALIZED (
     SELECT $1::date AS period,
            branch.territory_uuid,
            assignment.branch_uuid,

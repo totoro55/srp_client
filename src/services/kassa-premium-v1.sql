@@ -120,7 +120,7 @@ worked AS MATERIALIZED (
       AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
       AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
 ),
-coefficients AS (
+coefficients AS MATERIALIZED (
     SELECT branch.territory_uuid,
            branch.branch_uuid,
            COALESCE(MAX(coefficient.value), 1) AS kassa_coef

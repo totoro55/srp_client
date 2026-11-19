@@ -177,7 +177,7 @@ month_tariffs AS MATERIALIZED (
     FROM basket_data.basket_kind_tariffs tariff
     WHERE tariff.period = $1::date
 ),
-tariffs AS (
+tariffs AS MATERIALIZED (
     SELECT sale_lines.territory_uuid,
            sale_lines.branch_uuid,
            sale_lines.author_kind,
@@ -212,7 +212,7 @@ tariffs AS (
         ON territory_base.territory_uuid = sale_lines.territory_uuid
        AND tariff.code IS NULL
 ),
-coefficients AS (
+coefficients AS MATERIALIZED (
     SELECT branch.territory_uuid,
            branch.branch_uuid,
            COALESCE(MAX(coefficient.value) FILTER (WHERE coefficient.coefficient_key = 'stm_coef'), 1) AS stm_coef,

@@ -175,33 +175,38 @@ calendar AS (
         ON unloader_counts.branch_uuid = branch.branch_uuid
        AND unloader_counts.day = month_days.day
 ),
-marked AS (
+marked AS MATERIALIZED (
     SELECT calendar.*,
            (calendar.has_schedule OR calendar.participants > 0) AS work_day
     FROM calendar
 ),
-attributed AS (
+targeted AS (
     SELECT marked.branch_uuid,
-           marked.day AS source_day,
+           marked.day,
            marked.receipt_volume,
            marked.participants,
            marked.work_day,
            CASE
                WHEN marked.work_day THEN marked.day
-               ELSE (
-                   SELECT previous.day
-                   FROM marked previous
-                   WHERE previous.branch_uuid = marked.branch_uuid
-                     AND previous.day < marked.day
-                     AND previous.work_day
-                   ORDER BY previous.day DESC
-                   LIMIT 1
+               ELSE MAX(marked.day) FILTER (WHERE marked.work_day) OVER (
+                   PARTITION BY marked.branch_uuid
+                   ORDER BY marked.day
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
                )
            END AS target_day
     FROM marked
-    WHERE marked.receipt_volume <> 0
 ),
-day_volume AS (
+attributed AS (
+    SELECT targeted.branch_uuid,
+           targeted.day AS source_day,
+           targeted.receipt_volume,
+           targeted.participants,
+           targeted.work_day,
+           targeted.target_day
+    FROM targeted
+    WHERE targeted.receipt_volume <> 0
+),
+day_volume AS MATERIALIZED (
     SELECT attributed.branch_uuid,
            attributed.target_day AS day,
            SUM(attributed.receipt_volume)::numeric AS volume
@@ -238,7 +243,7 @@ shares AS (
           OR paid_days.day BETWEEN $4::date AND COALESCE($5::date, $4::date)
       )
 ),
-worked AS (
+worked AS MATERIALIZED (
     SELECT $1::date AS period,
            branch.territory_uuid,
            assignment.branch_uuid,
@@ -267,7 +272,7 @@ worked AS (
       AND ($3::uuid IS NULL OR assignment.branch_uuid = $3::uuid)
       AND ($7::uuid[] IS NULL OR assignment.branch_uuid = ANY($7::uuid[]))
 ),
-coefficients AS (
+coefficients AS MATERIALIZED (
     SELECT branch.territory_uuid,
            branch.branch_uuid,
            COALESCE(MAX(coefficient.value), 1) AS unloading_coef

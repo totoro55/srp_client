@@ -308,7 +308,7 @@ function CancelRecalcButton({ runId, className }: { runId: number | null; classN
             type="button"
             variant="ghost"
             size="icon-sm"
-            className={cn("shrink-0 self-center text-muted-foreground hover:text-destructive", className)}
+            className={cn("shrink-0 self-center text-destructive hover:bg-destructive/10", className)}
             aria-label="Отменить пересчёт"
             title="Отменить пересчёт"
             disabled={pending}
@@ -336,7 +336,7 @@ function CancelRecalcButton({ runId, className }: { runId: number | null; classN
                 })();
             }}
         >
-            {pending ? <LoaderCircleIcon className="animate-spin" /> : <SquareIcon />}
+            {pending ? <LoaderCircleIcon className="animate-spin" /> : <SquareIcon className="fill-current" />}
         </Button>
     );
 }
