@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CircleCheckIcon, CircleIcon, CircleXIcon, ListChecksIcon, LoaderCircleIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAccess } from "@/hooks/useAccess";
 import { RECALC_ERROR_TYPE_LABELS, type RecalcErrorDetail } from "@/lib/recalc-error";
 import { compactBranchScopeLabel, recalcReasonLabel, recalcReasonPhrase } from "@/lib/recalc-reasons";
@@ -200,26 +201,29 @@ function ProcessGroup({ process, defaultOpen }: { process: JournalProcess; defau
     const facts = launchFacts(process);
     return (
         <TraceCollapsible open={open} onOpenChange={setOpen}>
-            <span className="flex w-full min-w-0 items-start gap-1">
-                <TraceCollapsibleTrigger className="min-w-0 flex-1 items-start">
-                    <TraceLine
-                        status={traceStatus(status === "failed" && !everyFailed ? "done" : status)}
-                        className="w-full min-w-0 flex-1 flex-col items-stretch gap-1 group-aria-expanded/trace-collapsible-trigger:gap-0"
-                    >
-                        <span className="flex min-w-0 items-center gap-2">
+            <span className="flex w-full min-w-0 flex-col gap-1">
+                <span className="flex w-fit max-w-full min-w-0 items-center">
+                    <TraceCollapsibleTrigger className="w-fit min-w-0 max-w-full [&>[data-slot=trace-icon]:last-child]:hidden">
+                        <TraceLine
+                            status={traceStatus(status === "failed" && !everyFailed ? "done" : status)}
+                            className="w-fit min-w-0"
+                        >
                             <TraceIcon>{statusIcon(status, several)}</TraceIcon>
                             <TraceTitle>{groupTitle(process)}</TraceTitle>
                             {several ? <ProcessDuration process={process} /> : null}
-                        </span>
-                        <TraceDescription
-                            aria-hidden={open}
-                            className={cn("w-full min-w-0 pl-6 whitespace-normal", open && "hidden")}
-                        >
-                            <RowSummary process={process} facts={facts} />
-                        </TraceDescription>
-                    </TraceLine>
-                </TraceCollapsibleTrigger>
-                {canSteerLaunch(process) ? <GroupLaunchActions process={process} className="self-start" /> : null}
+                        </TraceLine>
+                    </TraceCollapsibleTrigger>
+                    {canSteerLaunch(process) ? <GroupLaunchActions process={process} /> : null}
+                    <CollapsibleTrigger className="group/trace-collapsible-trigger flex size-4 shrink-0 items-center text-muted-foreground">
+                        <ChevronRightIcon className="size-4 transition-transform group-aria-expanded/trace-collapsible-trigger:rotate-90" />
+                    </CollapsibleTrigger>
+                </span>
+                <CollapsibleTrigger
+                    aria-hidden={open}
+                    className={cn("w-full min-w-0 pl-6 text-left whitespace-normal text-muted-foreground", open && "hidden")}
+                >
+                    <RowSummary process={process} facts={facts} />
+                </CollapsibleTrigger>
             </span>
             <TraceCollapsibleContent className={cn("flex flex-col gap-3 border-l-2 border-foreground/30", open && "h-auto! overflow-visible!")}>
                 <LaunchInfo process={process} facts={facts} />
