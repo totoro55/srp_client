@@ -81,7 +81,7 @@ export function BasketUpdates({ initial }: { initial: BasketCalculationBoard }) 
         openRecalcConsole({
             period: request.period,
             kinds: request.target === "baskets"
-                ? ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "shared", "brigade"]
+                ? ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display", "shared", "brigade"]
                 : request.target === "shared"
                     ? ["shared"]
                     : [request.target, "brigade"],

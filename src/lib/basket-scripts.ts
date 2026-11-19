@@ -61,6 +61,14 @@ export const BASKET_SCRIPTS: readonly BasketScript[] = [
         file: "product-selection-premium-v1.sql",
         summary: "Ставка quantity умножается на количество, ставка volume — на объём. Обе умножаются на коэффициент филиала selection_coef.",
     },
+    {
+        id: "display.quantity-volume",
+        title: "Количество и объём выставления",
+        indicator: "Выставление товара",
+        parameters: ["quantity", "volume"],
+        file: "display-premium-v1.sql",
+        summary: "Итог зоны делится поровну между сотрудниками зоны с часами табеля. Ставка quantity умножается на долю количества, ставка volume — на долю объёма. Обе умножаются на коэффициент филиала display_coef. Зона без часов и выставление без зоны складываются в «Общую» дня.",
+    },
 ];
 
 export function basketScriptsFor(indicator: string): BasketScript[] {

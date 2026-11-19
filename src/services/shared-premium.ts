@@ -92,6 +92,7 @@ interface AuthorInsert {
     warehouse: number;
     unloading: number;
     selection: number;
+    display: number;
 }
 
 interface OutsideAuthor {
@@ -105,6 +106,7 @@ interface OutsideAuthor {
     warehouse: number;
     unloading: number;
     selection: number;
+    display: number;
 }
 
 export async function writeSharedPremiums(
@@ -317,6 +319,7 @@ export interface SharedPremiumAuthorRow {
     warehouse: number;
     unloading: number;
     selection: number;
+    display: number;
     activeFrom: string;
 }
 
@@ -349,6 +352,7 @@ export async function readSharedPremiumAuthors(
         warehouse: number | string;
         unloading: number | string;
         selection: number | string;
+        display: number | string;
         name: string;
         title: string;
     }>(
@@ -363,6 +367,7 @@ export async function readSharedPremiumAuthors(
                author.warehouse::float8 AS warehouse,
                author.unloading::float8 AS unloading,
                author.selection::float8 AS selection,
+               author.display::float8 AS display,
                COALESCE(
                    NULLIF(btrim(person.name), ''),
                    NULLIF(btrim(promoter.name_employees), ''),
@@ -406,7 +411,8 @@ export async function readSharedPremiumAuthors(
         const warehouse = amount(row.warehouse);
         const unloading = amount(row.unloading);
         const selection = amount(row.selection);
-        if (sale === null || release === null || kassa === null || osnt === null || warehouse === null || unloading === null || selection === null) {
+        const display = amount(row.display);
+        if (sale === null || release === null || kassa === null || osnt === null || warehouse === null || unloading === null || selection === null || display === null) {
             return [];
         }
         const kind = authorKind(row.kind);
@@ -426,11 +432,12 @@ export async function readSharedPremiumAuthors(
             warehouse,
             unloading,
             selection,
+            display,
             activeFrom: row.activeFrom,
         }];
     }).sort((left, right) => (
-        (right.sale + right.release + right.kassa + right.osnt + right.warehouse + right.unloading + right.selection)
-        - (left.sale + left.release + left.kassa + left.osnt + left.warehouse + left.unloading + left.selection)
+        (right.sale + right.release + right.kassa + right.osnt + right.warehouse + right.unloading + right.selection + right.display)
+        - (left.sale + left.release + left.kassa + left.osnt + left.warehouse + left.unloading + left.selection + left.display)
     ) || left.name.localeCompare(right.name, "ru"));
 }
 
@@ -579,6 +586,7 @@ function sharesToWrite(
     const warehouseByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const unloadingByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     const selectionByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
+    const displayByBranch = new Map<string, { id: string; day: string; amount: number }[]>();
     for (const day of premiumDays) {
         const target = day.indicator === "Выдача товара"
             ? releaseByBranch
@@ -592,7 +600,9 @@ function sharesToWrite(
                             ? unloadingByBranch
                             : day.indicator === "Набор товара"
                                 ? selectionByBranch
-                                : saleByBranch;
+                                : day.indicator === "Выставление товара"
+                                    ? displayByBranch
+                                    : saleByBranch;
         const list = target.get(day.branchId) ?? [];
         list.push({ id: day.id, day: day.day, amount: day.amount });
         target.set(day.branchId, list);
@@ -617,6 +627,7 @@ function sharesToWrite(
             && outsideAuthor.warehouse === 0
             && outsideAuthor.unloading === 0
             && outsideAuthor.selection === 0
+            && outsideAuthor.display === 0
         ) {
             continue;
         }
@@ -632,6 +643,7 @@ function sharesToWrite(
             warehouse: outsideAuthor.warehouse,
             unloading: outsideAuthor.unloading,
             selection: outsideAuthor.selection,
+            display: outsideAuthor.display,
         });
     }
     for (const [branchId, employeeIds] of employeesByBranch) {
@@ -663,6 +675,7 @@ function sharesToWrite(
         const warehouse = premiumsBySegment(segments, warehouseByBranch.get(branchId) ?? []);
         const unloading = premiumsBySegment(segments, unloadingByBranch.get(branchId) ?? []);
         const selection = premiumsBySegment(segments, selectionByBranch.get(branchId) ?? []);
+        const display = premiumsBySegment(segments, displayByBranch.get(branchId) ?? []);
         let pool = outside.pools.get(branchId) ?? outside.pools.get(branchId.toLowerCase()) ?? 0;
         for (const segment of segments) {
             if (participates(segment.ktu, roleOf(branchId, segment.id, segment.title, segment.ktu, overrides, settings))) {
@@ -675,7 +688,8 @@ function sharesToWrite(
             const warehouseAmount = warehouse[segment.rowKey] ?? 0;
             const unloadingAmount = unloading[segment.rowKey] ?? 0;
             const selectionAmount = selection[segment.rowKey] ?? 0;
-            pool += saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount + selectionAmount;
+            const displayAmount = display[segment.rowKey] ?? 0;
+            pool += saleAmount + releaseAmount + kassaAmount + osntAmount + warehouseAmount + unloadingAmount + selectionAmount + displayAmount;
             if (
                 saleAmount !== 0
                 || releaseAmount !== 0
@@ -684,6 +698,7 @@ function sharesToWrite(
                 || warehouseAmount !== 0
                 || unloadingAmount !== 0
                 || selectionAmount !== 0
+                || displayAmount !== 0
             ) {
                 authors.push({
                     branch: branchId,
@@ -697,6 +712,7 @@ function sharesToWrite(
                     warehouse: warehouseAmount,
                     unloading: unloadingAmount,
                     selection: selectionAmount,
+                    display: displayAmount,
                 });
             }
         }
@@ -828,7 +844,7 @@ async function replaceAuthors(
             `
             INSERT INTO main.shared_premium_authors (
                 period, branch_uuid, employee_uuid, author_kind, active_from,
-                sale, release, kassa, osnt, warehouse, unloading, selection
+                sale, release, kassa, osnt, warehouse, unloading, selection, display
             )
             SELECT $1::date,
                    item.branch::uuid,
@@ -841,11 +857,12 @@ async function replaceAuthors(
                    item.osnt::numeric,
                    item.warehouse::numeric,
                    item.unloading::numeric,
-                   item.selection::numeric
+                   item.selection::numeric,
+                   item.display::numeric
             FROM unnest(
                 $2::text[], $3::text[], $4::text[], $5::text[],
-                $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[]
-            ) AS item(branch, employee, kind, active_from, sale, release, kassa, osnt, warehouse, unloading, selection)
+                $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[]
+            ) AS item(branch, employee, kind, active_from, sale, release, kassa, osnt, warehouse, unloading, selection, display)
             `,
             [
                 period,
@@ -860,6 +877,7 @@ async function replaceAuthors(
                 chunk.map((item) => item.warehouse.toFixed(2)),
                 chunk.map((item) => item.unloading.toFixed(2)),
                 chunk.map((item) => item.selection.toFixed(2)),
+                chunk.map((item) => item.display.toFixed(2)),
             ],
         );
     }
@@ -889,7 +907,7 @@ async function readOutsideContributions(
           AND ($4::uuid[] IS NULL OR day.branch_uuid = ANY($4::uuid[]))
           AND indicator.name IN (
               'Продажа товара', 'Выдача товара', 'Кассовые операции',
-              'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара'
+              'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара', 'Выставление товара'
           )
         GROUP BY day.branch_uuid, day.employee_uuid, day.author_kind, indicator.name
         `,
@@ -919,13 +937,14 @@ async function readOutsideContributions(
                 + author.osnt
                 + author.warehouse
                 + author.unloading
-                + author.selection,
+                + author.selection
+                + author.display,
         );
     }
     return { pools, authors };
 }
 
-function outsideField(indicator: string): "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | null {
+function outsideField(indicator: string): "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | "display" | null {
     if (indicator === "Продажа товара") {
         return "sale";
     }
@@ -947,6 +966,9 @@ function outsideField(indicator: string): "sale" | "release" | "kassa" | "osnt" 
     if (indicator === "Набор товара") {
         return "selection";
     }
+    if (indicator === "Выставление товара") {
+        return "display";
+    }
     return null;
 }
 
@@ -962,6 +984,7 @@ function emptyOutside(branchId: string, employeeId: string, kind: "promoter" | "
         warehouse: 0,
         unloading: 0,
         selection: 0,
+        display: 0,
     };
 }
 
@@ -1134,7 +1157,7 @@ async function dbRows(query: PremiumQuery, period: string, asOf: string, branchI
           AND ($4::uuid[] IS NULL OR day.branch_uuid = ANY($4::uuid[]))
           AND indicator.name IN (
               'Продажа товара', 'Выдача товара', 'Кассовые операции',
-              'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара'
+              'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара', 'Выставление товара'
           )
         `,
         [period, asOf, branchId, listed],

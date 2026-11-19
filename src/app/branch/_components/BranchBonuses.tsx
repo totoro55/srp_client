@@ -394,6 +394,7 @@ export function BranchBonuses() {
             "Складские операции": directory.warehousePremiums[key],
             "Разгрузка ТС": directory.unloadingPremiums[key],
             "Набор товара": directory.selectionPremiums[key],
+            "Выставление товара": directory.displayPremiums[key],
         });
         const shared = directory.sharedPremiums[key] ?? 0;
         const earned = earnedPremium([...Object.values(premiums), ...Object.values(services), shared]);
@@ -427,6 +428,7 @@ export function BranchBonuses() {
         directory.sharedPremiums,
         directory.unloadingPremiums,
         directory.selectionPremiums,
+        directory.displayPremiums,
         directory.warehousePremiums,
         services,
         settings,
@@ -656,7 +658,7 @@ export function BranchBonuses() {
                         const lines = canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail);
                         const currentHeat = payHeatStyle(currentHeatRanks, row.pay.currentPay);
                         const forecastHeat = payHeatStyle(forecastHeatRanks, row.pay.forecastPay);
-                        const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
+                        const timesheetShort = !showForecast && timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
                         const rowId = roleKey(row.employee);
                         const movement = row.employee.movement;
                         const place = places[index];
@@ -819,7 +821,7 @@ function BonusListItem({
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
-    const timesheetShort = timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
+    const timesheetShort = !showForecast && timesheetIsShort(row.pay.scheduleHours, row.pay.timesheetHours);
     const movement = row.employee.movement;
     const valueTone = movementValueClass(movement);
     const details = [

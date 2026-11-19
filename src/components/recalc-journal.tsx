@@ -561,7 +561,7 @@ function buildProcesses(events: BasketRecalcRun[], plan: RecalcPlan | null): Jou
     return processes;
 }
 
-const BRIGADE_BASKET_KINDS = new Set<BasketUpdateKind>(["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection"]);
+const BRIGADE_BASKET_KINDS = new Set<BasketUpdateKind>(["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display"]);
 
 function appendWaitingBrigade(processes: JournalProcess[]): void {
     for (const process of processes) {
@@ -901,6 +901,9 @@ function kindName(kind: BasketUpdateKind): string {
     }
     if (kind === "selection") {
         return "Набор";
+    }
+    if (kind === "display") {
+        return "Выставление";
     }
     if (kind === "tariffs") {
         return "Тарифы";

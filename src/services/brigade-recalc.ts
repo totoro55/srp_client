@@ -19,6 +19,7 @@ const INDICATOR_BY_KIND: Partial<Record<BasketUpdateKind, BrigadeIndicator>> = {
     warehouse: "Складские операции",
     unloading: "Разгрузка ТС",
     selection: "Набор товара",
+    display: "Выставление товара",
 };
 
 export function brigadeIndicatorOf(kind: BasketUpdateKind): BrigadeIndicator | null {

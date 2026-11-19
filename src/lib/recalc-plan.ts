@@ -155,6 +155,7 @@ function isRecalcKind(kind: unknown): kind is BasketUpdateKind {
         || kind === "warehouse"
         || kind === "unloading"
         || kind === "selection"
+        || kind === "display"
         || kind === "shared"
         || kind === "tariffs"
         || kind === "brigade";

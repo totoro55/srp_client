@@ -8,7 +8,7 @@ import { getAppSettings } from "@/services/app-settings";
 import { db } from "@/services/db";
 import { notifyRecalc } from "@/services/notifications";
 
-export type BasketUpdateKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | "shared" | "tariffs" | "brigade";
+export type BasketUpdateKind = "sale" | "release" | "kassa" | "osnt" | "warehouse" | "unloading" | "selection" | "display" | "shared" | "tariffs" | "brigade";
 export type RecalcRunStatus = "running" | "success" | "failed" | "cancelled";
 export type { RecalcScopeLevel };
 
@@ -102,6 +102,7 @@ const KIND_BY_INDICATOR: Record<string, Exclude<BasketUpdateKind, "shared" | "ta
     "Складские операции": "warehouse",
     "Разгрузка ТС": "unloading",
     "Набор товара": "selection",
+    "Выставление товара": "display",
 };
 
 interface BasketRow {
@@ -174,7 +175,7 @@ async function snapshotFor(indicator: string): Promise<SnapshotRow[]> {
 }
 
 export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
-    const [settings, baskets, saleSource, releaseSource, kassaSource, osntSource, warehouseSource, unloadingSource, selectionSource, saleSnapshot, releaseSnapshot, kassaSnapshot, osntSnapshot, warehouseSnapshot, unloadingSnapshot, selectionSnapshot, sharedSnapshot, runs] = await Promise.all([
+    const [settings, baskets, saleSource, releaseSource, kassaSource, osntSource, warehouseSource, unloadingSource, selectionSource, displaySource, saleSnapshot, releaseSnapshot, kassaSnapshot, osntSnapshot, warehouseSnapshot, unloadingSnapshot, selectionSnapshot, displaySnapshot, sharedSnapshot, runs] = await Promise.all([
         getAppSettings(),
         db.query<BasketRow>(`
             SELECT basket.id,
@@ -183,7 +184,7 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
             FROM baskets basket
             JOIN indicators indicator ON indicator.id = basket.indicator_id
             WHERE basket.status = 'active'
-              AND indicator.name IN ('Продажа товара', 'Выдача товара', 'Кассовые операции', 'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара')
+              AND indicator.name IN ('Продажа товара', 'Выдача товара', 'Кассовые операции', 'ОСНТ', 'Складские операции', 'Разгрузка ТС', 'Набор товара', 'Выставление товара')
             ORDER BY basket.sort_order, basket.id
         `),
         db.query<CountRow>(`
@@ -236,6 +237,13 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
             WHERE period IS NOT NULL
             GROUP BY period
         `),
+        db.query<CountRow>(`
+            SELECT to_char("period", 'YYYY-MM-DD') AS period,
+                   count(*)::int AS rows
+            FROM raw.vystavleniye
+            WHERE "period" IS NOT NULL
+            GROUP BY "period"
+        `),
         snapshotFor("Продажа товара"),
         snapshotFor("Выдача товара"),
         snapshotFor("Кассовые операции"),
@@ -243,6 +251,7 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
         snapshotFor("Складские операции"),
         snapshotFor("Разгрузка ТС"),
         snapshotFor("Набор товара"),
+        snapshotFor("Выставление товара"),
         db.query<SnapshotRow>(`
             SELECT to_char(share.period, 'YYYY-MM-DD') AS period,
                    count(*)::int AS lines,
@@ -272,6 +281,7 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
         warehouse: indexCounts(warehouseSource),
         unloading: indexCounts(unloadingSource),
         selection: indexCounts(selectionSource),
+        display: indexCounts(displaySource),
     };
     const snapshotByKind = {
         sale: indexSnapshots(saleSnapshot),
@@ -281,6 +291,7 @@ export async function readBasketUpdates(): Promise<BasketCalculationBoard> {
         warehouse: indexSnapshots(warehouseSnapshot),
         unloading: indexSnapshots(unloadingSnapshot),
         selection: indexSnapshots(selectionSnapshot),
+        display: indexSnapshots(displaySnapshot),
     };
 
     return {
@@ -334,7 +345,7 @@ function sharedMonths(
 }
 
 const JOURNAL_PAGE = 40;
-const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "shared", "tariffs", "brigade"];
+const JOURNAL_KINDS: BasketUpdateKind[] = ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display", "shared", "tariffs", "brigade"];
 const JOURNAL_STATUSES: RecalcRunStatus[] = ["running", "success", "failed", "cancelled"];
 
 export function parseJournalBasket(value: string | null | undefined): BasketUpdateKind | null {

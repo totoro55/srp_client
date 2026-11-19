@@ -26,6 +26,7 @@ interface BranchBrigadesPayload {
     warehousePremiums: Record<string, number>;
     unloadingPremiums: Record<string, number>;
     selectionPremiums: Record<string, number>;
+    displayPremiums: Record<string, number>;
     shares: Record<string, number>;
 }
 
@@ -103,6 +104,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
                 warehousePremiums: fresh?.warehousePremiums ?? {},
                 unloadingPremiums: fresh?.unloadingPremiums ?? {},
                 selectionPremiums: fresh?.selectionPremiums ?? {},
+                displayPremiums: fresh?.displayPremiums ?? {},
                 shares: fresh?.sharedPremiums ?? {},
             },
         });

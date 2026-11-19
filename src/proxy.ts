@@ -81,6 +81,9 @@ export async function proxy(req: NextRequest) {
                 || pathname === "/api/branch/osnt-premium/recalculate"
                 || pathname === "/api/branch/warehouse-premium/recalculate"
                 || pathname === "/api/branch/unloading-premium/recalculate"
+                || pathname === "/api/branch/selection-premium/recalculate"
+                || pathname === "/api/branch/display-premium/recalculate"
+                || pathname === "/api/branch/month-premium/recalculate"
                 || pathname === "/api/branch/shared-premium/recalculate")
             && req.headers.get("authorization")?.startsWith("Bearer ")
         ) {

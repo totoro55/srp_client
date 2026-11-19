@@ -1,249 +1,197 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { DataTableSkeleton } from "@/components/loading-state";
+import { DETAIL_TIMEOUT_MESSAGE, isDetailTimeoutBody } from "@/lib/detail-timeout";
 import { cn } from "@/lib/utils";
 import {
-    BonusDetailPagination,
     BonusDetailSearch,
     BonusDetailShell,
-    BonusDetailSortButton,
-    BonusDetailSortHeader,
     BonusDetailTableFrame,
     BonusDetailToolbar,
     filterDetailItems,
     parseDetailDate,
     sortDetailItems,
-    useBonusDetailPagination,
-    useBonusDetailSort,
     useResetWhenChanged,
 } from "./BonusDetailPager";
-import {
-    detailAmountClass,
-    detailChevronClass,
-    detailGridDual,
-    detailWideCell,
-    detailHeaderClass,
-    detailModeToggleClass,
-    detailModeToggleItemClass,
-    detailNestedClass,
-    detailNestedRowClass,
-    detailRowClass,
-} from "./bonus-detail-ui";
-import {
-    displayOperationDetail,
-    formatMoney,
-    type DisplayDayGroup,
-    type DisplayDetailRow,
-} from "./mock";
+import { detailAmountClass, detailHeaderClass, detailRowClass } from "./bonus-detail-ui";
+import { BrigadeMemberFilter, useBrigadeMemberFilter } from "./BrigadeDetailFilter";
+import { useBranchDirectory } from "./branch-directory";
+import { useBranchLocation } from "./BranchFrame";
+import { DetailHint } from "./SalesBonusDetail";
+import { formatMoney } from "./mock";
+import { findStaffSegment } from "./staff";
 
-type GroupMode = "zone" | "day";
+const POOL_ZONE = "Общая";
+const POOL_HINT = "Учитываются товары не привязанные ни к одной из зон.";
+const displayWideColumns = "sm:grid sm:grid-cols-[minmax(7rem,0.8fr)_minmax(9rem,1.1fr)_minmax(14rem,1.6fr)_7.5rem] sm:items-center sm:gap-x-3";
+
+interface DisplayLine {
+    id: string;
+    title: string;
+    day: string;
+    calculation: string;
+    amount: number;
+    employeeId?: string;
+    employeeName?: string;
+}
 
 export function DisplayBonusDetail({ employeeId, period }: { employeeId: string; period: string }) {
-    const detail = displayOperationDetail(employeeId, period);
-    const [mode, setMode] = useState<GroupMode>("zone");
-    const [openIds, setOpenIds] = useState<string[]>([]);
+    const { branchId } = useBranchLocation();
+    const directory = useBranchDirectory();
+    const searchParams = useSearchParams();
+    const employee = findStaffSegment(directory.employees, employeeId, searchParams.get("from"));
+    const [lines, setLines] = useState<DisplayLine[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    const [timedOut, setTimedOut] = useState(false);
     const [query, setQuery] = useState("");
-    const { sort, setSort, toggle } = useBonusDetailSort("amount", "desc");
-
-    useResetWhenChanged(mode, () => {
-        setSort({ key: mode === "day" ? "date" : "amount", dir: "desc" });
-        setOpenIds([]);
-        setQuery("");
-    });
-
-    const zoneRows = useMemo(() => {
-        if (!detail || mode !== "zone") return [];
-        const filtered = filterDetailItems(
-            detail.byZone,
-            query,
-            (row) => `${row.title} ${row.day} ${row.quantityCalculation} ${row.volumeCalculation}`,
-        );
-        return sortDetailItems(filtered, sort, {
-            title: (row) => row.title,
-            date: (row) => parseDetailDate(row.day),
-            quantity: (row) => row.quantityAmount,
-            volume: (row) => row.volumeAmount,
-            amount: (row) => row.amount,
-        });
-    }, [detail, mode, query, sort]);
-
-    const dayGroups = useMemo(() => {
-        if (!detail || mode !== "day") return [];
-        const filtered = filterDetailItems(
-            detail.byDay,
-            query,
-            (group) => `${group.day} ${group.quantityCalculation} ${group.volumeCalculation} ${group.zones.map((row) => row.title).join(" ")}`,
-        );
-        return sortDetailItems(filtered, sort, {
-            title: (group) => group.day,
-            date: (group) => parseDetailDate(group.day),
-            quantity: (group) => group.quantityAmount,
-            volume: (group) => group.volumeAmount,
-            amount: (group) => group.amount,
-        });
-    }, [detail, mode, query, sort]);
-
-    const itemCount = mode === "zone" ? zoneRows.length : dayGroups.length;
-    const pager = useBonusDetailPagination(itemCount, `${mode}-${sort.key}-${sort.dir}-${query}`);
-    const pageZones = zoneRows.slice(pager.start, pager.end);
-    const pageDays = dayGroups.slice(pager.start, pager.end);
-
-    if (!detail) {
-        return <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Нет данных по выставлению товара.</p>;
+    const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+    const brigade = useBrigadeMemberFilter(members);
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const measureRef = useRef<HTMLDivElement | null>(null);
+    const scopeKey = `${branchId}|${employeeId}|${period}|${employee?.activeFrom ?? ""}|${employee?.activeUntil ?? ""}`;
+    const [scope, setScope] = useState(scopeKey);
+    if (scope !== scopeKey) {
+        setScope(scopeKey);
+        setLines(null);
+        setMembers([]);
+        setFailed(false);
+        setTimedOut(false);
     }
+    useResetWhenChanged(scopeKey, () => setQuery(""));
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const params = new URLSearchParams({
+            period,
+            branch: branchId,
+            employee: employeeId,
+            from: employee?.activeFrom ?? "",
+            until: employee?.activeUntil ?? "",
+        });
+        fetch(`/api/branch/display-premium/detail?${params.toString()}`, { signal: controller.signal })
+            .then(async (response) => {
+                const body = await response.json() as {
+                    success?: boolean;
+                    data?: { lines?: DisplayLine[]; members?: { id: string; name: string }[] };
+                };
+                if (controller.signal.aborted) {
+                    return;
+                }
+                if (isDetailTimeoutBody(body)) {
+                    setTimedOut(true);
+                    setFailed(false);
+                    setLines(null);
+                    return;
+                }
+                const next = Array.isArray(body.data?.lines) ? body.data.lines.map(normalizeDisplayLine) : null;
+                if (!response.ok || !body.success || !next) {
+                    setFailed(true);
+                    setLines(null);
+                    return;
+                }
+                setFailed(false);
+                setTimedOut(false);
+                setLines(next);
+                setMembers(Array.isArray(body.data?.members) ? body.data.members : []);
+            })
+            .catch((error: unknown) => {
+                if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+                    return;
+                }
+                setFailed(true);
+                setLines(null);
+                setTimedOut(false);
+            });
+        return () => controller.abort();
+    }, [branchId, employee?.activeFrom, employee?.activeUntil, employeeId, period]);
+
+    const rows = useMemo(() => {
+        const filtered = filterDetailItems(
+            (lines ?? []).filter((line) => brigade.allows(line.employeeId)),
+            query,
+            (line) => `${line.employeeName ?? ""} ${line.day} ${line.title} ${line.calculation}`,
+        );
+        return sortDetailItems(filtered, { key: "date", dir: "desc" }, {
+            date: (line) => parseDetailDate(line.day),
+        });
+    }, [brigade, lines, query]);
+    const showSkeleton = lines === null && !failed && !timedOut;
+    const showEmpty = !showSkeleton && !failed && !timedOut && lines !== null && lines.length === 0;
 
     return (
         <BonusDetailShell
-            measureRef={pager.measureRef}
+            measureRef={measureRef}
+            scrollRef={scrollRef}
             toolbar={(
                 <BonusDetailToolbar
-                    controls={(
-                        <ToggleGroup
-                            variant="outline"
-                            size="sm"
-                            spacing={0}
-                            value={[mode]}
-                            onValueChange={(values) => {
-                                const next = values[0];
-                                if (next === "zone" || next === "day") {
-                                    setMode(next);
-                                }
-                            }}
-                            aria-label="Группировка выставления товара"
-                            className={detailModeToggleClass}
-                        >
-                            <ToggleGroupItem value="zone" className={detailModeToggleItemClass}>По зонам</ToggleGroupItem>
-                            <ToggleGroupItem value="day" className={detailModeToggleItemClass}>По дням</ToggleGroupItem>
-                        </ToggleGroup>
-                    )}
+                    controls={brigade.active ? (
+                        <BrigadeMemberFilter className="hidden md:inline-flex" members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     search={<BonusDetailSearch value={query} onChange={setQuery} placeholder="Поиск" />}
-                    sort={(
-                        <BonusDetailSortButton
-                            sort={sort}
-                            onToggle={toggle}
-                            options={[
-                                { key: mode === "zone" ? "title" : "date", label: mode === "zone" ? "Зона" : "День" },
-                                { key: "quantity", label: "Количество" },
-                                { key: "volume", label: "Объём" },
-                                { key: "amount", label: "Сумма" },
-                            ]}
-                        />
-                    )}
+                    sort={brigade.active ? (
+                        <BrigadeMemberFilter members={brigade.members} selected={brigade.selected} onToggle={brigade.toggle} />
+                    ) : null}
                     total={null}
                 />
             )}
-            pagination={pager.needsPagination ? (
-                <BonusDetailPagination
-                    page={pager.page}
-                    pageSize={pager.pageSize}
-                    total={itemCount}
-                    onPageChange={pager.setPage}
-                />
-            ) : null}
+            pagination={null}
         >
-            <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[52rem]">
-                <div className={cn(detailGridDual, detailHeaderClass)}>
-                    <BonusDetailSortHeader
-                        label={mode === "zone" ? "Зона выставления" : "День"}
-                        sortKey={mode === "zone" ? "title" : "date"}
-                        sort={sort}
-                        onToggle={toggle}
-                    />
-                    <BonusDetailSortHeader label="Расчёт за количество" sortKey="quantity" sort={sort} onToggle={toggle} className={detailWideCell} />
-                    <BonusDetailSortHeader label="Расчёт за объём" sortKey="volume" sort={sort} onToggle={toggle} className={detailWideCell} />
-                    <BonusDetailSortHeader label="Сумма" sortKey="amount" sort={sort} onToggle={toggle} align="end" className={detailAmountClass} />
-                    <span />
+            {showSkeleton ? (
+                <DataTableSkeleton columns={4} rows={6} />
+            ) : timedOut ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">{DETAIL_TIMEOUT_MESSAGE}</p>
+            ) : failed ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Не удалось прочитать выставление товара.</p>
+            ) : showEmpty ? (
+                <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">Нет данных по выставлению товара.</p>
+            ) : (
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:h-auto max-sm:flex-none">
+                    <BonusDetailTableFrame minWidthClass="min-w-0 sm:min-w-[52rem]">
+                        <div className={cn(detailHeaderClass, "flex items-center justify-between", displayWideColumns)}>
+                            <span>Дата</span>
+                            <span className="hidden sm:block">Зона</span>
+                            <span className="hidden sm:block">Расчёт</span>
+                            <span className={detailAmountClass}>Премия</span>
+                        </div>
+                        {rows.length === 0 ? (
+                            <p className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
+                        ) : rows.map((line) => (
+                            <div key={line.id} data-scroll-row="" className={cn(detailRowClass, "flex items-center justify-between gap-2", displayWideColumns)}>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium tabular-nums">{line.day}</span>
+                                    {line.employeeName ? <span className="block truncate text-xs text-muted-foreground">{line.employeeName}</span> : null}
+                                    <span className="block sm:hidden">
+                                        <DisplayZoneLabel title={line.title} className="truncate text-xs text-muted-foreground" />
+                                    </span>
+                                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{line.calculation}</span>
+                                </span>
+                                <span className="hidden min-w-0 sm:block">
+                                    <DisplayZoneLabel title={line.title} className="truncate" />
+                                </span>
+                                <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{line.calculation}</span>
+                                <span className={detailAmountClass}>{formatMoney(line.amount)}</span>
+                            </div>
+                        ))}
+                    </BonusDetailTableFrame>
                 </div>
-                {itemCount === 0 ? (
-                    <p className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
-                ) : mode === "zone" ? (
-                    pageZones.map((row) => <DisplayCalcRow key={row.id} row={row} />)
-                ) : (
-                    pageDays.map((group) => (
-                        <DisplayDayRow
-                            key={group.id}
-                            group={group}
-                            open={openIds.includes(group.id)}
-                            onOpenChange={(next) => {
-                                setOpenIds((current) => (next ? [...current, group.id] : current.filter((id) => id !== group.id)));
-                            }}
-                        />
-                    ))
-                )}
-            </BonusDetailTableFrame>
+            )}
         </BonusDetailShell>
     );
 }
 
-function DisplayDayRow({
-    group,
-    open,
-    onOpenChange,
-}: {
-    group: DisplayDayGroup;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-}) {
-    return (
-        <Collapsible open={open} onOpenChange={onOpenChange} className="border-b last:border-b-0">
-            <CollapsibleTrigger className={cn(detailGridDual, detailRowClass, "text-left hover:bg-muted/50")}>
-                <span className="min-w-0">
-                    <span className="block truncate font-medium tabular-nums">{group.day}</span>
-                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{group.quantityCalculation}</span>
-                    <span className="block truncate text-xs text-muted-foreground sm:hidden">{group.volumeCalculation}</span>
-                </span>
-                <div className={detailWideCell}>
-                    <p className="truncate text-muted-foreground">{group.quantityCalculation}</p>
-                    <p className="tabular-nums">{formatMoney(group.quantityAmount)}</p>
-                </div>
-                <div className={detailWideCell}>
-                    <p className="truncate text-muted-foreground">{group.volumeCalculation}</p>
-                    <p className="tabular-nums">{formatMoney(group.volumeAmount)}</p>
-                </div>
-                <span className={detailAmountClass}>{formatMoney(group.amount)}</span>
-                <ChevronDown className={cn(detailChevronClass, open && "rotate-180")} />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-                <div className={detailNestedClass}>
-                    {group.zones.map((row) => (
-                        <DisplayCalcRow key={row.id} row={row} nested hideDay />
-                    ))}
-                </div>
-            </CollapsibleContent>
-        </Collapsible>
-    );
+function normalizeDisplayLine(line: DisplayLine): DisplayLine {
+    if (line.title === "Общий котёл") {
+        return { ...line, title: POOL_ZONE };
+    }
+    return line;
 }
 
-function DisplayCalcRow({
-    row,
-    nested = false,
-    hideDay = false,
-}: {
-    row: DisplayDetailRow;
-    nested?: boolean;
-    hideDay?: boolean;
-}) {
+function DisplayZoneLabel({ title, className }: { title: string; className?: string }) {
     return (
-        <div className={cn(detailGridDual, nested ? detailNestedRowClass : detailRowClass)}>
-            <div className="min-w-0">
-                <p className="truncate font-medium">{row.title}</p>
-                {!hideDay ? <p className="text-xs text-muted-foreground">{row.day}</p> : null}
-                <p className="truncate text-xs text-muted-foreground sm:hidden">{row.quantityCalculation}</p>
-                <p className="truncate text-xs text-muted-foreground sm:hidden">{row.volumeCalculation}</p>
-            </div>
-            <div className={detailWideCell}>
-                <p className="truncate text-muted-foreground">{row.quantityCalculation}</p>
-                <p className="tabular-nums">{formatMoney(row.quantityAmount)}</p>
-            </div>
-            <div className={detailWideCell}>
-                <p className="truncate text-muted-foreground">{row.volumeCalculation}</p>
-                <p className="tabular-nums">{formatMoney(row.volumeAmount)}</p>
-            </div>
-            <span className={detailAmountClass}>{formatMoney(row.amount)}</span>
-            <span />
-        </div>
+        <DetailHint text={title === POOL_ZONE ? POOL_HINT : title} className={cn("max-w-full cursor-help text-left", className)}>
+            {title}
+        </DetailHint>
     );
 }

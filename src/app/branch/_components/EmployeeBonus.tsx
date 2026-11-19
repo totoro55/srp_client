@@ -15,6 +15,7 @@ import { useBranchLocation } from "./BranchFrame";
 import { EmployeeNameLine } from "./EmployeeMovementMark";
 import {
     basketGroups,
+    brigadeName,
     branchMonth,
     employeeById,
     formatMoney,
@@ -23,6 +24,7 @@ import {
     roleCaption,
     withBranchQuery,
     type BasketGroup,
+    type BrigadeSetup,
 } from "./mock";
 
 const ROLE_MARK: Record<string, string> = {
@@ -61,19 +63,47 @@ export function EmployeeBonus() {
         return null;
     }
     const role = roleCaption(employee, roleId, settings);
+    const brigade = employeeBrigade(employee.id, slice.savedBrigades);
     const salary = salaryFromTimesheet(employee.hourly, employee.timesheetHours);
     const premium = fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, employee.timesheetHours);
-    const salePremium = directory.salePremiums[roleKey(employee)] ?? 0;
-    const releasePremium = directory.releasePremiums[roleKey(employee)] ?? 0;
-    const kassaPremium = directory.kassaPremiums[roleKey(employee)] ?? 0;
-    const sharedPremium = directory.sharedPremiums[roleKey(employee)] ?? 0;
-    const earned = earnedPremium([salePremium, releasePremium, kassaPremium, sharedPremium]);
+    const key = roleKey(employee);
+    const salePremium = directory.salePremiums[key] ?? 0;
+    const releasePremium = directory.releasePremiums[key] ?? 0;
+    const kassaPremium = directory.kassaPremiums[key] ?? 0;
+    const osntPremium = directory.osntPremiums[key] ?? 0;
+    const warehousePremium = directory.warehousePremiums[key] ?? 0;
+    const unloadingPremium = directory.unloadingPremiums[key] ?? 0;
+    const selectionPremium = directory.selectionPremiums[key] ?? 0;
+    const displayPremium = directory.displayPremiums[key] ?? 0;
+    const sharedPremium = directory.sharedPremiums[key] ?? 0;
+    const earned = earnedPremium([
+        salePremium,
+        releasePremium,
+        kassaPremium,
+        osntPremium,
+        warehousePremium,
+        unloadingPremium,
+        selectionPremium,
+        displayPremium,
+        sharedPremium,
+    ]);
     const current = currentPay(salary, premium, earned);
     const forecast = forecastPay(employee.hourly, employee.payLevel, directory.baseBonus, directory.priceGrowth, employee.scheduleHours, employee.timesheetHours, earned);
     const showForecast = !monthHasEnded(period);
     const groups = [
-        ...employeeBaskets(employee.id, branchId, period, directory.indicators, directory.salePremiums[roleKey(employee)], directory.releasePremiums[roleKey(employee)], directory.kassaPremiums[roleKey(employee)]),
-        { basketId: "shared", title: "Общая премия", amount: sharedPremium, facts: [] },
+        ...employeeBaskets(employee.id, branchId, period, directory.indicators, {
+            "Продажа товара": directory.salePremiums[key],
+            "Выдача товара": directory.releasePremiums[key],
+            "Кассовые операции": directory.kassaPremiums[key],
+            "ОСНТ": directory.osntPremiums[key],
+            "Складские операции": directory.warehousePremiums[key],
+            "Разгрузка ТС": directory.unloadingPremiums[key],
+            "Набор товара": directory.selectionPremiums[key],
+            "Выставление товара": directory.displayPremiums[key],
+        }),
+        ...(sharedPremium !== 0
+            ? [{ basketId: "shared", title: "Общая премия", amount: sharedPremium, facts: [] } satisfies BasketGroup]
+            : []),
     ];
     const lines = directory.foreignDetail || directory.viewerEmployeeId === employee.id.toLowerCase();
 
@@ -115,7 +145,7 @@ export function EmployeeBonus() {
                                     </span>
                                 </dd>
                             </div>
-                            <Fact label="В расчёте" value={participating ? "Да" : "Нет"} />
+                            <Fact label="Бригада" value={brigade} invisible={!brigade} />
                             <Fact label="По графику" value={formatHours(employee.scheduleHours)} />
                             <Fact label="По табелю" value={formatHours(employee.timesheetHours)} />
                             <Fact label="Оклад" value={salary === null ? "—" : formatMoney(salary)} />
@@ -177,39 +207,65 @@ export function EmployeeBonus() {
     );
 }
 
+const EMPLOYEE_BASKET_TITLES = [
+    "Продажа товара",
+    "Выдача товара",
+    "Кассовые операции",
+    "ОСНТ",
+    "Складские операции",
+    "Разгрузка ТС",
+    "Набор товара",
+    "Выставление товара",
+] as const;
+
 function employeeBaskets(
     employeeId: string,
     branchId: string,
     period: string,
     indicators: { id: string; title: string }[],
-    salePremium: number | undefined,
-    releasePremium: number | undefined,
-    kassaPremium: number | undefined,
+    premiums: Partial<Record<(typeof EMPLOYEE_BASKET_TITLES)[number], number | undefined>>,
 ): BasketGroup[] {
     if (employeeById(employeeId)) {
-        return basketGroups(periodLines(employeeId, period, branchMonth(branchId, period).calculated));
+        return basketGroups(periodLines(employeeId, period, branchMonth(branchId, period).calculated))
+            .filter((group) => group.amount !== 0);
     }
     const groups: BasketGroup[] = [];
-    const sale = indicators.find((indicator) => indicator.title === "Продажа товара");
-    if (sale && salePremium !== undefined) {
-        groups.push({ basketId: sale.id, title: sale.title, amount: salePremium, facts: [] });
-    }
-    const release = indicators.find((indicator) => indicator.title === "Выдача товара");
-    if (release && releasePremium !== undefined) {
-        groups.push({ basketId: release.id, title: release.title, amount: releasePremium, facts: [] });
-    }
-    const kassa = indicators.find((indicator) => indicator.title === "Кассовые операции");
-    if (kassa && kassaPremium !== undefined) {
-        groups.push({ basketId: kassa.id, title: kassa.title, amount: kassaPremium, facts: [] });
+    for (const title of EMPLOYEE_BASKET_TITLES) {
+        const indicator = indicators.find((item) => item.title === title);
+        const amount = premiums[title];
+        if (!indicator || amount === undefined || amount === 0) {
+            continue;
+        }
+        groups.push({ basketId: indicator.id, title: indicator.title, amount, facts: [] });
     }
     return groups;
 }
 
-function Fact({ label, value, prominent = false, className }: { label: string; value: string; prominent?: boolean; className?: string }) {
+function employeeBrigade(employeeId: string, setup: BrigadeSetup): string {
+    const name = brigadeName(employeeId, setup, true);
+    if (!name || name === "Выключена") {
+        return "";
+    }
+    return name;
+}
+
+function Fact({
+    label,
+    value,
+    prominent = false,
+    invisible = false,
+    className,
+}: {
+    label: string;
+    value: string;
+    prominent?: boolean;
+    invisible?: boolean;
+    className?: string;
+}) {
     return (
-        <div className={cn("flex flex-col gap-0.5", className)}>
+        <div className={cn("flex flex-col gap-0.5", invisible && "invisible", className)}>
             <dt className={cn("text-xs", className ? "opacity-80" : "text-muted-foreground")}>{label}</dt>
-            <dd className={cn("tabular-nums", prominent && "text-base font-medium")}>{value}</dd>
+            <dd className={cn("min-h-5 tabular-nums", prominent && "text-base font-medium")}>{value || "\u00a0"}</dd>
         </div>
     );
 }

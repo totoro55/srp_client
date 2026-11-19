@@ -14,6 +14,7 @@ export interface SharedPremiumAuthor {
     warehouse: number;
     unloading: number;
     selection: number;
+    display: number;
     activeFrom: string;
 }
 

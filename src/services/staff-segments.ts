@@ -38,8 +38,17 @@ export interface HourDay {
     timesheet: number | null;
 }
 
-export function staffSegments(versions: StaffVersion[], days: HourDay[], branchId: string, monthStart: string): BranchStaffRow[] {
+export function staffSegments(
+    versions: StaffVersion[],
+    days: HourDay[],
+    branchId: string,
+    monthStart: string,
+    options?: { timesheetUntil?: string },
+): BranchStaffRow[] {
     const monthEnd = shiftDate(monthStart, 1, -1);
+    const timesheetUntil = options?.timesheetUntil && /^\d{4}-\d{2}-\d{2}$/.test(options.timesheetUntil)
+        ? options.timesheetUntil
+        : null;
     const byEmployee = new Map<string, StaffVersion[]>();
     for (const version of versions) {
         const list = byEmployee.get(version.id) ?? [];
@@ -98,6 +107,9 @@ export function staffSegments(versions: StaffVersion[], days: HourDay[], branchI
         segments.forEach((segment, index) => {
             const version = segment.version;
             const wholeMonth = segments.length === 1 && segment.from === monthStart && segment.until === monthEnd;
+            const from = wholeMonth ? "" : segment.from;
+            const until = wholeMonth ? "9999-12-31" : segment.until;
+            const sheetUntil = timesheetUntil && timesheetUntil < until ? timesheetUntil : until;
             rows.push({
                 id: employeeId,
                 rowKey: `${employeeId}:${segment.from}`,
@@ -108,8 +120,8 @@ export function staffSegments(versions: StaffVersion[], days: HourDay[], branchI
                 hourlyRate: finite(version.hourlyRate),
                 salaryAmount: finite(version.salaryAmount),
                 status: version.status,
-                scheduleHours: hoursIn(employeeDays, wholeMonth ? "" : segment.from, wholeMonth ? "9999-12-31" : segment.until, "schedule"),
-                timesheetHours: hoursIn(employeeDays, wholeMonth ? "" : segment.from, wholeMonth ? "9999-12-31" : segment.until, "timesheet"),
+                scheduleHours: hoursIn(employeeDays, from, until, "schedule"),
+                timesheetHours: hoursIn(employeeDays, from, sheetUntil, "timesheet"),
                 activeFrom: segment.from,
                 activeUntil: segment.until,
                 titleChange: index > 0 && segments[index - 1]?.version.title !== version.title,

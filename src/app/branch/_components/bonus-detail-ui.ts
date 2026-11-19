@@ -7,9 +7,10 @@ export const detailWideCell = "hidden min-w-0 sm:block";
 
 export const detailChevronClass = "size-4 shrink-0 justify-self-end text-muted-foreground transition-transform";
 
-export const detailTableFrameClass = "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain rounded-xl border bg-background max-sm:h-auto max-sm:flex-none max-sm:overflow-x-auto max-sm:overflow-y-visible";
+/** На узком экране вертикаль идёт страницей; горизонталь — только у внутренней оболочки, иначе overflow-x:auto превращает overflow-y:visible в auto. */
+export const detailTableFrameClass = "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain rounded-xl border bg-background max-sm:h-auto max-sm:flex-none max-sm:overflow-visible";
 
-export const detailTableInnerClass = "min-w-full";
+export const detailTableInnerClass = "min-w-full max-sm:overflow-x-auto max-sm:overscroll-x-contain";
 
 /** title | amount */
 export const detailGridDoc =

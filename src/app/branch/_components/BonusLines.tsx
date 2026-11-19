@@ -48,8 +48,9 @@ export function BonusLines() {
     const warehouseIndicator = directory.indicators.find((indicator) => indicator.title === "Складские операции");
     const unloadingIndicator = directory.indicators.find((indicator) => indicator.title === "Разгрузка ТС");
     const selectionIndicator = directory.indicators.find((indicator) => indicator.title === "Набор товара");
+    const displayIndicator = directory.indicators.find((indicator) => indicator.title === "Выставление товара");
     const mockBaskets = [...new Map(lines.map((item) => [item.basketId, item.basketTitle])).entries()];
-    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator, osntIndicator, warehouseIndicator, unloadingIndicator, selectionIndicator]
+    const liveBaskets = [salesIndicator, releaseIndicator, kassaIndicator, osntIndicator, warehouseIndicator, unloadingIndicator, selectionIndicator, displayIndicator]
         .flatMap((indicator) => indicator ? [[indicator.id, indicator.title] as [string, string]] : []);
     const baskets = month?.calculated && mockBaskets.length > 0 ? mockBaskets : liveBaskets;
     const knownPart = part !== null && baskets.some(([basketId]) => basketId === part);
@@ -125,7 +126,7 @@ export function BonusLines() {
     }
 
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:gap-2">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 max-sm:h-auto max-sm:flex-none max-sm:gap-2">
             <div className="relative min-w-0 shrink-0">
                 <Tabs
                     value={tab}
@@ -199,7 +200,7 @@ export function BonusLines() {
                     </>
                 ) : null}
             </div>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:h-auto max-sm:flex-none">
                 {tab === "sales" || tab === salesIndicator?.id ? (
                     <SalesBonusDetail employeeId={personId} period={period} />
                 ) : tab === releaseIndicator?.id ? (
@@ -218,7 +219,7 @@ export function BonusLines() {
                     <IssueBonusDetail employeeId={personId} period={period} />
                 ) : tab === "picking" ? (
                     <PickingBonusDetail employeeId={personId} period={period} />
-                ) : tab === "display" ? (
+                ) : tab === displayIndicator?.id || tab === "display" ? (
                     <DisplayBonusDetail employeeId={personId} period={period} />
                 ) : tab === "services" ? (
                     <ServiceBonusDetail employeeId={personId} period={period} kind="services" />

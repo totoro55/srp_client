@@ -344,6 +344,7 @@ function Staff({
                     warehousePremiums?: Record<string, number>;
                     unloadingPremiums?: Record<string, number>;
                     selectionPremiums?: Record<string, number>;
+                    displayPremiums?: Record<string, number>;
                     shares?: Record<string, number>;
                 };
                 error?: { message?: string };
@@ -368,6 +369,7 @@ function Staff({
                     warehousePremiums: json.data.warehousePremiums ?? {},
                     unloadingPremiums: json.data.unloadingPremiums ?? {},
                     selectionPremiums: json.data.selectionPremiums ?? {},
+                    displayPremiums: json.data.displayPremiums ?? {},
                     sharedPremiums: json.data.shares,
                 });
             }
@@ -423,7 +425,7 @@ function Staff({
                     const scopeLabel = branchScopeLabel(directory.branches, branchId);
                     openRecalcConsole({
                         period,
-                        kinds: ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "shared", "brigade"],
+                        kinds: ["sale", "release", "kassa", "osnt", "warehouse", "unloading", "selection", "display", "shared", "brigade"],
                         reason: "branch.roles",
                         actor,
                         scopeLevel: "branch",
@@ -728,6 +730,7 @@ function Brigades({
                     warehousePremiums?: Record<string, number>;
                     unloadingPremiums?: Record<string, number>;
                     selectionPremiums?: Record<string, number>;
+                    displayPremiums?: Record<string, number>;
                     shares?: Record<string, number>;
                 };
                 error?: { message?: string };
@@ -747,6 +750,7 @@ function Brigades({
                     warehousePremiums: json.data.warehousePremiums ?? {},
                     unloadingPremiums: json.data.unloadingPremiums ?? {},
                     selectionPremiums: json.data.selectionPremiums ?? {},
+                    displayPremiums: json.data.displayPremiums ?? {},
                     sharedPremiums: json.data.shares,
                 });
             }
