@@ -1,9 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Plus, Save, Trash2, Undo2 } from "lucide-react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormAlert } from "@/components/form-alert";
 import { ButtonSpinner } from "@/components/loading-state";
 import { Button } from "@/components/ui/button";
@@ -15,8 +14,15 @@ import { useAccess } from "@/hooks/useAccess";
 import { notifySuccess } from "@/lib/notify";
 import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
 import { showStartedRecalc } from "@/lib/recalc-plan";
-import { stmBrandName, type StmBrand } from "@/lib/stm-brands";
+import { STM_BRAND_NAME_MAX, stmBrandKey, stmBrandName, type StmBrand } from "@/lib/stm-brands";
+import { cn } from "@/lib/utils";
 import type { ApiResponse } from "@/types/api";
+
+interface DraftBrand {
+    name: string;
+    setAt: string | null;
+    setBy: string | null;
+}
 
 function formatWhen(value: string): string {
     return new Intl.DateTimeFormat("ru-RU", {
@@ -25,92 +31,186 @@ function formatWhen(value: string): string {
     }).format(new Date(value));
 }
 
+function draftOf(brands: StmBrand[]): DraftBrand[] {
+    return brands.map((brand) => ({ name: brand.name, setAt: brand.setAt, setBy: brand.setBy }));
+}
+
+function byName(left: DraftBrand, right: DraftBrand): number {
+    return left.name.localeCompare(right.name, "ru", { sensitivity: "base" }) || left.name.localeCompare(right.name, "ru");
+}
+
+function listSignature(rows: readonly DraftBrand[]): string {
+    return rows.map((row) => `${stmBrandKey(row.name)}\0${row.name}`).sort().join("\n");
+}
+
+function restoreSaved(saved: readonly DraftBrand[], name: string): DraftBrand {
+    const previous = saved.find((row) => stmBrandKey(row.name) === stmBrandKey(name));
+    if (!previous) {
+        return { name, setAt: null, setBy: null };
+    }
+    return { ...previous, name };
+}
+
 export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
     const access = useAccess();
     const canWrite = access.has("stm-brands:write");
-    const [rows, setRows] = useState(initial);
+    const [saved, setSaved] = useState(() => draftOf(initial));
+    const [rows, setRows] = useState(() => draftOf(initial));
     const [name, setName] = useState("");
     const [saving, setSaving] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-    const [removing, setRemoving] = useState<string | null>(null);
+    const [recalculating, setRecalculating] = useState(false);
+    const [recalcReady, setRecalcReady] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const dirty = listSignature(rows) !== listSignature(saved);
+    const removed = saved.filter((row) => !rows.some((item) => stmBrandKey(item.name) === stmBrandKey(row.name)));
+    const busy = saving || recalculating;
+    const recalcOn = canWrite && recalcReady && !dirty;
 
-    async function onSubmit(event: FormEvent) {
+    function addBrand(event: FormEvent) {
         event.preventDefault();
+        const normalized = name.trim().replace(/\s+/g, " ");
         const brand = stmBrandName(name);
         if (!brand) {
-            setError("Укажите название бренда");
+            setError(normalized.length > STM_BRAND_NAME_MAX ? "Название бренда не длиннее 255 символов" : "Укажите название бренда");
             return;
         }
+        if (rows.some((row) => stmBrandKey(row.name) === stmBrandKey(brand))) {
+            setError("Такой бренд уже есть");
+            return;
+        }
+        setError(null);
+        setRows([...rows, restoreSaved(saved, brand)].sort(byName));
+        setName("");
+    }
+
+    function removeBrand(brand: string) {
+        setError(null);
+        setRows(rows.filter((row) => row.name !== brand));
+    }
+
+    async function save() {
         setSaving(true);
         setError(null);
-        const startedAt = new Date().toISOString();
         try {
             const response = await fetch("/api/admin/stm-brands", {
-                method: "POST",
+                method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: brand }),
+                body: JSON.stringify({ names: rows.map((row) => row.name) }),
             });
-            const json = (await response.json()) as ApiResponse<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }>;
+            const json = (await response.json()) as ApiResponse<{ brands: StmBrand[]; changed: boolean }>;
             if (!response.ok || !json.success) {
-                setError(json.success ? "Не удалось добавить бренд" : json.error.message);
+                setError(json.success ? "Не удалось сохранить список" : json.error.message);
                 return;
             }
-            setRows(json.data.brands);
-            if (json.data.recalc) {
-                showStartedRecalc(json.data.recalc, startedAt);
+            const next = draftOf(json.data.brands);
+            setSaved(next);
+            setRows(next);
+            if (json.data.changed) {
+                setRecalcReady(true);
             }
-            setName("");
-            notifySuccess("Бренд добавлен");
+            notifySuccess("Список сохранён");
         } catch {
-            setError("Не удалось добавить бренд");
+            setError("Не удалось сохранить список");
         } finally {
             setSaving(false);
         }
     }
 
-    async function remove(brand: string) {
+    async function recalculate() {
+        setRecalculating(true);
         setError(null);
         const startedAt = new Date().toISOString();
-        const response = await fetch(`/api/admin/stm-brands?name=${encodeURIComponent(brand)}`, {
-            method: "DELETE",
-        });
-        const json = (await response.json()) as ApiResponse<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }>;
-        if (!response.ok || !json.success) {
-            setError(json.success ? "Не удалось удалить бренд" : json.error.message);
-            return;
-        }
-        setRows(json.data.brands);
-        if (json.data.recalc) {
+        try {
+            const response = await fetch("/api/admin/stm-brands/recalculate", { method: "POST" });
+            const json = (await response.json()) as ApiResponse<{ recalc: StartedPremiumRecalc | null }>;
+            if (!response.ok || !json.success) {
+                setError(json.success ? "Не удалось запустить пересчёт" : json.error.message);
+                return;
+            }
+            if (!json.data.recalc) {
+                setError("Премия этого месяца не пересчитывается.");
+                return;
+            }
             showStartedRecalc(json.data.recalc, startedAt);
+            setRecalcReady(false);
+        } catch {
+            setError("Не удалось запустить пересчёт");
+        } finally {
+            setRecalculating(false);
         }
-        notifySuccess("Бренд удалён");
     }
+
+    const recalcTitle = dirty
+        ? "Сначала сохраните список"
+        : recalcReady
+            ? "Пересчитать премию по продажам и общую премию дивизиона"
+            : "Пересчёт включается после сохранения списка";
 
     return (
         <AdminPageShell>
             <Card className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
                 <CardContent className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
-                    <form onSubmit={onSubmit} className="flex max-w-xl flex-col gap-4">
-                        <FormAlert message={error} />
-                        <div className="flex flex-col gap-2">
-                            <Label htmlFor="stm-brand-name">Бренд</Label>
-                            <Input
-                                id="stm-brand-name"
-                                value={name}
-                                disabled={saving || !canWrite}
-                                onChange={(event) => setName(event.target.value)}
-                                placeholder="Название, как в продаже"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <Button type="submit" size="sm" disabled={saving || !canWrite}>
-                                {saving ? <ButtonSpinner /> : null}
-                                {saving ? "Сохранение..." : "Добавить"}
+                    <div className="flex max-w-xl flex-col gap-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button type="button" size="sm" disabled={!canWrite || !dirty || busy} onClick={() => void save()}>
+                                {saving ? <ButtonSpinner /> : <Save />}
+                                {saving ? "Сохранение..." : "Сохранить"}
                             </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={!canWrite || !dirty || busy}
+                                onClick={() => {
+                                    setRows(saved);
+                                    setError(null);
+                                }}
+                            >
+                                <Undo2 />
+                                Отменить
+                            </Button>
+                            <span title={recalcTitle} className="inline-flex">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={recalcOn ? "default" : "outline"}
+                                    disabled={!recalcOn || busy}
+                                    onClick={() => void recalculate()}
+                                >
+                                    {recalculating ? <ButtonSpinner /> : null}
+                                    {recalculating ? "Пересчёт..." : "Пересчитать"}
+                                </Button>
+                            </span>
                         </div>
-                    </form>
+                        <FormAlert message={error} />
+                        <form onSubmit={addBrand} className="flex items-end gap-2">
+                            <div className="flex min-w-0 flex-1 flex-col gap-2">
+                                <Label htmlFor="stm-brand-name">Бренд</Label>
+                                <Input
+                                    id="stm-brand-name"
+                                    value={name}
+                                    disabled={busy || !canWrite}
+                                    onChange={(event) => setName(event.target.value)}
+                                    placeholder="Название, как в продаже"
+                                />
+                            </div>
+                            <Button
+                                type="submit"
+                                size="icon"
+                                className="shrink-0"
+                                aria-label="Добавить бренд"
+                                title="Добавить"
+                                disabled={busy || !canWrite || name.trim() === ""}
+                            >
+                                <Plus />
+                            </Button>
+                        </form>
+                        {removed.length > 0 ? (
+                            <p className="text-sm text-amber-800 dark:text-amber-200">
+                                К удалению: {removed.map((row) => row.name).join(", ")}
+                            </p>
+                        ) : null}
+                    </div>
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -124,52 +224,35 @@ export function StmBrandsEditor({ initial }: { initial: StmBrand[] }) {
                             {rows.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
-                                        Бренды СТМ ещё не заданы.
+                                        {saved.length === 0 ? "Бренды СТМ ещё не заданы." : "Список будет очищен после сохранения."}
                                     </TableCell>
                                 </TableRow>
-                            ) : rows.map((row) => (
-                                <TableRow key={row.name}>
-                                    <TableCell>{row.name}</TableCell>
-                                    <TableCell>{row.setBy}</TableCell>
-                                    <TableCell className="tabular-nums">{formatWhen(row.setAt)}</TableCell>
-                                    <TableCell>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            disabled={!canWrite || deleting}
-                                            aria-label={`Удалить бренд ${row.name}`}
-                                            onClick={() => setRemoving(row.name)}
-                                        >
-                                            <Trash2 className="size-4" />
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                            ) : rows.map((row) => {
+                                const pending = !saved.some((item) => stmBrandKey(item.name) === stmBrandKey(row.name) && item.name === row.name);
+                                return (
+                                    <TableRow key={row.name} className={cn(pending && "bg-amber-50 dark:bg-amber-950/30")}>
+                                        <TableCell>{row.name}</TableCell>
+                                        <TableCell>{row.setBy ?? "Не сохранён"}</TableCell>
+                                        <TableCell className="tabular-nums">{row.setAt ? formatWhen(row.setAt) : "—"}</TableCell>
+                                        <TableCell>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                disabled={!canWrite || busy}
+                                                aria-label={`Удалить бренд ${row.name}`}
+                                                onClick={() => removeBrand(row.name)}
+                                            >
+                                                <Trash2 className="size-4" />
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
                         </TableBody>
                     </Table>
                 </CardContent>
             </Card>
-            <ConfirmDialog
-                open={removing !== null}
-                title="Удалить бренд"
-                description={removing ? `Бренд «${removing}» перестанет считаться СТМ.` : ""}
-                confirmLabel="Удалить"
-                isPending={deleting}
-                onOpenChange={(open) => {
-                    if (!open) setRemoving(null);
-                }}
-                onConfirm={async () => {
-                    if (!removing) return;
-                    setDeleting(true);
-                    try {
-                        await remove(removing);
-                    } finally {
-                        setDeleting(false);
-                        setRemoving(null);
-                    }
-                }}
-            />
         </AdminPageShell>
     );
 }

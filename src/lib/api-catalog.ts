@@ -148,7 +148,8 @@ export const API_GROUPS: { title: string; routes: { path: string; description: s
             { path: "/api/motivation-roles", description: "GET читает роли мотивации и правила. Нужно право motivation-roles:read или одно из прав настроек филиала: branch.roles:write, branch.brigades:write, branch.shared:write. PUT заменяет справочник и правила, нужно право motivation-roles:write." },
             { path: "/api/admin/staffing", description: "GET читает штатное расписание месяца. Параметры period, branch, territory и q. branch и territory — списки uuid через запятую. territory — целые РРС. Без филиала, РРС и q строки сотрудников не читаются. q без филиала ищет имя по всем доступным филиалам. Нужно право staffing:read." },
             { path: "/api/admin/price-growth", description: "GET читает надбавку за рост цен по месяцам. PUT записывает значение с месяца, DELETE удаляет месяц. Запись требует price-growth:write." },
-            { path: "/api/admin/stm-brands", description: "GET читает бренды СТМ. POST добавляет бренд, DELETE удаляет его. Запись требует stm-brands:write. Изменение ставит в очередь премию по продажам и общую премию месяца ежедневного расчёта, по всему дивизиону. Страница не ждёт расчёт." },
+            { path: "/api/admin/stm-brands", description: "GET читает бренды СТМ. PUT заменяет список: тело names — названия брендов. Пустой список очищает таблицу. Запись требует stm-brands:write и не ставит пересчёт. Уже записанный бренд сохраняет, кто и когда его добавил." },
+            { path: "/api/admin/stm-brands/recalculate", description: "POST ставит в очередь премию по продажам и общую премию месяца ежедневного расчёта, по всему дивизиону. Нужно право stm-brands:write. Страница включает этот пересчёт после сохранения списка и не ждёт расчёт. Закрытый месяц в очередь не ставится." },
         ],
     },
 ];

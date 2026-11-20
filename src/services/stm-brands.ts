@@ -1,5 +1,5 @@
 import type { StartedPremiumRecalc } from "@/lib/premium-recalc-notice";
-import { stmBrandName, type StmBrand } from "@/lib/stm-brands";
+import { stmBrandKey, stmBrandName, type StmBrand } from "@/lib/stm-brands";
 import { automaticBasketPeriod } from "@/services/recalc-schedule";
 import { enqueuePremiumScopes } from "@/services/premium-recalc-queue";
 import { db } from "@/services/db";
@@ -40,44 +40,69 @@ export async function readStmBrands(): Promise<StmBrand[]> {
     return rows.map(toBrand);
 }
 
-export async function addStmBrand(rawName: unknown, actor: string): Promise<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }> {
-    const name = stmBrandName(rawName);
-    if (!name) {
-        throw new StmBrandError("Укажите название бренда");
-    }
-    const inserted = await db.query<{ name: string }>(
-        `
-        INSERT INTO stm_brands (name, set_by)
-        SELECT $1, $2
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM stm_brands
-            WHERE lower(btrim(name)) = lower(btrim($1))
-        )
-        RETURNING name
-        `,
-        [name, actor],
-    );
-    if (inserted.length === 0) {
-        throw new StmBrandError("Такой бренд уже есть");
-    }
-    const brands = await readStmBrands();
-    const recalc = await enqueueStmPremium(actor);
-    return { brands, recalc };
+export interface StmBrandChange {
+    brands: StmBrand[];
+    changed: boolean;
+    added: string[];
+    removed: string[];
+    renamed: string[];
 }
 
-export async function deleteStmBrand(rawName: unknown, actor: string): Promise<{ brands: StmBrand[]; recalc: StartedPremiumRecalc | null }> {
-    const name = stmBrandName(rawName);
-    if (!name) {
-        throw new StmBrandError("Укажите бренд");
+export async function saveStmBrands(rawNames: unknown, actor: string): Promise<StmBrandChange> {
+    if (!Array.isArray(rawNames)) {
+        throw new StmBrandError("Укажите список брендов");
     }
-    const removed = await db.query<{ name: string }>(`DELETE FROM stm_brands WHERE name = $1 RETURNING name`, [name]);
-    const brands = await readStmBrands();
-    const recalc = removed.length > 0 ? await enqueueStmPremium(actor) : null;
-    return { brands, recalc };
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of rawNames) {
+        const name = stmBrandName(raw);
+        if (!name) {
+            throw new StmBrandError("Укажите название бренда");
+        }
+        const key = stmBrandKey(name);
+        if (seen.has(key)) {
+            throw new StmBrandError(`Бренд «${name}» повторяется`);
+        }
+        seen.add(key);
+        names.push(name);
+    }
+
+    return db.transaction(async (query) => {
+        await query("LOCK TABLE stm_brands IN EXCLUSIVE MODE");
+        const current = await query<StmBrandRow>(LIST_SQL);
+        const currentByKey = new Map(current.map((row) => [stmBrandKey(row.name), row]));
+        const added: string[] = [];
+        const renamed: string[] = [];
+        for (const name of names) {
+            const existing = currentByKey.get(stmBrandKey(name));
+            if (!existing) {
+                added.push(name);
+                await query(`INSERT INTO stm_brands (name, set_by) VALUES ($1, $2)`, [name, actor]);
+                continue;
+            }
+            if (existing.name !== name) {
+                renamed.push(`${existing.name} → ${name}`);
+                await query(`UPDATE stm_brands SET name = $1 WHERE name = $2`, [name, existing.name]);
+            }
+        }
+        const removed = current
+            .filter((row) => !seen.has(stmBrandKey(row.name)))
+            .map((row) => row.name);
+        if (removed.length > 0) {
+            await query(`DELETE FROM stm_brands WHERE name = ANY($1::text[])`, [removed]);
+        }
+        const brands = (await query<StmBrandRow>(LIST_SQL)).map(toBrand);
+        return {
+            brands,
+            changed: added.length > 0 || removed.length > 0 || renamed.length > 0,
+            added,
+            removed,
+            renamed,
+        };
+    });
 }
 
-function enqueueStmPremium(actor: string): Promise<StartedPremiumRecalc | null> {
+export function recalculateStmBrands(actor: string): Promise<StartedPremiumRecalc | null> {
     return enqueuePremiumScopes({
         period: automaticBasketPeriod(),
         actor,
@@ -85,6 +110,6 @@ function enqueueStmPremium(actor: string): Promise<StartedPremiumRecalc | null> 
         territoryId: null,
         territoryKinds: ["sale"],
         branchKinds: new Map(),
-        route: "/api/admin/stm-brands",
+        route: "/api/admin/stm-brands/recalculate",
     });
 }

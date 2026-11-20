@@ -196,7 +196,7 @@ export const PERMISSION_CATALOG = [
         code: "stm-brands:write",
         group: "Мотивация",
         title: "Изменение брендов СТМ",
-        description: "Добавление и удаление бренда из списка СТМ",
+        description: "Сохранение списка брендов СТМ. Пересчёт премии запускается отдельно после сохранения",
     },
     {
         code: "monitoring:read",
