@@ -989,8 +989,8 @@ function emptyOutside(branchId: string, employeeId: string, kind: "promoter" | "
 }
 
 async function readSettings(query: PremiumQuery): Promise<MotivationSettings> {
-    const roles = await query<{ id: string; title: string }>(`
-        SELECT id, title
+    const roles = await query<{ id: string; title: string; manual_allowed: boolean }>(`
+        SELECT id, title, manual_allowed
         FROM motivation_roles
         ORDER BY sort_order, id
     `);
@@ -1000,7 +1000,7 @@ async function readSettings(query: PremiumQuery): Promise<MotivationSettings> {
         ORDER BY sort_order, id
     `);
     return {
-        roles: roles.map((role) => ({ id: role.id, title: role.title })),
+        roles: roles.map((role) => ({ id: role.id, title: role.title, manualAllowed: role.manual_allowed })),
         rules: rules.flatMap((rule) => {
             const ktu = ruleKtu(rule.ktu);
             if (!ktu) {

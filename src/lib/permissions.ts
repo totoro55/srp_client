@@ -133,6 +133,12 @@ export const PERMISSION_CATALOG = [
         description: "Назначение ролей и признака «В расчёте» на филиале",
     },
     {
+        code: "branch.any-role:write",
+        group: "Филиал",
+        title: "Любая роль сотруднику",
+        description: "Можно назначить роль, которую нельзя выбирать вручную. Без права такую роль ставит только правило",
+    },
+    {
         code: "branch.brigades:write",
         group: "Филиал",
         title: "Бригады",

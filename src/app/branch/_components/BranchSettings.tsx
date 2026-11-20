@@ -2,7 +2,7 @@
 
 import { useState, type DragEvent, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
-import { ArrowRightLeft, CircleOff, GripVertical, LayoutGrid, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, UserMinus, Users, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowRightLeft, ArrowUp, CircleOff, GripVertical, LayoutGrid, ListFilter, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, UserMinus, Users, WandSparkles } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,6 +22,7 @@ import { ButtonSpinner, StackSkeleton, TableSkeleton } from "@/components/loadin
 import { useAccess } from "@/hooks/useAccess";
 import { receivesManagerGrants } from "@/lib/manager-grants";
 import { useMotivationRoles } from "@/hooks/useMotivationRoles";
+import type { MotivationSettings } from "@/lib/motivation-roles";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { clearRecalcPlan, openRecalcConsole } from "@/lib/recalc-plan";
 import { cn } from "@/lib/utils";
@@ -28,7 +30,7 @@ import { useBranchDirectory, type BranchChoice } from "./branch-directory";
 import { useBranchRecalcLock } from "./branch-recalc-lock";
 import { useBranchStore } from "./branch-store";
 import { useBranchLocation } from "./BranchFrame";
-import { EmployeeNameLine } from "./EmployeeMovementMark";
+import { EmployeeNameLine, EmployeeStatusNote, employeeStatusText } from "./EmployeeMovementMark";
 import { KtuMark } from "./ktu-mark";
 import {
     formatMoney,
@@ -36,6 +38,8 @@ import {
     roleCaption,
     type BrigadeMode,
     type BrigadeSetup,
+    type EmployeeMovement,
+    type Ktu,
 } from "./mock";
 import { latestStaffSegments, roleKey, type StaffEmployee } from "./staff";
 
@@ -62,7 +66,7 @@ function brigadeNotice(seconds: number, skip: boolean): string {
     const skipSentence = skip
         ? " «Сохранить без пересчёта» записывает состав и оставляет уже посчитанные доли."
         : "";
-    return `Состав бригад сохранится, доли продажи, выдачи, кассы, ОСНТ, склада и разгрузки будут пересчитаны.${waitSentence(seconds)}${skipSentence} Оклад, фикс, услуги и общая премия не меняются.`;
+    return `Состав бригад сохранится, доли подключённых операционных корзин будут пересчитаны.${waitSentence(seconds)}${skipSentence} Оклад, фикс, услуги и общая премия не меняются.`;
 }
 
 export function BranchSettings() {
@@ -117,21 +121,10 @@ export function BranchSettings() {
             ) : null}
             {shared ? (
                 <TabsContent value="shared">
-                    <SharedPremiumTab branchId={branchId} period={period} recalcLocked={recalcLocked} />
+                    <SharedPremiumRoles branchId={branchId} period={period} disabled={directory.loading || recalcLocked} />
                 </TabsContent>
             ) : null}
         </Tabs>
-    );
-}
-
-function SharedPremiumTab({ branchId, period, recalcLocked }: { branchId: string; period: string; recalcLocked: boolean }) {
-    const directory = useBranchDirectory();
-
-    return (
-        <div className="flex flex-col gap-3">
-            {directory.error ? <Notice>{directory.error}</Notice> : null}
-            <SharedPremiumRoles branchId={branchId} period={period} disabled={directory.loading || recalcLocked} />
-        </div>
     );
 }
 
@@ -215,7 +208,9 @@ function SharedPremiumRoles({
     }
 
     return (
-        <Card>
+        <div className="flex flex-col gap-3">
+            {directory.error ? <Notice>{directory.error}</Notice> : null}
+            {directory.closedMessage ? <Notice>Этот месяц закрыт. Перечень ролей сохранится, доли за этот месяц не пересчитаются.</Notice> : null}
             <ConfirmDialog
                 open={noticeOpen}
                 title="Пересчёт премии сотрудников"
@@ -243,35 +238,42 @@ function SharedPremiumRoles({
                 }}
                 onOpenChange={setNoticeOpen}
             />
-            <CardHeader>
-                <CardTitle>Общая премия</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                    {selected.length === 0
-                        ? "Роли не выбраны: премия делится между всеми, у кого «В расчёте» — да."
-                        : "Премия делится только между выбранными ролями. Берётся ручная роль, а если её нет — автоматическая."}
-                </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-2">
-                    {roles.map((role) => (
-                        <Label key={role.id} className="rounded-md border px-3 py-2 font-normal">
-                            <Checkbox
-                                checked={selected.includes(role.id)}
-                                disabled={disabled || saving || !branchId}
-                                onCheckedChange={(checked) => toggle(role.id, checked === true)}
-                            />
-                            {role.title}
-                        </Label>
-                    ))}
+            <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" disabled={disabled || saving || !branchId || !dirty} onClick={() => setNoticeOpen(true)}>
+                    {saving ? <ButtonSpinner /> : <Save />}
+                    Сохранить
+                </Button>
+                <Button type="button" size="sm" variant="outline" disabled={disabled || saving || !dirty} onClick={() => setSelected(directory.sharedPremiumRoleIds)}>
+                    <Undo2 />
+                    Отменить
+                </Button>
+                <p className={cn("text-sm text-amber-800 dark:text-amber-200", !dirty && "hidden")}>Есть несохранённые изменения</p>
+                <div className="ml-auto">
+                    <HelpDrawer title="Общая премия">
+                        <SharedPremiumHelp />
+                    </HelpDrawer>
                 </div>
-                <div>
-                    <Button type="button" size="sm" disabled={disabled || saving || !branchId || !dirty} onClick={() => setNoticeOpen(true)}>
-                        {saving ? <ButtonSpinner /> : <Save />}
-                        Сохранить
-                    </Button>
-                </div>
-            </CardContent>
-        </Card>
+            </div>
+            <p className="text-sm text-muted-foreground">
+                {selected.length === 0
+                    ? "Роли не выбраны: премия делится между всеми, у кого «В расчёте» — да."
+                    : "Премия делится только между выбранными ролями. Берётся ручная роль, а если её нет — автоматическая."}
+                {" "}
+                Перечень один на филиал. Выбранный месяц задаёт, за какой период пересчитать доли.
+            </p>
+            <div className="flex flex-wrap gap-2">
+                {roles.map((role) => (
+                    <Label key={role.id} className="rounded-md border px-3 py-2 font-normal">
+                        <Checkbox
+                            checked={selected.includes(role.id)}
+                            disabled={disabled || saving || !branchId}
+                            onCheckedChange={(checked) => toggle(role.id, checked === true)}
+                        />
+                        {role.title}
+                    </Label>
+                ))}
+            </div>
+        </div>
     );
 }
 
@@ -312,11 +314,26 @@ function Staff({
     const [saving, setSaving] = useState(false);
     const [resetOpen, setResetOpen] = useState(false);
     const [noticeOpen, setNoticeOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const [hiddenMovements, setHiddenMovements] = useState<EmployeeMovement[]>(DEFAULT_HIDDEN_STAFF);
+    const [ktuFilter, setKtuFilter] = useState<Ktu[]>([]);
+    const [calcFilter, setCalcFilter] = useState<StaffCalcFilter[]>([]);
+    const [roleFilter, setRoleFilter] = useState<string[]>([]);
+    const [sort, setSort] = useState<StaffSort | null>(null);
     const hasManual = employees.some((employee) => slice.roleManual[employee.id]);
     const participationChanged = employees.some((employee) => {
         const key = roleKey(employee);
         return inCalculation(employee, slice.savedRoles[key] ?? null) !== inCalculation(employee, slice.draftRoles[key] ?? null);
     });
+    const staffView: StaffView = { query, hiddenMovements, ktuFilter, calcFilter, roleFilter, sort };
+    const shown = visibleStaff(employees, staffView, slice.draftRoles, settings);
+    const withoutAbsentHide = visibleStaff(
+        employees,
+        { ...staffView, hiddenMovements: hiddenMovements.filter((movement) => movement !== "absent") },
+        slice.draftRoles,
+        settings,
+    );
+    const absentOnly = shown.length === 0 && withoutAbsentHide.length > 0 && withoutAbsentHide.every((employee) => employee.movement === "absent");
 
     async function save(skipRecalc = false): Promise<boolean> {
         setSaving(true);
@@ -465,7 +482,25 @@ function Staff({
                     Сбросить до автоматических
                 </Button>
                 <p className={cn("text-sm text-amber-800 dark:text-amber-200", !slice.rolesDirty && "hidden")}>Есть несохранённые изменения</p>
-                <div className="ml-auto">
+                <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
+                    <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Поиск"
+                        aria-label="Поиск сотрудника"
+                        className="h-8 w-full sm:w-52"
+                    />
+                    <StaffListFilters
+                        hiddenMovements={hiddenMovements}
+                        onHiddenMovements={setHiddenMovements}
+                        ktuFilter={ktuFilter}
+                        onKtuFilter={setKtuFilter}
+                        calcFilter={calcFilter}
+                        onCalcFilter={setCalcFilter}
+                        roleFilter={roleFilter}
+                        onRoleFilter={setRoleFilter}
+                        roles={settings.roles}
+                    />
                     <HelpDrawer title="Назначение ролей">
                         <StaffRoleHelp />
                     </HelpDrawer>
@@ -474,15 +509,15 @@ function Staff({
             <Table containerClassName="max-w-full">
                 <TableHeader>
                     <TableRow>
-                        <TableHead>Сотрудник</TableHead>
-                        <TableHead>КТУ</TableHead>
-                        <TableHead className="text-right">Уровень оплаты труда</TableHead>
-                        <TableHead className="text-right">Часовая ставка</TableHead>
-                        <TableHead>Роль</TableHead>
+                        <StaffSortHead label="Сотрудник" sortKey="name" sort={sort} onSort={setSort} />
+                        <StaffSortHead label="КТУ" sortKey="ktu" sort={sort} onSort={setSort} />
+                        <StaffSortHead label="Уровень оплаты труда" sortKey="pay" sort={sort} align="right" onSort={setSort} />
+                        <StaffSortHead label="Часовая ставка" sortKey="hourly" sort={sort} align="right" onSort={setSort} />
+                        <StaffSortHead label="Роль" sortKey="role" sort={sort} onSort={setSort} />
                         <TableHead className="w-10 px-2">
                             <span className="sr-only">Назначение</span>
                         </TableHead>
-                        <TableHead>В расчёте</TableHead>
+                        <StaffSortHead label="В расчёте" sortKey="calc" sort={sort} onSort={setSort} />
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -496,7 +531,13 @@ function Staff({
                                     : "В штатном расписании этого филиала никого нет."}
                             </TableCell>
                         </TableRow>
-                    ) : employees.map((employee) => {
+                    ) : shown.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                                {absentOnly ? "Отсутствующие скрыты. Включите их в фильтре." : "Никого не найдено."}
+                            </TableCell>
+                        </TableRow>
+                    ) : shown.map((employee) => {
                         const roleId = slice.draftRoles[roleKey(employee)] ?? null;
                         const manual = slice.roleManual[employee.id] === true;
                         const participating = inCalculation(employee, roleId);
@@ -504,7 +545,8 @@ function Staff({
                             <TableRow key={roleKey(employee)}>
                                 <TableCell>
                                     <div className="font-medium">
-                                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} />
+                                        <EmployeeNameLine name={employee.name} movement={employee.movement} movementOn={employee.movementOn} partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} spoiler={false} />
+                                        <EmployeeStatusNote movement={employee.movement} movementOn={employee.movementOn} partial={employee.partial} from={employee.activeFrom} until={employee.activeUntil} className="mt-0.5" />
                                     </div>
                                     <div className="text-muted-foreground">
                                         {employee.title || "Должность не указана"}
@@ -546,6 +588,285 @@ function Staff({
     );
 }
 
+const DEFAULT_HIDDEN_STAFF: EmployeeMovement[] = ["absent"];
+const NUMERIC_STAFF_SORT = new Set<StaffSortKey>(["pay", "hourly"]);
+
+type StaffSortKey = "name" | "ktu" | "pay" | "hourly" | "role" | "calc";
+type StaffSort = { key: StaffSortKey; dir: "asc" | "desc" };
+type StaffCalcFilter = "yes" | "no";
+
+interface StaffView {
+    query: string;
+    hiddenMovements: readonly EmployeeMovement[];
+    ktuFilter: readonly Ktu[];
+    calcFilter: readonly StaffCalcFilter[];
+    roleFilter: readonly string[];
+    sort: StaffSort | null;
+}
+
+function visibleStaff(
+    employees: StaffEmployee[],
+    view: StaffView,
+    draftRoles: Record<string, string | null>,
+    settings: MotivationSettings,
+): StaffEmployee[] {
+    const needle = view.query.trim().toLocaleLowerCase("ru-RU");
+    const matched = employees.filter((employee) => {
+        if (employee.movement && view.hiddenMovements.includes(employee.movement)) {
+            return false;
+        }
+        const roleId = draftRoles[roleKey(employee)] ?? null;
+        if (view.ktuFilter.length > 0 && (employee.ktu === null || !view.ktuFilter.includes(employee.ktu))) {
+            return false;
+        }
+        if (view.roleFilter.length > 0 && !view.roleFilter.includes(roleId ?? "none")) {
+            return false;
+        }
+        if (view.calcFilter.length > 0 && !view.calcFilter.includes(inCalculation(employee, roleId) ? "yes" : "no")) {
+            return false;
+        }
+        if (!needle) {
+            return true;
+        }
+        const haystack = [
+            employee.name,
+            employee.title,
+            employeeStatusText({
+                movement: employee.movement,
+                movementOn: employee.movementOn,
+                partial: employee.partial,
+                from: employee.activeFrom,
+                until: employee.activeUntil,
+            }),
+            roleCaption(employee, roleId, settings),
+        ].join(" ").toLocaleLowerCase("ru-RU");
+        return haystack.includes(needle);
+    });
+    return sortStaff(matched, view.sort, draftRoles, settings);
+}
+
+function sortStaff(
+    employees: StaffEmployee[],
+    sort: StaffSort | null,
+    draftRoles: Record<string, string | null>,
+    settings: MotivationSettings,
+): StaffEmployee[] {
+    const key = sort?.key ?? "name";
+    const direction: 1 | -1 = sort?.dir === "desc" ? -1 : 1;
+    return employees.slice().sort((left, right) => {
+        const compared = compareStaff(left, right, key, direction, draftRoles, settings);
+        if (compared !== 0) {
+            return compared;
+        }
+        return left.name.localeCompare(right.name, "ru");
+    });
+}
+
+function compareStaff(
+    left: StaffEmployee,
+    right: StaffEmployee,
+    key: StaffSortKey,
+    direction: 1 | -1,
+    draftRoles: Record<string, string | null>,
+    settings: MotivationSettings,
+): number {
+    const leftValue = staffSortValue(left, key, draftRoles, settings);
+    const rightValue = staffSortValue(right, key, draftRoles, settings);
+    if (leftValue === null && rightValue === null) {
+        return 0;
+    }
+    if (leftValue === null) {
+        return 1;
+    }
+    if (rightValue === null) {
+        return -1;
+    }
+    const base = typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), "ru", { sensitivity: "base" });
+    return base * direction;
+}
+
+function staffSortValue(
+    employee: StaffEmployee,
+    key: StaffSortKey,
+    draftRoles: Record<string, string | null>,
+    settings: MotivationSettings,
+): string | number | null {
+    const roleId = draftRoles[roleKey(employee)] ?? null;
+    if (key === "name") {
+        return employee.name;
+    }
+    if (key === "ktu") {
+        return employee.ktu === "plus" ? 0 : employee.ktu === "minus" ? 1 : null;
+    }
+    if (key === "pay") {
+        return employee.payLevel;
+    }
+    if (key === "hourly") {
+        return employee.hourly;
+    }
+    if (key === "role") {
+        return roleCaption(employee, roleId, settings);
+    }
+    return inCalculation(employee, roleId) ? 0 : 1;
+}
+
+function nextStaffSort(current: StaffSort | null, key: StaffSortKey): StaffSort | null {
+    const first: StaffSort["dir"] = NUMERIC_STAFF_SORT.has(key) ? "desc" : "asc";
+    if (!current || current.key !== key) {
+        return { key, dir: first };
+    }
+    if (current.dir === first) {
+        return { key, dir: first === "desc" ? "asc" : "desc" };
+    }
+    return null;
+}
+
+function sameMovements(left: readonly EmployeeMovement[], right: readonly EmployeeMovement[]): boolean {
+    return left.length === right.length && left.every((movement) => right.includes(movement));
+}
+
+function toggleValue<T>(values: readonly T[], value: T): T[] {
+    return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
+
+function StaffSortHead({
+    label,
+    sortKey,
+    sort,
+    align = "left",
+    onSort,
+}: {
+    label: string;
+    sortKey: StaffSortKey;
+    sort: StaffSort | null;
+    align?: "left" | "right";
+    onSort: (next: StaffSort | null) => void;
+}) {
+    const active = sort?.key === sortKey;
+    return (
+        <TableHead aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"} className={cn(align === "right" && "text-right")}>
+            <button
+                type="button"
+                title="Сортировать"
+                className={cn("inline-flex items-center gap-1 hover:text-foreground", align === "right" && "w-full justify-end")}
+                onClick={() => onSort(nextStaffSort(sort, sortKey))}
+            >
+                {label}
+                {active ? (sort.dir === "asc" ? <ArrowUp className="size-3 shrink-0" /> : <ArrowDown className="size-3 shrink-0" />) : null}
+            </button>
+        </TableHead>
+    );
+}
+
+function StaffListFilters({
+    hiddenMovements,
+    onHiddenMovements,
+    ktuFilter,
+    onKtuFilter,
+    calcFilter,
+    onCalcFilter,
+    roleFilter,
+    onRoleFilter,
+    roles,
+}: {
+    hiddenMovements: readonly EmployeeMovement[];
+    onHiddenMovements: (hidden: EmployeeMovement[]) => void;
+    ktuFilter: readonly Ktu[];
+    onKtuFilter: (next: Ktu[]) => void;
+    calcFilter: readonly StaffCalcFilter[];
+    onCalcFilter: (next: StaffCalcFilter[]) => void;
+    roleFilter: readonly string[];
+    onRoleFilter: (next: string[]) => void;
+    roles: { id: string; title: string }[];
+}) {
+    const active = !sameMovements(hiddenMovements, DEFAULT_HIDDEN_STAFF) || ktuFilter.length > 0 || calcFilter.length > 0 || roleFilter.length > 0;
+    const roleOptions = [
+        { value: "none", label: "Без роли" },
+        ...roles.slice().sort((left, right) => left.title.localeCompare(right.title, "ru")).map((role) => ({ value: role.id, label: role.title })),
+    ];
+    function toggleMovement(movement: EmployeeMovement) {
+        onHiddenMovements(hiddenMovements.includes(movement)
+            ? hiddenMovements.filter((item) => item !== movement)
+            : [...hiddenMovements, movement]);
+    }
+    return (
+        <Popover>
+            <PopoverTrigger
+                render={
+                    <Button type="button" variant="outline" size="icon-sm" aria-label="Фильтр" className={cn(active && "text-primary")}>
+                        <ListFilter />
+                    </Button>
+                }
+            />
+            <PopoverContent align="end" className="max-h-80 w-64 gap-3 overflow-y-auto p-2">
+                <div className="flex flex-col gap-1 border-b pb-2">
+                    <p className="px-2 text-xs font-medium text-muted-foreground">Сотрудники</p>
+                    <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                        <Checkbox checked={hiddenMovements.length === 0} onCheckedChange={() => onHiddenMovements([])} />
+                        <span>Показывать всех</span>
+                    </Label>
+                    <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                        <Checkbox checked={hiddenMovements.includes("absent")} onCheckedChange={() => toggleMovement("absent")} />
+                        <span>Скрыть отсутствующих</span>
+                    </Label>
+                    <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                        <Checkbox checked={hiddenMovements.includes("dismissed")} onCheckedChange={() => toggleMovement("dismissed")} />
+                        <span>Скрыть уволенных</span>
+                    </Label>
+                    <Label className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                        <Checkbox checked={hiddenMovements.includes("transferred")} onCheckedChange={() => toggleMovement("transferred")} />
+                        <span>Скрыть переведённых</span>
+                    </Label>
+                </div>
+                <StaffChoiceFilter
+                    title="КТУ"
+                    options={[{ value: "plus", label: "КТУ+" }, { value: "minus", label: "КТУ−" }]}
+                    selected={ktuFilter}
+                    onToggle={(value) => onKtuFilter(toggleValue(ktuFilter, value))}
+                />
+                <StaffChoiceFilter
+                    title="В расчёте"
+                    options={[{ value: "yes", label: "Да" }, { value: "no", label: "Нет" }]}
+                    selected={calcFilter}
+                    onToggle={(value) => onCalcFilter(toggleValue(calcFilter, value))}
+                />
+                <StaffChoiceFilter
+                    title="Роль"
+                    options={roleOptions}
+                    selected={roleFilter}
+                    onToggle={(value) => onRoleFilter(toggleValue(roleFilter, value))}
+                />
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+function StaffChoiceFilter<T extends string>({
+    title,
+    options,
+    selected,
+    onToggle,
+}: {
+    title: string;
+    options: { value: T; label: string }[];
+    selected: readonly T[];
+    onToggle: (value: T) => void;
+}) {
+    return (
+        <div className="flex flex-col gap-1">
+            <p className="px-2 text-xs font-medium text-muted-foreground">{title}</p>
+            {options.map((option) => (
+                <Label key={option.value} className="rounded-md px-2 py-1.5 font-normal hover:bg-muted">
+                    <Checkbox checked={selected.includes(option.value)} onCheckedChange={() => onToggle(option.value)} />
+                    <span className="truncate">{option.label}</span>
+                </Label>
+            ))}
+        </div>
+    );
+}
+
 function RoleSelect({
     employee,
     roleId,
@@ -560,7 +881,8 @@ function RoleSelect({
     onChange: (roleId: string | null | "auto") => void;
 }) {
     const settings = useMotivationRoles();
-    const { roles } = settings;
+    const allowAnyRole = useAccess().has("branch.any-role:write");
+    const choices = settings.roles.filter((role) => role.manualAllowed || allowAnyRole || (manual && role.id === roleId));
     const value = manual ? (roleId ?? "none") : "auto";
     return (
         <Select
@@ -585,7 +907,7 @@ function RoleSelect({
             <SelectContent>
                 <SelectItem value="auto">Автоматически</SelectItem>
                 <SelectItem value="none">{employee.ktu === "plus" ? "Без подписи" : "Вне расчёта"}</SelectItem>
-                {roles.map((role) => (
+                {choices.map((role) => (
                     <SelectItem key={role.id} value={role.id}>{role.title}</SelectItem>
                 ))}
             </SelectContent>
@@ -611,13 +933,19 @@ function StaffRoleHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Ручное назначение</h3>
                 <p className="text-muted-foreground">
-                    Роль, выбранная из списка, действует только для данного сотрудника в данном филиале. Назначение обозначается значком <Pencil className="inline size-3.5 align-text-bottom" aria-hidden /> и сохраняется при изменении должности или признака КТУ. Пункт «Автоматически» возвращает назначение по правилу.
+                    Роль, выбранная из списка, действует только для данного сотрудника в данном филиале. Назначение обозначается значком <Pencil className="inline size-3.5 align-text-bottom" aria-hidden /> и сохраняется при изменении должности или признака КТУ. Пункт «Автоматически» возвращает назначение по правилу. Роль с выключенным ручным выбором в этот список не попадает: её ставит только правило. Право «Любая роль сотруднику» возвращает такие роли в список. Уже сохранённое ручное назначение можно оставить.
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Участие в расчёте</h3>
                 <p className="text-muted-foreground">
                     Сотрудник с признаком КТУ+ участвует в расчёте независимо от наличия роли. Сотрудник с признаком КТУ− участвует в расчёте только при назначенной роли.
+                </p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Список</h3>
+                <p className="text-muted-foreground">
+                    Поиск ищет по имени, должности, роли и статусу. Заголовок столбца меняет порядок: повторный щелчок переворачивает его, третий возвращает порядок по имени. Отсутствующие скрыты, пока в фильтре не снять «Скрыть отсутствующих». Статус и даты отсутствия видны под именем.
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
@@ -1327,6 +1655,37 @@ function Notice({ children }: { children: string }) {
     return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">{children}</p>;
 }
 
+function SharedPremiumHelp() {
+    return (
+        <div className="flex flex-col gap-3">
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Котёл</h3>
+                <p className="text-muted-foreground">
+                    Общая премия собирается из операционных корзин, подключённых на филиале. В котёл попадает премия сотрудников, которые не участвуют в расчёте, а также промоутеров, автокассы и терминала. Своя премия того, кто в расчёте, в котёл не входит. Оклад, фиксированная премия и услуги остаются личными. Корзина, которая на филиале не подключена, в сумму не попадает.
+                </p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Кому делится</h3>
+                <p className="text-muted-foreground">
+                    Роли не выбраны — доля есть у каждого, у кого «В расчёте» — да. Выбраны роли — только у сотрудников с такой ролью. Берётся ручная роль, а если её нет — автоматическая. Сотрудник с КТУ+ без роли долю не получает, пока отмечены конкретные роли.
+                </p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Как делится</h3>
+                <p className="text-muted-foreground">
+                    Сумма делится на часы по табелю получателей и умножается на часы сотрудника. Нулевые часы дают долю ноль, деньги остаются в котле. Увольнение, перевод, смена должности и уже начисленный отрезок оставляют записанную долю: она вычитается из котла, остаток делится между остальными.
+                </p>
+            </section>
+            <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+                <h3 className="text-sm font-medium">Сохранение</h3>
+                <p className="text-muted-foreground">
+                    Перечень ролей один на филиал, не на каждый месяц. Сохранение в открытом месяце сразу пересчитывает доли этого месяца. В закрытом месяце перечень сохраняется, доли этого месяца не меняются. Администратор подтверждает сразу, остальные ждут 15 секунд.
+                </p>
+            </section>
+        </div>
+    );
+}
+
 function BrigadeHelp() {
     return (
         <div className="flex flex-col gap-3">
@@ -1363,7 +1722,7 @@ function BrigadeHelp() {
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">
                 <h3 className="text-sm font-medium">Расчёт</h3>
                 <p className="text-muted-foreground">
-                    Премия корзины всех, кто в бригаде и в расчёте, складывается. Сумма делится на их часы по табелю и умножается на часы сотрудника. Так считаются продажа, выдача, касса, ОСНТ, склад и разгрузка. Оклад, фиксированная премия, услуги и общая премия остаются личными. Сотрудник вне группы свою премию не отдаёт. Нулевые часы отдают премию в котёл, доля такого сотрудника — ноль. Увольнение, перевод и смена должности оставляют уже записанную долю: она вычитается из котла, остаток делится между остальными.
+                    Премия подключённых операционных корзин всех, кто в бригаде и в расчёте, складывается. Сумма делится на их часы по табелю и умножается на часы сотрудника. Корзина, которая на филиале не подключена, в распределение не входит. Оклад, фиксированная премия, услуги и общая премия остаются личными. Сотрудник вне группы свою премию не отдаёт. Нулевые часы отдают премию в котёл, доля такого сотрудника — ноль. Увольнение, перевод и смена должности оставляют уже записанную долю: она вычитается из котла, остаток делится между остальными.
                 </p>
             </section>
             <section className="flex flex-col gap-2 rounded-lg border bg-card p-3">

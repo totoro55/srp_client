@@ -70,7 +70,7 @@ export async function PUT(request: Request): Promise<NextResponse<ApiResponse<Br
             readBranchRoleOverrides(branchId, period),
         ]);
         const participationChanged = staffParticipationChanged(visible.employees, before, overrides, motivation);
-        await saveBranchRoleOverrides(branchId, period, overrides);
+        await saveBranchRoleOverrides(branchId, period, overrides, can(access, "branch.any-role:write"));
         let recalculated = false;
         let recalcMessage: string | null = null;
         if (participationChanged && !skipRecalc) {

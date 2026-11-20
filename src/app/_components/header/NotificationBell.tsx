@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, BellOff, BellRing, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,11 @@ import {
     browserNotificationCapability,
     browserNotificationsEnabled,
     notifyNotificationsChanged,
-    onNotificationsChanged,
     requestBrowserNotificationPermission,
     setBrowserNotificationsEnabled,
     type BrowserNotificationCapability,
 } from "./browser-notify";
+import { startNotificationPoll } from "./notification-poll";
 import { ApiResponse } from "@/types/api";
 
 interface NotificationItem {
@@ -33,8 +33,12 @@ interface NotificationFeed {
     items: NotificationItem[];
 }
 
+interface NotificationSummary {
+    unread: number;
+    latestId: number | null;
+}
+
 const POLL_MS = 8000;
-const INSECURE_HINT = "Уведомления браузера доступны только по HTTPS или localhost. На стенде откройте http://localhost:3000 на самом тестовом ПК.";
 
 export function NotificationBell() {
     const router = useRouter();
@@ -51,25 +55,32 @@ export function NotificationBell() {
     const { count, unreadOnly, setCount, setUnreadOnly } = useNotificationPreview();
     const announced = useRef(new Set<number>());
     const primed = useRef(false);
+    const latestSeen = useRef<number | null | undefined>(undefined);
+    const unreadSeen = useRef<number | undefined>(undefined);
+    const menuOpenRef = useRef(false);
+    const allOpenRef = useRef(false);
+    const loadListRef = useRef<() => Promise<boolean>>(async () => false);
+
+    const applyFeed = useCallback((data: NotificationFeed) => {
+        setFeed(data);
+        latestSeen.current = data.items[0]?.id ?? null;
+        unreadSeen.current = data.unread;
+    }, []);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
             const capability = browserNotificationCapability();
             setPermission(capability);
             setBrowserOn(capability === "granted" && browserNotificationsEnabled());
-            if (capability === "insecure") {
-                setBrowserHint(INSECURE_HINT);
-            }
         }, 0);
         return () => window.clearTimeout(timer);
     }, []);
 
     useEffect(() => {
         let stopped = false;
-        let timer = 0;
         const controller = new AbortController();
 
-        async function load() {
+        async function loadList() {
             try {
                 const response = await fetch("/api/notifications", { signal: controller.signal, cache: "no-store" });
                 const json = (await response.json()) as ApiResponse<NotificationFeed>;
@@ -77,10 +88,10 @@ export function NotificationBell() {
                     if (!stopped && !json.success) {
                         setError(json.error.message);
                     }
-                    return;
+                    return false;
                 }
                 setError(null);
-                setFeed(json.data);
+                applyFeed(json.data);
                 const unreadItems = json.data.items.filter((item) => item.readAt === null);
                 let arrived = false;
                 if (primed.current) {
@@ -100,6 +111,40 @@ export function NotificationBell() {
                 if (arrived) {
                     notifyNotificationsChanged();
                 }
+                return true;
+            } catch {
+                if (!stopped) {
+                    setError("Не удалось загрузить уведомления");
+                }
+                return false;
+            }
+        }
+
+        async function loadSummary() {
+            try {
+                const response = await fetch("/api/notifications?summary=1", { signal: controller.signal, cache: "no-store" });
+                const json = (await response.json()) as ApiResponse<NotificationSummary>;
+                if (stopped || !json.success) {
+                    if (!stopped && !json.success) {
+                        setError(json.error.message);
+                    }
+                    return;
+                }
+                setError(null);
+                const summary = json.data;
+                const latestChanged = latestSeen.current !== summary.latestId;
+                const unreadChanged = unreadSeen.current !== summary.unread;
+                const listOpen = menuOpenRef.current || allOpenRef.current;
+                if (latestChanged || (listOpen && unreadChanged)) {
+                    const loaded = await loadList();
+                    if (!loaded || stopped) {
+                        return;
+                    }
+                    return;
+                }
+                latestSeen.current = summary.latestId;
+                unreadSeen.current = summary.unread;
+                setFeed((current) => current === null ? current : { ...current, unread: summary.unread });
             } catch {
                 if (!stopped) {
                     setError("Не удалось загрузить уведомления");
@@ -107,30 +152,23 @@ export function NotificationBell() {
             }
         }
 
-        function arm() {
-            window.clearTimeout(timer);
-            if (stopped) {
-                return;
-            }
-            timer = window.setTimeout(() => {
-                void load().finally(arm);
-            }, POLL_MS);
-        }
-
-        const start = window.setTimeout(() => {
-            void load().finally(arm);
-        }, 0);
-        const stopListening = onNotificationsChanged(() => {
-            void load();
+        loadListRef.current = () => loadList();
+        const stopPoll = startNotificationPoll({
+            intervalMs: POLL_MS,
+            hidden: () => document.hidden,
+            load: loadSummary,
+            listenVisibility: (onChange) => {
+                document.addEventListener("visibilitychange", onChange);
+                return () => document.removeEventListener("visibilitychange", onChange);
+            },
         });
         return () => {
             stopped = true;
-            stopListening();
+            loadListRef.current = async () => false;
+            stopPoll();
             controller.abort();
-            window.clearTimeout(timer);
-            window.clearTimeout(start);
         };
-    }, []);
+    }, [applyFeed]);
 
     async function mark(body: { id: number; read?: boolean } | { all: true }) {
         const all = "all" in body;
@@ -154,7 +192,7 @@ export function NotificationBell() {
                 setError(json.error.message);
                 return null;
             }
-            setFeed(json.data);
+            applyFeed(json.data);
             notifyNotificationsChanged();
             return json.data;
         } catch {
@@ -177,7 +215,6 @@ export function NotificationBell() {
         const next = await requestBrowserNotificationPermission();
         setPermission(next);
         if (next === "insecure") {
-            setBrowserHint(INSECURE_HINT);
             setBrowserNotificationsEnabled(false);
             setBrowserOn(false);
             return;
@@ -209,20 +246,27 @@ export function NotificationBell() {
     const allItems = feed?.items ?? [];
     const items = previewNotifications(allItems, count, unreadOnly);
     const label = unread > 0 ? `Уведомления, непрочитанных: ${unread > 9 ? "9+" : unread}` : "Уведомления";
-    const browserBlocked = permission === "denied" || permission === "insecure" || permission === "missing";
+    const browserBlocked = permission === "denied" || permission === "missing";
+    const browserSilent = permission === "insecure";
     const browserLabel = permission === "insecure"
-        ? "Уведомления браузера недоступны по HTTP"
+        ? "Уведомления браузера"
         : permission === "missing"
-            ? "Уведомления браузера недоступны"
-            : permission === "denied"
-                ? "Браузер запретил уведомления"
-                : browserOn
-                    ? "Выключить уведомления браузера"
-                    : "Включить уведомления браузера";
+        ? "Уведомления браузера недоступны"
+        : permission === "denied"
+            ? "Браузер запретил уведомления"
+            : browserOn
+                ? "Выключить уведомления браузера"
+                : "Включить уведомления браузера";
 
     return (
         <>
-            <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+            <Popover open={menuOpen} onOpenChange={(open) => {
+                menuOpenRef.current = open;
+                setMenuOpen(open);
+                if (open) {
+                    void loadListRef.current();
+                }
+            }}>
                 <PopoverTrigger
                     render={
                         <Button type="button" variant="ghost" size="icon-sm" className="relative shrink-0" aria-label={label} />
@@ -246,20 +290,21 @@ export function NotificationBell() {
                         <NotificationIconButton
                             label={browserLabel}
                             onClick={() => {
+                                if (permission === "insecure") {
+                                    return;
+                                }
                                 if (browserBlocked && !browserOn) {
                                     setBrowserHint(
-                                        permission === "insecure"
-                                            ? INSECURE_HINT
-                                            : permission === "denied"
-                                                ? "Браузер запретил уведомления. Разрешите их в настройках сайта."
-                                                : "Этот браузер не поддерживает уведомления.",
+                                        permission === "denied"
+                                            ? "Браузер запретил уведомления. Разрешите их в настройках сайта."
+                                            : "Этот браузер не поддерживает уведомления.",
                                     );
                                     return;
                                 }
                                 void (browserOn ? disableBrowser() : enableBrowser());
                             }}
                         >
-                            {browserBlocked ? <BellOff /> : browserOn ? <BellRing className="text-primary" /> : <Bell />}
+                            {browserBlocked || browserSilent ? <BellOff /> : browserOn ? <BellRing className="text-primary" /> : <Bell />}
                         </NotificationIconButton>
                         <NotificationAreaFilters unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} />
                         <NotificationCountButton count={count} onCount={setCount} />
@@ -291,8 +336,13 @@ export function NotificationBell() {
                             type="button"
                             className="border-t px-2 pt-2 text-left text-sm text-muted-foreground hover:text-foreground"
                             onClick={() => {
+                                menuOpenRef.current = false;
                                 setMenuOpen(false);
-                                window.setTimeout(() => setAllOpen(true), 0);
+                                window.setTimeout(() => {
+                                    allOpenRef.current = true;
+                                    setAllOpen(true);
+                                    void loadListRef.current();
+                                }, 0);
                             }}
                         >
                             Показать все
@@ -302,7 +352,13 @@ export function NotificationBell() {
             </Popover>
             <NotificationsDialog
                 open={allOpen}
-                onOpenChange={setAllOpen}
+                onOpenChange={(open) => {
+                    allOpenRef.current = open;
+                    setAllOpen(open);
+                    if (open) {
+                        void loadListRef.current();
+                    }
+                }}
                 items={feed?.items ?? []}
                 unread={unread}
                 error={error}
@@ -311,6 +367,7 @@ export function NotificationBell() {
                 togglingId={togglingId}
                 onReadAll={() => void mark({ all: true })}
                 onOpenItem={(item) => {
+                    allOpenRef.current = false;
                     setAllOpen(false);
                     void openItem(item);
                 }}

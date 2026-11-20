@@ -145,7 +145,7 @@ ${selectSql}
         const minutes = finiteNumber(row.minute);
         const tariff = finiteNumber(row.tariff);
         const amount = finiteNumber(row.premium);
-        if (minutes === null || tariff === null || amount === null) {
+        if (minutes === null || tariff === null || amount === null || amount === 0) {
             return [];
         }
         const personId = row.employeeId?.toLowerCase() ?? "";

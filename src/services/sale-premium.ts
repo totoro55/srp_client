@@ -563,15 +563,18 @@ ${selectSql}
         // Тарифы месяца соединяются одним проходом. Вложенный цикл читает весь список на каждую строку.
         { hashJoins: true },
     );
-    const lines = rows.map((row, index) => {
+    const lines = rows.flatMap((row, index) => {
         const amount = finiteNumber(row.premium) ?? 0;
+        if (amount === 0) {
+            return [];
+        }
         const price = finiteNumber(row.price);
         const documentNumber = row.documentNumber?.trim() || "Без номера";
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
         const personId = row.employeeId?.toLowerCase() ?? "";
         const personName = names?.get(personId) ?? "";
-        return {
+        return [{
             id: `${personId}:${row.code ?? ""}:${documentId}:${index}`,
             channel: channelLabel(row.channel),
             categoryTitle: row.itemTitle.trim() || "Без названия",
@@ -582,7 +585,7 @@ ${selectSql}
             productName: row.productName?.trim() || "Без названия",
             doubled: row.baseMode === "per_unit" && (row.channel === "stm" || row.channel === "not_stm" || row.channel === "main") && price !== null && price >= 100000,
             ...(personName ? { employeeId: personId, employeeName: personName } : {}),
-        };
+        }];
     });
     return {
         rowLabel: axis === "product_kind" ? "Изделие" : "Категория",

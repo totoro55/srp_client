@@ -3,10 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, BadgeCheck, FlaskConical, GripVertical, Lock, LockOpen, Pencil, Plus } from "lucide-react";
-import { AdminToolbar } from "@/app/admin/_components/AdminToolbar";
+import { Archive, ArrowUpDown, BadgeCheck, FlaskConical, GripVertical, Layers, ListFilter, Pencil, Plus, Radio } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -61,7 +61,6 @@ export function BasketsEditor() {
     const canWrite = access.has("baskets:write");
     const [baskets, setBaskets] = useState<BasketSummary[]>([]);
     const [indicators, setIndicators] = useState<Indicator[]>([]);
-    const [query, setQuery] = useState("");
     const [indicatorFilter, setIndicatorFilter] = useState("");
     const [versionView, setVersionView] = useState<VersionView>("active");
     const [createOpen, setCreateOpen] = useState(false);
@@ -83,16 +82,10 @@ export function BasketsEditor() {
     const [overId, setOverId] = useState<number | null>(null);
     const [ordering, setOrdering] = useState(false);
     const sorting = canWrite && sortUnlocked;
-    const visible = useMemo(() => {
-        const needle = query.trim().toLowerCase();
-        return baskets.filter((basket) => {
-            if (indicatorFilter && String(basket.indicatorId) !== indicatorFilter) return false;
-            if (!needle) return true;
-            return basket.name.toLowerCase().includes(needle)
-                || basket.code.toLowerCase().includes(needle)
-                || basket.description.toLowerCase().includes(needle);
-        });
-    }, [baskets, query, indicatorFilter]);
+    const visible = useMemo(
+        () => baskets.filter((basket) => !indicatorFilter || String(basket.indicatorId) === indicatorFilter),
+        [baskets, indicatorFilter],
+    );
     const rows = sorting ? baskets : visible;
 
     async function moveBasket(fromId: number, toId: number) {
@@ -261,24 +254,26 @@ export function BasketsEditor() {
     return (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <div className="flex flex-wrap items-center gap-2">
             {canWrite ? (
-                <div className="flex flex-wrap items-center gap-2">
+                <>
                     <Button type="button" size="sm" onClick={() => { resetForm(); setCreateOpen(true); }}>
                         Добавить корзину
                     </Button>
                     <Button
                         type="button"
-                        variant="outline"
-                        size="sm"
+                        variant={sorting ? "default" : "outline"}
+                        size="icon-sm"
                         aria-pressed={sorting}
+                        aria-label={sorting ? "Заблокировать сортировку" : "Разблокировать сортировку"}
+                        title={sorting ? "Заблокировать сортировку" : "Разблокировать сортировку"}
                         onClick={() => {
                             setSortUnlocked((current) => !current);
                             setDragId(null);
                             setOverId(null);
                         }}
                     >
-                        {sorting ? <LockOpen /> : <Lock />}
-                        {sorting ? "Заблокировать сортировку" : "Разблокировать сортировку"}
+                        <ArrowUpDown />
                     </Button>
                     <Dialog open={createOpen} onOpenChange={(open) => {
                         setCreateOpen(open);
@@ -409,42 +404,28 @@ export function BasketsEditor() {
                             </form>
                         </DialogContent>
                     </Dialog>
-                </div>
+                </>
             ) : access.username ? (
                 <p className="text-xs text-muted-foreground">
                     {access.previewRoleName ? "Просмотр от имени роли. Изменения недоступны." : "Нет права менять корзины."}
                 </p>
             ) : null}
+            {sorting ? null : (
+                <BasketListFilters
+                    versionView={versionView}
+                    onVersionView={setVersionView}
+                    indicatorFilter={indicatorFilter}
+                    onIndicatorFilter={setIndicatorFilter}
+                    indicators={indicators}
+                />
+            )}
+            </div>
             {sorting ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     {ordering ? <ButtonSpinner /> : null}
                     Перетащите корзины за маркер. Этот порядок используется при включении корзин на РРС.
                 </p>
-            ) : (
-            <AdminToolbar search={query} onSearchChange={setQuery} searchPlaceholder="Название, код или описание">
-                <select
-                    value={indicatorFilter}
-                    onChange={(event) => setIndicatorFilter(event.target.value)}
-                    aria-label="Показатель"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-xs sm:w-44"
-                >
-                    <option value="">Все показатели</option>
-                    {indicators.map((item) => (
-                        <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
-                </select>
-                <select
-                    value={versionView}
-                    onChange={(event) => setVersionView(event.target.value as VersionView)}
-                    aria-label="Версии"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-xs sm:w-44"
-                >
-                    {VERSION_VIEWS.map((view) => (
-                        <option key={view} value={view}>{versionViewTitle(view)}</option>
-                    ))}
-                </select>
-            </AdminToolbar>
-            )}
+            ) : null}
             <Table>
                 <TableHeader>
                     <TableRow>
@@ -534,6 +515,93 @@ export function BasketsEditor() {
             </Table>
         </div>
     );
+}
+
+function BasketListFilters({
+    versionView,
+    onVersionView,
+    indicatorFilter,
+    onIndicatorFilter,
+    indicators,
+}: {
+    versionView: VersionView;
+    onVersionView: (view: VersionView) => void;
+    indicatorFilter: string;
+    onIndicatorFilter: (value: string) => void;
+    indicators: Indicator[];
+}) {
+    const narrowed = versionView !== "active" || indicatorFilter !== "";
+    return (
+        <Popover>
+            <PopoverTrigger
+                render={
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label="Фильтр"
+                        title="Фильтр"
+                        className={cn(narrowed && "text-primary")}
+                    >
+                        <ListFilter />
+                    </Button>
+                }
+            />
+            <PopoverContent align="end" className="max-h-80 w-64 gap-3 overflow-y-auto p-2">
+                <div className="flex flex-col gap-1">
+                    <p className="px-2 text-xs font-medium text-muted-foreground">Версии</p>
+                    {VERSION_VIEWS.map((view) => {
+                        const selected = versionView === view;
+                        return (
+                            <button
+                                key={view}
+                                type="button"
+                                aria-pressed={selected}
+                                className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted", selected && "bg-muted")}
+                                onClick={() => onVersionView(view)}
+                            >
+                                <VersionViewIcon view={view} />
+                                {versionViewTitle(view)}
+                            </button>
+                        );
+                    })}
+                </div>
+                <div className="flex flex-col gap-1 border-t pt-2">
+                    <p className="px-2 text-xs font-medium text-muted-foreground">Показатель</p>
+                    <button
+                        type="button"
+                        aria-pressed={indicatorFilter === ""}
+                        className={cn("flex w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted", indicatorFilter === "" && "bg-muted")}
+                        onClick={() => onIndicatorFilter("")}
+                    >
+                        Все показатели
+                    </button>
+                    {indicators.map((item) => {
+                        const selected = String(item.id) === indicatorFilter;
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                aria-pressed={selected}
+                                className={cn("flex w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted", selected && "bg-muted")}
+                                onClick={() => onIndicatorFilter(String(item.id))}
+                            >
+                                {item.name}
+                            </button>
+                        );
+                    })}
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+function VersionViewIcon({ view }: { view: VersionView }) {
+    const className = "size-4 shrink-0";
+    if (view === "active") return <Radio className={className} />;
+    if (view === "draft") return <Pencil className={className} />;
+    if (view === "off") return <Archive className={className} />;
+    return <Layers className={className} />;
 }
 
 function VersionList({ versions, view }: { versions: BasketVersionRef[]; view: VersionView }) {

@@ -167,6 +167,7 @@ ${selectSql}
             || participants === null
             || participants <= 0
             || amount === null
+            || amount === 0
         ) {
             return [];
         }

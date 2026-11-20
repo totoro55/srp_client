@@ -151,7 +151,7 @@ ${selectSql}
         const totalVolume = finiteNumber(row.totalVolume);
         const tariff = finiteNumber(row.tariff);
         const amount = finiteNumber(row.premium);
-        if (participants === null || totalVolume === null || tariff === null || amount === null) {
+        if (participants === null || totalVolume === null || tariff === null || amount === null || amount === 0) {
             return [];
         }
         const personId = row.employeeId?.toLowerCase() ?? "";

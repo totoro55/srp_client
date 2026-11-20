@@ -4,6 +4,8 @@ export type RuleKtu = MotivationKtu | "any";
 export interface MotivationRole {
     id: string;
     title: string;
+    /** Можно выбрать роль в списке на филиале. Иначе её ставит только правило. */
+    manualAllowed: boolean;
 }
 
 export interface MotivationRoleRule {
@@ -101,11 +103,18 @@ export function readMotivationDocument(value: unknown): MotivationSettings | nul
         if (!item || typeof item !== "object") {
             return null;
         }
-        const role = item as { id?: unknown; title?: unknown };
+        const role = item as { id?: unknown; title?: unknown; manualAllowed?: unknown };
         if (typeof role.id !== "string" || typeof role.title !== "string") {
             return null;
         }
-        roles.push({ id: role.id.trim().toLowerCase(), title: role.title.trim() });
+        if (role.manualAllowed !== undefined && typeof role.manualAllowed !== "boolean") {
+            return null;
+        }
+        roles.push({
+            id: role.id.trim().toLowerCase(),
+            title: role.title.trim(),
+            manualAllowed: role.manualAllowed !== false,
+        });
     }
     const rules: MotivationRoleRule[] = [];
     for (const item of body.rules) {
@@ -177,19 +186,23 @@ export function motivationSettingsError(settings: MotivationSettings): string | 
 export function draftAddRole(settings: MotivationSettings, role: MotivationRole): MotivationDraft {
     const next = {
         ...settings,
-        roles: [...settings.roles, { id: role.id.trim().toLowerCase(), title: role.title.trim() }],
+        roles: [...settings.roles, {
+            id: role.id.trim().toLowerCase(),
+            title: role.title.trim(),
+            manualAllowed: role.manualAllowed !== false,
+        }],
     };
     const error = motivationSettingsError(next);
     return error ? { ok: false, error } : { ok: true, settings: next };
 }
 
-export function draftUpdateRole(settings: MotivationSettings, id: string, title: string): MotivationDraft {
+export function draftUpdateRole(settings: MotivationSettings, id: string, title: string, manualAllowed: boolean): MotivationDraft {
     if (!settings.roles.some((role) => role.id === id)) {
         return { ok: false, error: "Роль не найдена" };
     }
     const next = {
         ...settings,
-        roles: settings.roles.map((role) => (role.id === id ? { ...role, title: title.trim() } : role)),
+        roles: settings.roles.map((role) => (role.id === id ? { ...role, title: title.trim(), manualAllowed } : role)),
     };
     const error = motivationSettingsError(next);
     return error ? { ok: false, error } : { ok: true, settings: next };
@@ -221,6 +234,24 @@ export function draftSaveRule(settings: MotivationSettings, rule: MotivationRole
 
 export function draftRemoveRule(settings: MotivationSettings, id: string): MotivationSettings {
     return { ...settings, rules: settings.rules.filter((rule) => rule.id !== id) };
+}
+
+export function draftReorderRules(settings: MotivationSettings, fromId: string, toId: string): MotivationSettings | null {
+    if (fromId === toId) {
+        return null;
+    }
+    const from = settings.rules.findIndex((rule) => rule.id === fromId);
+    const to = settings.rules.findIndex((rule) => rule.id === toId);
+    if (from < 0 || to < 0) {
+        return null;
+    }
+    const rules = [...settings.rules];
+    const [rule] = rules.splice(from, 1);
+    if (!rule) {
+        return null;
+    }
+    rules.splice(to, 0, rule);
+    return { ...settings, rules };
 }
 
 export function draftMoveRule(settings: MotivationSettings, id: string, direction: -1 | 1): MotivationSettings | null {

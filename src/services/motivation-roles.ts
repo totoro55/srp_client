@@ -17,6 +17,7 @@ export class MotivationSettingsError extends Error {
 interface RoleRow {
     id: string;
     title: string;
+    manual_allowed: boolean;
 }
 
 interface RuleRow {
@@ -41,7 +42,7 @@ function ruleKtu(value: string): RuleKtu {
 export async function readMotivationSettings(): Promise<MotivationSettings> {
     const [roles, rules] = await Promise.all([
         db.query<RoleRow>(`
-            SELECT id, title
+            SELECT id, title, manual_allowed
             FROM motivation_roles
             ORDER BY sort_order, id
         `),
@@ -52,7 +53,7 @@ export async function readMotivationSettings(): Promise<MotivationSettings> {
         `),
     ]);
     return {
-        roles: roles.map((role) => ({ id: role.id, title: role.title })),
+        roles: roles.map((role) => ({ id: role.id, title: role.title, manualAllowed: role.manual_allowed })),
         rules: rules.map((rule) => ({
             id: rule.id,
             title: rule.title,
@@ -92,13 +93,14 @@ export async function replaceMotivationSettings(input: MotivationSettings): Prom
             for (const [index, role] of input.roles.entries()) {
                 await query(
                     `
-                    INSERT INTO motivation_roles (id, title, sort_order)
-                    VALUES ($1, $2, $3)
+                    INSERT INTO motivation_roles (id, title, sort_order, manual_allowed)
+                    VALUES ($1, $2, $3, $4)
                     ON CONFLICT (id) DO UPDATE
                         SET title = EXCLUDED.title,
-                            sort_order = EXCLUDED.sort_order
+                            sort_order = EXCLUDED.sort_order,
+                            manual_allowed = EXCLUDED.manual_allowed
                     `,
-                    [role.id, role.title, index],
+                    [role.id, role.title, index, role.manualAllowed],
                 );
             }
             await query(
@@ -163,6 +165,7 @@ export async function saveBranchRoleOverrides(
     branchId: string,
     period: string,
     overrides: Record<string, string | null>,
+    allowAnyRole = false,
 ): Promise<void> {
     if (!ROLE_PERIOD.test(period)) {
         throw new MotivationSettingsError("Укажите месяц");
@@ -198,6 +201,21 @@ export async function saveBranchRoleOverrides(
     const branch = branchId.toLowerCase();
     await db.transaction(async (query) => {
         const inherited = await readRoleSlice(query, branch, period, false);
+        if (!allowAnyRole) {
+            const lockedRows = await query<{ id: string; title: string }>(
+                `SELECT id, title FROM motivation_roles WHERE manual_allowed = false`,
+            );
+            const locked = new Map(lockedRows.map((row) => [row.id, row.title]));
+            for (const [employee, wantRole] of desired) {
+                if (!wantRole || !locked.has(wantRole)) {
+                    continue;
+                }
+                const hadRole = inherited.has(employee) ? inherited.get(employee) ?? null : null;
+                if (hadRole !== wantRole) {
+                    throw new MotivationSettingsError(`Роль «${locked.get(wantRole)}» назначается только правилом`);
+                }
+            }
+        }
         const stored = await query<{ employee: string }>(
             `
             SELECT employee_uuid AS employee

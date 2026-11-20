@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Pencil, Trash2 } from "lucide-react";
+import { DragEvent, FormEvent, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, GripVertical, Info, Pencil, Trash2 } from "lucide-react";
 import { AdminPageShell } from "@/app/admin/_components/AdminPageShell";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormAlert } from "@/components/form-alert";
@@ -10,16 +10,20 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAccess } from "@/hooks/useAccess";
+import { cn } from "@/lib/utils";
 import { useMotivationRoles, useReplaceMotivationSettings } from "@/hooks/useMotivationRoles";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import {
     RULE_KTU_LABELS,
     draftAddRole,
     draftMoveRule,
+    draftReorderRules,
     draftRemoveRole,
     draftRemoveRule,
     draftSaveRule,
@@ -41,6 +45,7 @@ export function MotivationRolesEditor() {
     const [roleDialog, setRoleDialog] = useState<MotivationRole | null | "new">(null);
     const [roleName, setRoleName] = useState("");
     const [roleCode, setRoleCode] = useState("");
+    const [roleManual, setRoleManual] = useState(true);
     const [ruleDialog, setRuleDialog] = useState<MotivationRoleRule | "new" | null>(null);
     const [ruleTitle, setRuleTitle] = useState("");
     const [ruleKtu, setRuleKtu] = useState<RuleKtu>("any");
@@ -48,6 +53,9 @@ export function MotivationRolesEditor() {
     const [formError, setFormError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [moving, setMoving] = useState<{ id: string; direction: -1 | 1 } | null>(null);
+    const [dragId, setDragId] = useState<string | null>(null);
+    const [overId, setOverId] = useState<string | null>(null);
+    const dragIdRef = useRef<string | null>(null);
     const [pendingRole, setPendingRole] = useState<MotivationRole | null>(null);
     const [pendingRule, setPendingRule] = useState<MotivationRoleRule | null>(null);
     const busy = useRef(false);
@@ -83,6 +91,7 @@ export function MotivationRolesEditor() {
         setRoleDialog(role);
         setRoleName(role === "new" ? "" : role.title);
         setRoleCode(role === "new" ? "" : role.id);
+        setRoleManual(role === "new" ? true : role.manualAllowed);
     }
 
     function openRule(rule: MotivationRoleRule | "new") {
@@ -97,9 +106,9 @@ export function MotivationRolesEditor() {
         event.preventDefault();
         setFormError(null);
         const draft = roleDialog === "new"
-            ? draftAddRole(settings, { id: roleCode, title: roleName })
+            ? draftAddRole(settings, { id: roleCode, title: roleName, manualAllowed: roleManual })
             : roleDialog
-                ? draftUpdateRole(settings, roleDialog.id, roleName)
+                ? draftUpdateRole(settings, roleDialog.id, roleName, roleManual)
                 : { ok: false as const, error: "Роль не найдена" };
         if (!draft.ok) {
             setFormError(draft.error);
@@ -137,6 +146,29 @@ export function MotivationRolesEditor() {
         }
         notifySuccess(ruleDialog === "new" ? "Правило добавлено" : "Правило сохранено");
         setRuleDialog(null);
+    }
+
+    async function placeRule(fromId: string, toId: string) {
+        const next = draftReorderRules(settings, fromId, toId);
+        if (!next || saving || moving) {
+            return;
+        }
+        const saved = await writeSettings(next);
+        if (typeof saved === "string") {
+            notifyError(saved);
+        }
+    }
+
+    function dropRule(event: DragEvent<HTMLTableRowElement>, toId: string) {
+        event.preventDefault();
+        const fromId = event.dataTransfer.getData("text/plain") || dragIdRef.current;
+        dragIdRef.current = null;
+        setDragId(null);
+        setOverId(null);
+        if (!fromId) {
+            return;
+        }
+        void placeRule(fromId, toId);
     }
 
     async function moveRule(id: string, direction: -1 | 1) {
@@ -216,10 +248,12 @@ export function MotivationRolesEditor() {
                     creating={roleDialog === "new"}
                     name={roleName}
                     code={roleCode}
+                    manual={roleManual}
                     error={formError}
                     saving={saving}
                     onName={setRoleName}
                     onCode={setRoleCode}
+                    onManual={setRoleManual}
                     onSubmit={(event) => void submitRole(event)}
                     onOpenChange={(open) => {
                         if (!saving && !open) {
@@ -261,18 +295,20 @@ export function MotivationRolesEditor() {
                             <TableRow>
                                 <TableHead>Название</TableHead>
                                 <TableHead>Код</TableHead>
+                                <TableHead>Вручную</TableHead>
                                 <TableHead />
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {settings.roles.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">Ролей пока нет.</TableCell>
+                                    <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">Ролей пока нет.</TableCell>
                                 </TableRow>
                             ) : settings.roles.map((role) => (
                                 <TableRow key={role.id}>
                                     <TableCell>{role.title}</TableCell>
                                     <TableCell className="text-muted-foreground">{role.id}</TableCell>
+                                    <TableCell>{role.manualAllowed ? "Да" : "Нет"}</TableCell>
                                     <TableCell className="text-right">
                                         <Button type="button" size="icon-sm" variant="ghost" disabled={!canWrite} aria-label={`Изменить ${role.title}`} onClick={() => openRole(role)}>
                                             <Pencil />
@@ -293,6 +329,7 @@ export function MotivationRolesEditor() {
                     <Table containerClassName="max-w-full">
                         <TableHeader>
                             <TableRow>
+                                {canWrite ? <TableHead className="w-10"><span className="sr-only">Порядок</span></TableHead> : null}
                                 <TableHead>Должность</TableHead>
                                 <TableHead>КТУ</TableHead>
                                 <TableHead>Роль</TableHead>
@@ -302,10 +339,50 @@ export function MotivationRolesEditor() {
                         <TableBody>
                             {settings.rules.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">Правил пока нет. Роль на филиале задаётся только вручную.</TableCell>
+                                    <TableCell colSpan={canWrite ? 5 : 4} className="py-8 text-center text-sm text-muted-foreground">Правил пока нет. Роль на филиале задаётся только вручную.</TableCell>
                                 </TableRow>
                             ) : settings.rules.map((rule, index) => (
-                                <TableRow key={rule.id}>
+                                <TableRow
+                                    key={rule.id}
+                                    className={cn(
+                                        dragId === rule.id && "opacity-50",
+                                        overId === rule.id && dragId !== null && dragId !== rule.id && "bg-primary/5",
+                                    )}
+                                    onDragOver={(event) => {
+                                        if (!canWrite || dragIdRef.current === null) {
+                                            return;
+                                        }
+                                        event.preventDefault();
+                                        if (overId !== rule.id) {
+                                            setOverId(rule.id);
+                                        }
+                                    }}
+                                    onDrop={(event) => dropRule(event, rule.id)}
+                                >
+                                    {canWrite ? (
+                                        <TableCell className="w-10">
+                                            <button
+                                                type="button"
+                                                draggable={!saving && moving === null}
+                                                aria-label={`Переместить правило «${rule.title}»`}
+                                                className="inline-flex size-7 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing disabled:cursor-not-allowed"
+                                                disabled={saving || moving !== null}
+                                                onDragStart={(event) => {
+                                                    event.dataTransfer.effectAllowed = "move";
+                                                    event.dataTransfer.setData("text/plain", rule.id);
+                                                    dragIdRef.current = rule.id;
+                                                    setDragId(rule.id);
+                                                }}
+                                                onDragEnd={() => {
+                                                    dragIdRef.current = null;
+                                                    setDragId(null);
+                                                    setOverId(null);
+                                                }}
+                                            >
+                                                <GripVertical className="size-4" />
+                                            </button>
+                                        </TableCell>
+                                    ) : null}
                                     <TableCell>{rule.title}</TableCell>
                                     <TableCell>{RULE_KTU_LABELS[rule.ktu]}</TableCell>
                                     <TableCell>{roleTitle(rule.roleId, settings)}</TableCell>
@@ -339,10 +416,12 @@ function RoleDialog({
     creating,
     name,
     code,
+    manual,
     error,
     saving,
     onName,
     onCode,
+    onManual,
     onSubmit,
     onOpenChange,
 }: {
@@ -350,10 +429,12 @@ function RoleDialog({
     creating: boolean;
     name: string;
     code: string;
+    manual: boolean;
     error: string | null;
     saving: boolean;
     onName: (value: string) => void;
     onCode: (value: string) => void;
+    onManual: (value: boolean) => void;
     onSubmit: (event: FormEvent) => void;
     onOpenChange: (open: boolean) => void;
 }) {
@@ -371,6 +452,25 @@ function RoleDialog({
                     <div className="flex flex-col gap-1.5">
                         <Label htmlFor="motivation-role-code">Код</Label>
                         <Input id="motivation-role-code" value={code} onChange={(event) => onCode(event.target.value)} placeholder="mentor" required disabled={!creating} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Label htmlFor="motivation-role-manual">Можно выбрать вручную</Label>
+                        <Tooltip>
+                            <TooltipTrigger
+                                render={<button type="button" aria-label="Подсказка" className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground" />}
+                            >
+                                <Info className="size-3.5" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs text-left leading-snug">
+                                Выключено — роль ставит только правило. Назначить её сотруднику может роль с правом «Любая роль сотруднику».
+                            </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                            id="motivation-role-manual"
+                            checked={manual}
+                            disabled={saving}
+                            onCheckedChange={(checked) => onManual(checked === true)}
+                        />
                     </div>
                     <FormAlert message={error} />
                     <DialogFooter>

@@ -1,10 +1,13 @@
 import { contentError, contentOk } from "@/lib/content-response";
 import { getActiveAccess } from "@/lib/require-admin";
-import { listNotifications, readNotifications } from "@/services/notifications";
+import { listNotifications, readNotifications, summarizeNotifications } from "@/services/notifications";
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const access = await getActiveAccess();
+        if (new URL(request.url).searchParams.get("summary") === "1") {
+            return contentOk(await summarizeNotifications(access));
+        }
         return contentOk(await listNotifications(access));
     } catch (error) {
         return contentError(error, "Не удалось загрузить уведомления");

@@ -54,6 +54,7 @@ export function BranchTariffs() {
     }
 
     const sales = page.sales;
+    const salesHidden = sales !== null && !sales.vacant && sales.rows.length === 0;
     const previewSales = sales?.rows.slice(0, SALES_TARIFF_PREVIEW) ?? [];
     const hasMoreSales = (sales?.rows.length ?? 0) > SALES_TARIFF_PREVIEW;
 
@@ -70,6 +71,7 @@ export function BranchTariffs() {
                 <TabsTrigger value="extras">Дополнительные сервисы</TabsTrigger>
             </TabsList>
             <TabsContent value="operations" className="flex flex-col gap-4">
+                {salesHidden ? null : (
                 <Card className="min-w-0 max-w-full">
                     <CardHeader>
                         <CardTitle>Продажа товара</CardTitle>
@@ -81,7 +83,7 @@ export function BranchTariffs() {
                             <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
                         ) : (
                             <>
-                                <SalesTariffTable axis={sales.axis} rows={previewSales} />
+                                <SalesTariffTable axis={sales.axis} rows={previewSales} columnRows={sales.rows} />
                                 {hasMoreSales ? (
                                     <Link
                                         href={withBranchQuery("/branch/tariffs/sales", branchId, period)}
@@ -95,6 +97,7 @@ export function BranchTariffs() {
                         )}
                     </CardContent>
                 </Card>
+                )}
                 <ParameterCards baskets={page.baskets} />
             </TabsContent>
             <TabsContent value="extras" className="flex flex-col gap-4">

@@ -3,11 +3,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Archive, ArrowLeft, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, BadgeCheck, ChevronDown, FlaskConical, GripVertical, History, Layers, Pencil, Percent, Plus, Radio, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { PageHeading } from "@/app/_components/header/page-heading";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ButtonSpinner, PageSkeleton } from "@/components/loading-state";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -404,13 +405,18 @@ export function BasketDetail() {
     }
 
     if (loading && !basket) {
-        return <PageSkeleton />;
+        return (
+            <>
+                <PageHeading trail={basketTrail("Корзина")} />
+                <PageSkeleton />
+            </>
+        );
     }
 
     if (!basket) {
         return (
             <div className="flex flex-col gap-3">
-                <BackToList />
+                <PageHeading trail={basketTrail("Корзина")} />
                 <p className="text-sm text-destructive">{error ?? "Корзина не найдена"}</p>
             </div>
         );
@@ -422,8 +428,8 @@ export function BasketDetail() {
 
     return (
         <div className="min-h-0 flex-1 overflow-y-auto">
+            <PageHeading trail={basketTrail(basket.name)} />
             <div className="flex flex-col gap-4 pb-8">
-            <BackToList />
             <FormAlert message={error} />
             <ParameterDialog
                 parameter={parameterEditor?.parameter ?? null}
@@ -1257,13 +1263,11 @@ export function BasketDetail() {
     );
 }
 
-function BackToList() {
-    return (
-        <Link href="/admin/baskets" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-fit")}>
-            <ArrowLeft />
-            К списку корзин
-        </Link>
-    );
+function basketTrail(label: string) {
+    return [
+        { href: "/admin/baskets", label: "Настройка корзин" },
+        { label },
+    ];
 }
 
 function VersionViewIcon({ view }: { view: VersionView }) {

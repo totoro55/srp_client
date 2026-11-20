@@ -16,6 +16,11 @@ export interface NotificationFeed {
     items: AppNotification[];
 }
 
+export interface NotificationSummary {
+    unread: number;
+    latestId: number | null;
+}
+
 const FEED_LIMIT = 100;
 
 const PROCESSORS = `
@@ -55,6 +60,49 @@ const PROCESSORS = `
     ORDER BY lower(candidate.login), candidate.login
 `;
 
+const RECALC_PROBLEM = /^(Пересчёт премии остановился|Пересчёт премии отменён|Тарифы продажи не записаны|Тарифы продажи отменены)/;
+
+async function unreadRecalc(login: string): Promise<{ id: number; body: string }[]> {
+    return db.query<{ id: number; body: string }>(
+        `
+        SELECT id, body
+        FROM app_notifications
+        WHERE lower(recipient) = $1 AND kind = 'recalc' AND read_at IS NULL
+        ORDER BY id DESC
+        `,
+        [login],
+    );
+}
+
+/** Одно непрочитанное об окончании и одно об ошибке или отмене. Остальные такие записи убирает. */
+async function foldUnreadRecalc(login: string): Promise<void> {
+    const rows = await unreadRecalc(login);
+    if (rows.length < 2) {
+        return;
+    }
+    const success = rows.find((row) => !recalcNoticeIsProblem(row.body));
+    const problem = rows.find((row) => recalcNoticeIsProblem(row.body));
+    const keep = new Set<number>();
+    if (success) {
+        keep.add(success.id);
+    }
+    if (problem) {
+        keep.add(problem.id);
+    }
+    const drop = rows.filter((row) => !keep.has(row.id)).map((row) => row.id);
+    if (drop.length === 0) {
+        return;
+    }
+    await db.query(
+        `DELETE FROM app_notifications WHERE id = ANY($1::int[])`,
+        [drop],
+    );
+}
+
+export function recalcNoticeIsProblem(body: string): boolean {
+    return RECALC_PROBLEM.test(body) || body.includes("с ошибкой");
+}
+
 export async function notifyRecalc(input: {
     actor: string;
     body: string;
@@ -66,13 +114,30 @@ export async function notifyRecalc(input: {
     if (actor === "" || actor.toLowerCase() === "airflow") {
         return;
     }
-    await db.query(
-        `
-        INSERT INTO app_notifications (recipient, kind, body, href, source_key)
-        VALUES ($1, 'recalc', $2, $3, $4)
-        `,
-        [actor, input.body, input.href, input.sourceKey ?? `recalc:${input.runId}`],
-    );
+    const login = actor.toLowerCase();
+    const sourceKey = input.sourceKey ?? `recalc:${input.runId}`;
+    const problem = recalcNoticeIsProblem(input.body);
+    const unread = await unreadRecalc(login);
+    const current = unread.find((row) => recalcNoticeIsProblem(row.body) === problem);
+    if (current) {
+        await db.query(
+            `
+            UPDATE app_notifications
+            SET body = $2, href = $3, source_key = $4, created_at = NOW()
+            WHERE id = $1
+            `,
+            [current.id, input.body, input.href, sourceKey],
+        );
+    } else {
+        await db.query(
+            `
+            INSERT INTO app_notifications (recipient, kind, body, href, source_key)
+            VALUES ($1, 'recalc', $2, $3, $4)
+            `,
+            [actor, input.body, input.href, sourceKey],
+        );
+    }
+    await foldUnreadRecalc(login);
 }
 
 export async function notifyFeedback(input: {
@@ -152,8 +217,28 @@ export async function markFeedbackSeen(username: string, ticketId: number): Prom
     );
 }
 
+export async function summarizeNotifications(access: AccessView): Promise<NotificationSummary> {
+    const login = access.username.toLowerCase();
+    await foldUnreadRecalc(login);
+    const rows = await db.query<{ unread: number; latest_id: number | null }>(
+        `
+        SELECT
+            COUNT(*) FILTER (WHERE read_at IS NULL)::int AS unread,
+            MAX(id)::int AS latest_id
+        FROM app_notifications
+        WHERE lower(recipient) = $1
+        `,
+        [login],
+    );
+    return {
+        unread: rows[0]?.unread ?? 0,
+        latestId: rows[0]?.latest_id ?? null,
+    };
+}
+
 export async function listNotifications(access: AccessView): Promise<NotificationFeed> {
     const login = access.username.toLowerCase();
+    await foldUnreadRecalc(login);
     const counts = await db.query<{ unread: number }>(
         `
         SELECT COUNT(*)::int AS unread
@@ -181,15 +266,38 @@ export async function listNotifications(access: AccessView): Promise<Notificatio
     );
     return {
         unread: counts[0]?.unread ?? 0,
-        items: rows.map((row) => ({
+        items: visibleNotifications(rows.map((row) => ({
             id: row.id,
             kind: row.kind,
             body: row.body,
             href: row.href,
             createdAt: new Date(row.created_at).toISOString(),
             readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
-        })),
+        }))),
     };
+}
+
+function visibleNotifications(items: AppNotification[]): AppNotification[] {
+    let success = false;
+    let problem = false;
+    const hidden = new Set<number>();
+    for (const item of items) {
+        if (item.kind !== "recalc") {
+            continue;
+        }
+        if (recalcNoticeIsProblem(item.body)) {
+            if (problem) {
+                hidden.add(item.id);
+            }
+            problem = true;
+            continue;
+        }
+        if (success) {
+            hidden.add(item.id);
+        }
+        success = true;
+    }
+    return items.filter((item) => !hidden.has(item.id));
 }
 
 export async function readNotifications(access: AccessView, body: unknown): Promise<NotificationFeed> {

@@ -164,7 +164,7 @@ ${selectSql}
         const itemCount = finiteNumber(row.itemCount);
         const volume = finiteNumber(row.volume);
         const amount = finiteNumber(row.premium);
-        if (quantityTariff === null || volumeTariff === null || itemCount === null || volume === null || amount === null) {
+        if (quantityTariff === null || volumeTariff === null || itemCount === null || volume === null || amount === null || amount === 0) {
             return [];
         }
         const personId = row.employeeId?.toLowerCase() ?? "";

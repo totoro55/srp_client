@@ -15,6 +15,7 @@ import { TariffDescriptionLink } from "./TariffDescriptionLink";
 import { useBranchTariffs } from "./use-branch-tariffs";
 import {
     compareSalesRows,
+    filledSalesColumns,
     nextSalesSort,
     SalesTariffTable,
     salesRowUnit,
@@ -55,6 +56,9 @@ export function BranchSalesTariffs() {
         return <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">Филиал в этом месяце не участвует в мотивации. Ставки как действующие не показаны.</p>;
     }
 
+    const columns = filledSalesColumns(sales?.rows ?? []);
+    const shownSort = columns.includes(sort.key) ? sort : { key: "title" as const, direction: "asc" as const };
+    const sortOptions = SORT_OPTIONS.filter((option) => columns.includes(option.key));
     const needle = query.trim().toLowerCase();
     const filtersActive = needle !== "" || units.length > 0;
     const rowLabel = sales ? salesRowLabel(sales.axis) : "Категория";
@@ -71,7 +75,7 @@ export function BranchSalesTariffs() {
                 return row.title.toLowerCase().includes(needle);
             })
             .slice()
-            .sort((left, right) => compareSalesRows(left, right, sort));
+            .sort((left, right) => compareSalesRows(left, right, shownSort));
 
     return (
         <>
@@ -82,8 +86,8 @@ export function BranchSalesTariffs() {
                     <TariffDescriptionLink articleId={sales?.articleId ?? null} />
                 </CardHeader>
                 <CardContent className="flex min-w-0 flex-col gap-2 sm:gap-3">
-                    {!sales || sales.rows.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Тарифы ещё не сохранены.</p>
+                    {!sales || sales.vacant || sales.rows.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">{!sales || sales.vacant ? "Тарифы ещё не сохранены." : "Нет тарифов для показа."}</p>
                     ) : (
                         <>
                             <div className="flex min-w-0 items-center gap-1 sm:gap-2">
@@ -139,7 +143,7 @@ export function BranchSalesTariffs() {
                                                     type="button"
                                                     variant="outline"
                                                     size="icon-sm"
-                                                    aria-label={`Сортировка: ${SORT_OPTIONS.find((item) => item.key === sort.key)?.label(sales.axis) ?? ""} ${sort.direction === "asc" ? "↑" : "↓"}`}
+                                                    aria-label={`Сортировка: ${sortOptions.find((item) => item.key === shownSort.key)?.label(sales.axis) ?? ""} ${shownSort.direction === "asc" ? "↑" : "↓"}`}
                                                     className="shrink-0"
                                                 >
                                                     <ArrowUpDown />
@@ -148,9 +152,9 @@ export function BranchSalesTariffs() {
                                         />
                                         <PopoverContent align="end" className="w-56 gap-1 p-2">
                                             <p className="px-2 text-xs font-medium text-muted-foreground">Сортировка</p>
-                                            {SORT_OPTIONS.map((option) => {
-                                                const active = sort.key === option.key;
-                                                const mark = sort.direction === "asc" ? "↑" : "↓";
+                                            {sortOptions.map((option) => {
+                                                const active = shownSort.key === option.key;
+                                                const mark = shownSort.direction === "asc" ? "↑" : "↓";
                                                 return (
                                                     <button
                                                         key={option.key}
@@ -159,7 +163,7 @@ export function BranchSalesTariffs() {
                                                             "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted",
                                                             active && "bg-muted font-medium",
                                                         )}
-                                                        onClick={() => setSort(nextSalesSort(sort, option.key))}
+                                                        onClick={() => setSort(nextSalesSort(shownSort, option.key))}
                                                     >
                                                         <span>{option.label(sales.axis)}</span>
                                                         {active ? <span aria-hidden="true">{mark}</span> : null}
@@ -187,7 +191,8 @@ export function BranchSalesTariffs() {
                             <SalesTariffTable
                                 axis={sales.axis}
                                 rows={visible}
-                                sort={sort}
+                                columnRows={sales.rows}
+                                sort={shownSort}
                                 onSort={setSort}
                                 bordered
                             />

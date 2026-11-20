@@ -37,6 +37,7 @@ export interface BranchTariffSales {
     axis: string;
     rows: BranchTariffRow[];
     articleId: number | null;
+    vacant: boolean;
 }
 
 export interface BranchTariffPage {
@@ -264,14 +265,19 @@ async function salesTariffs(
     const b2b = coefficients.get("b2b_coef") ?? 1;
     const sale = coefficients.get("sale_coef") ?? 1;
     const saved = axis ? await savedSaleRows(axis, period, territoryId, version.versionId) : [];
+    const fallback = saved.length > 0 ? null : await baseSaleRow(version, period, territoryId, stm, notStm, im, b2b, sale);
     const rows = saved.length > 0
-        ? saved.map((row) => saleRow(row, stm, notStm, im, b2b, sale))
-        : await baseSaleRow(version, period, territoryId, stm, notStm, im, b2b, sale);
+        ? saved.flatMap((row) => {
+            const next = saleRow(row, stm, notStm, im, b2b, sale);
+            return next ? [next] : [];
+        })
+        : fallback?.rows ?? [];
     rows.sort((left, right) => left.title.localeCompare(right.title, "ru"));
     return {
         axis: axis ? tariffAxisTitle(axis) : "Базовая ставка",
         rows,
         articleId: version.wikiArticleId,
+        vacant: saved.length === 0 && (fallback?.vacant ?? true),
     };
 }
 
@@ -315,15 +321,23 @@ interface SavedSaleRow {
     b2b: number | null;
 }
 
-function saleRow(row: SavedSaleRow, stm: number, notStm: number, im: number, b2b: number, sale: number): BranchTariffRow {
-    const retail = row.baseMode === "percent" ? formatPercent : formatMoney;
+function saleRow(row: SavedSaleRow, stm: number, notStm: number, im: number, b2b: number, sale: number): BranchTariffRow | null {
+    const percent = row.baseMode === "percent";
+    const stmValue = percent ? shownPercent(product(row.main, stm, sale)) : shownMoney(product(row.main, stm, sale));
+    const nonStmValue = percent ? shownPercent(product(row.main, notStm, sale)) : shownMoney(product(row.main, notStm, sale));
+    const imValue = shownMoney(product(row.im, im, sale));
+    const b2bValue = shownMoney(product(row.b2b, b2b, sale));
+    if (stmValue === null && nonStmValue === null && imValue === null && b2bValue === null) {
+        return null;
+    }
+    const retail = percent ? formatPercent : formatMoney;
     return {
         title: row.title,
         mode: row.baseMode,
-        stm: retail(product(row.main, stm, sale)),
-        nonStm: retail(product(row.main, notStm, sale)),
-        im: formatMoney(product(row.im, im, sale)),
-        b2b: formatMoney(product(row.b2b, b2b, sale)),
+        stm: retail(stmValue),
+        nonStm: retail(nonStmValue),
+        im: formatMoney(imValue),
+        b2b: formatMoney(b2bValue),
     };
 }
 
@@ -336,10 +350,10 @@ async function baseSaleRow(
     im: number,
     b2b: number,
     sale: number,
-): Promise<BranchTariffRow[]> {
+): Promise<{ vacant: boolean; rows: BranchTariffRow[] }> {
     const table = version.dataTable;
     if (!table || !DATA_TABLE.test(table) || !await tableExists(table)) {
-        return [];
+        return { vacant: true, rows: [] };
     }
     const rows = await db.query<{ base: string | null }>(
         `
@@ -354,16 +368,17 @@ async function baseSaleRow(
     );
     const base = numberOrNull(rows[0]?.base ?? null);
     if (base === null) {
-        return [];
+        return { vacant: true, rows: [] };
     }
-    return [{
-        title: "Базовая ставка",
-        mode: "per_unit",
-        stm: formatMoney(product(base, stm, sale)),
-        nonStm: formatMoney(product(base, notStm, sale)),
-        im: formatMoney(product(base, im, sale)),
-        b2b: formatMoney(product(base, b2b, sale)),
-    }];
+    const row = saleRow(
+        { title: "Базовая ставка", baseMode: "per_unit", main: base, im: base, b2b: base },
+        stm,
+        notStm,
+        im,
+        b2b,
+        sale,
+    );
+    return { vacant: false, rows: row ? [row] : [] };
 }
 
 async function parameterBasket(
@@ -410,7 +425,11 @@ async function parameterBasket(
             return [];
         }
         const coefficient = shared ?? coefficients.get(`${parameter.key}_coef`) ?? coefficients.get(parameter.key) ?? 1;
-        return [{ title, value: formatMoney(value * coefficient) }];
+        const amount = shownMoney(value * coefficient);
+        if (amount === null) {
+            return [];
+        }
+        return [{ title, value: formatMoney(amount) }];
     });
     if (shown.length === 0) {
         return null;
@@ -439,6 +458,24 @@ function numberOrNull(value: string | null): number | null {
     }
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+}
+
+function shownMoney(value: number | null): number | null {
+    if (value === null || !Number.isFinite(value) || moneyFormat.format(value) === "0") {
+        return null;
+    }
+    return value;
+}
+
+function shownPercent(value: number | null): number | null {
+    if (value === null || !Number.isFinite(value)) {
+        return null;
+    }
+    const shown = Math.round(value * 10_000) / 100;
+    if (percentFormat.format(shown) === "0") {
+        return null;
+    }
+    return value;
 }
 
 function formatMoney(value: number | null): string {

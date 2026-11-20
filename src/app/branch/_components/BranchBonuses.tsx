@@ -37,19 +37,40 @@ interface CabinetIndicator {
 
 interface CabinetColumns {
     baskets: CabinetIndicator[];
+    services: readonly CabinetIndicator[];
     basketIds: ReadonlySet<string>;
     basketLast?: string;
+    serviceLast?: string;
+    showFixed: boolean;
 }
 
 const SERVICE_TITLES = new Set<string>(SERVICE_INDICATORS.map((indicator) => indicator.title));
 
 function cabinetColumns(indicators: readonly CabinetIndicator[]): CabinetColumns {
-    const baskets = indicators.filter((indicator) => !SERVICE_TITLES.has(indicator.title));
+    return columnSet(indicators.filter((indicator) => !SERVICE_TITLES.has(indicator.title)), SERVICE_INDICATORS, true);
+}
+
+function columnSet(baskets: readonly CabinetIndicator[], services: readonly CabinetIndicator[], showFixed: boolean): CabinetColumns {
     return {
-        baskets,
+        baskets: [...baskets],
+        services,
         basketIds: new Set(baskets.map((indicator) => indicator.id)),
         basketLast: baskets.at(-1)?.id,
+        serviceLast: services.at(-1)?.id,
+        showFixed,
     };
+}
+
+function columnsWithData(rows: readonly BonusRow[], columns: CabinetColumns): CabinetColumns {
+    return columnSet(
+        columns.baskets.filter((indicator) => rows.some((row) => hasOperationAmount(row.premiums[indicator.id]))),
+        columns.services.filter((indicator) => rows.some((row) => hasOperationAmount(row.services[indicator.id as ServiceIndicatorId]))),
+        rows.some((row) => hasOperationAmount(row.fixed)),
+    );
+}
+
+function hasOperationAmount(value: number | null | undefined): boolean {
+    return value !== null && value !== undefined && value !== 0;
 }
 type SortDirection = "asc" | "desc";
 type BonusSort = { key: BonusColumn; direction: SortDirection };
@@ -252,7 +273,6 @@ const PIN_NAME = "sticky left-0 z-20 border-l bg-background shadow-[1px_0_0_0_va
 const PIN_ROLE = "sticky left-(--name-col) z-20 bg-background shadow-[1px_0_0_0_var(--background),2px_0_0_0_rgba(0,0,0,0.12)] transform-gpu";
 const PIN_NAME_HEAD = "sticky left-0 z-30 border-l bg-card shadow-[1px_0_0_0_var(--card)] transform-gpu";
 const PIN_ROLE_HEAD = "sticky left-(--name-col) z-30 bg-card shadow-[1px_0_0_0_var(--card),2px_0_0_0_rgba(0,0,0,0.12)] transform-gpu";
-const SERVICE_LAST = SERVICE_INDICATORS[SERVICE_INDICATORS.length - 1].id;
 const WASH_BASE = "bg-[color-mix(in_oklab,var(--color-sky-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-sky-950)_62%,var(--background))]";
 const WASH_FIXED = "bg-[color-mix(in_oklab,var(--color-indigo-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-indigo-950)_62%,var(--background))]";
 const WASH_TOTAL = "bg-[color-mix(in_oklab,var(--color-fuchsia-100)_58%,var(--background))] dark:bg-[color-mix(in_oklab,var(--color-fuchsia-950)_62%,var(--background))]";
@@ -269,7 +289,7 @@ function endsGroup(column: BonusColumn, columns: CabinetColumns): boolean {
         || column === "forecast"
         || column === "total"
         || column === columns.basketLast
-        || column === SERVICE_LAST;
+        || column === columns.serviceLast;
 }
 
 function bodyWash(column: BonusColumn, columns: CabinetColumns): string | undefined {
@@ -337,12 +357,12 @@ function buildColumnIndexes(brigadeOn: boolean, columns: CabinetColumns, showFor
         "schedule",
         "timesheet",
         "salary",
-        "fixed",
+        ...(columns.showFixed ? ["fixed" as const] : []),
         "current",
         ...(showForecast ? ["forecast" as const] : []),
         "total",
         ...columns.baskets.map((indicator) => indicator.id),
-        ...SERVICE_INDICATORS.map((indicator) => indicator.id),
+        ...columns.services.map((indicator) => indicator.id),
     ];
     return new Map(order.map((column, index) => [column, index]));
 }
@@ -374,7 +394,7 @@ export function BranchBonuses() {
     const slice = store.slice(branchId, period, directory.employees, settings);
     const brigadeOn = slice.savedBrigades.mode === "groups";
     const showForecast = !monthHasEnded(period);
-    const columns = useMemo(() => cabinetColumns(directory.indicators), [directory.indicators]);
+    const sourceColumns = useMemo(() => cabinetColumns(directory.indicators), [directory.indicators]);
     const services = useMemo(() => blankServices(), []);
     const poolHref = withBranchQuery("/branch/bonuses/common", branchId, period);
     const rows = useMemo(() => directory.employees.flatMap((employee) => {
@@ -386,7 +406,7 @@ export function BranchBonuses() {
         const salary = salaryFromTimesheet(employee.hourly, timesheetHours);
         const fixed = fixedPremium(employee.payLevel, employee.hourly, directory.baseBonus, directory.priceGrowth, timesheetHours);
         const key = roleKey(employee);
-        const premiums = rowPremiums(columns.baskets, {
+        const premiums = rowPremiums(sourceColumns.baskets, {
             "Продажа товара": directory.salePremiums[key],
             "Выдача товара": directory.releasePremiums[key],
             "Кассовые операции": directory.kassaPremiums[key],
@@ -417,7 +437,7 @@ export function BranchBonuses() {
             ...brigadePlace(employee.id, slice.savedBrigades.groups),
         } satisfies BonusRow];
     }), [
-        columns.baskets,
+        sourceColumns,
         directory.baseBonus,
         directory.employees,
         directory.kassaPremiums,
@@ -435,6 +455,7 @@ export function BranchBonuses() {
         slice.savedBrigades,
         slice.savedRoles,
     ]);
+    const columns = useMemo(() => columnsWithData(rows, sourceColumns), [rows, sourceColumns]);
     const roleOptions = useMemo(() => uniqueSorted(rows.map((row) => row.role)), [rows]);
     const brigadeOptions = useMemo(
         () => uniqueSorted(rows.flatMap((row) => row.brigade ? [row.brigade] : [])),
@@ -509,7 +530,8 @@ export function BranchBonuses() {
     const emptyText = carriedRoster
         ? "За этот месяц табель ещё не загружен."
         : rows.length === 0 ? "В этом филиале нет сотрудников в расчёте." : "Никого не найдено по этим фильтрам.";
-    const columnCount = (showForecast ? 9 : 8) + columns.baskets.length + SERVICE_INDICATORS.length + (brigadeOn ? 1 : 0);
+    const columnCount = (showForecast ? 8 : 7) + (columns.showFixed ? 1 : 0) + columns.baskets.length + columns.services.length + (brigadeOn ? 1 : 0);
+    const tail = columns.serviceLast ?? columns.basketLast ?? "total";
     const visibleNames = visible.map((row) => row.employee.name).join("\n");
 
     const staffReady = branchId !== ""
@@ -634,14 +656,14 @@ export function BranchBonuses() {
                         <SortHead label="Часов по графику" column="schedule" sort={explicitSort} fit="hour" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         <SortHead label="Часов по табелю" column="timesheet" sort={explicitSort} fit="hour" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         <SortHead label="Оклад" column="salary" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
-                        <SortHead label="Фиксированная премия" column="fixed" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
+                        {columns.showFixed ? <SortHead label="Фиксированная премия" column="fixed" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} /> : null}
                         <SortHead label="Текущая ЗП" column="current" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         {showForecast ? <SortHead label="Прогноз ЗП" column="forecast" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} /> : null}
                         <SortHead label="Общая премия" column="total" sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         {columns.baskets.map((indicator) => (
                             <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         ))}
-                        {SERVICE_INDICATORS.map((indicator) => (
+                        {columns.services.map((indicator) => (
                             <SortHead key={indicator.id} label={indicator.title} column={indicator.id} sort={explicitSort} fit="money" columnIndexes={columnIndexes} columns={columns} onSort={setSort} />
                         ))}
                     </TableRow>
@@ -676,32 +698,38 @@ export function BranchBonuses() {
                                 <AimedCell row={rowId} column={col("schedule")} className={valued("schedule", row.pay.scheduleHours ?? undefined)}>{formatHours(row.pay.scheduleHours)}</AimedCell>
                                 <AimedCell row={rowId} column={col("timesheet")} className={cn(valued("timesheet", row.pay.timesheetHours ?? undefined), timesheetShort && SHORTFALL)}>{formatHours(row.pay.timesheetHours)}</AimedCell>
                                 <AimedCell row={rowId} column={col("salary")} className={valued("salary", row.pay.salary)}>{formatAmount(row.pay.salary)}</AimedCell>
-                                <AimedCell row={rowId} column={col("fixed")} className={valued("fixed", row.fixed)}>{formatAmount(row.fixed)}</AimedCell>
+                                {columns.showFixed ? <AimedCell row={rowId} column={col("fixed")} className={valued("fixed", row.fixed)}>{formatAmount(row.fixed)}</AimedCell> : null}
                                 <AimedCell row={rowId} column={col("current")} className={valued("current", row.pay.currentPay)} style={currentHeat}>{formatAmount(row.pay.currentPay)}</AimedCell>
                                 {showForecast ? <AimedCell row={rowId} column={col("forecast")} className={valued("forecast", row.pay.forecastPay)} style={forecastHeat}>{formatAmount(row.pay.forecastPay)}</AimedCell> : null}
-                                <AimedCell row={rowId} column={col("total")} className={valued("total", row.total)} onOpen={() => router.push(poolHref)}>{formatAmount(row.total)}</AimedCell>
-                                {columns.baskets.map((indicator) => (
+                                <AimedCell row={rowId} column={col("total")} className={cn(valued("total", row.total), tail === "total" && frameClass(place, "end"))} onOpen={() => router.push(poolHref)}>{formatAmount(row.total)}</AimedCell>
+                                {columns.baskets.map((indicator) => {
+                                    const amount = row.premiums[indicator.id];
+                                    return (
                                     <AimedCell
                                         key={indicator.id}
                                         row={rowId}
                                         column={col(indicator.id)}
-                                        className={valued(indicator.id, row.premiums[indicator.id])}
-                                        onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
+                                        className={cn(valued(indicator.id, amount), indicator.id === tail && frameClass(place, "end"))}
+                                        onOpen={lines && amount !== 0 ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
                                     >
-                                        {formatAmount(row.premiums[indicator.id])}
+                                        {formatAmount(shownOperation(amount))}
                                     </AimedCell>
-                                ))}
-                                {SERVICE_INDICATORS.map((indicator) => (
+                                    );
+                                })}
+                                {columns.services.map((indicator) => {
+                                    const amount = row.services[indicator.id as ServiceIndicatorId];
+                                    return (
                                     <AimedCell
                                         key={indicator.id}
                                         row={rowId}
                                         column={col(indicator.id)}
-                                        className={cn(valued(indicator.id, row.services[indicator.id]), indicator.id === SERVICE_LAST && frameClass(place, "end"))}
-                                        onOpen={lines ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
+                                        className={cn(valued(indicator.id, amount), indicator.id === tail && frameClass(place, "end"))}
+                                        onOpen={lines && amount !== 0 ? () => router.push(segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom)) : undefined}
                                     >
-                                        {formatAmount(row.services[indicator.id])}
+                                        {formatAmount(shownOperation(amount))}
                                     </AimedCell>
-                                ))}
+                                    );
+                                })}
                             </TableRow>
                             {place === "end" && index < visible.length - 1 ? (
                                 <TableRow aria-hidden className="hover:bg-transparent">
@@ -730,6 +758,8 @@ export function BranchBonuses() {
                             lines={canOpenPersonalDetail(row.employee.id, directory.viewerEmployeeId, directory.foreignDetail)}
                             poolHref={poolHref}
                             baskets={columns.baskets}
+                            services={columns.services}
+                            showFixed={columns.showFixed}
                             currentHeat={payHeatStyle(currentHeatRanks, row.pay.currentPay)}
                             forecastHeat={showForecast ? payHeatStyle(forecastHeatRanks, row.pay.forecastPay) : undefined}
                             showForecast={showForecast}
@@ -752,6 +782,13 @@ export function BranchBonuses() {
 
 function canOpenPersonalDetail(employeeId: string, viewerId: string | null, foreignDetail: boolean): boolean {
     return foreignDetail || (viewerId !== null && viewerId === employeeId.toLowerCase());
+}
+
+function shownOperation(value: number | null): number | null {
+    if (value === null || value === 0) {
+        return null;
+    }
+    return value;
 }
 
 function formatAmount(value: number | null): string {
@@ -785,12 +822,12 @@ function sortColumns(brigadeOn: boolean, columns: CabinetColumns, showForecast: 
         { key: "schedule", label: "Часов по графику" },
         { key: "timesheet", label: "Часов по табелю" },
         { key: "salary", label: "Оклад" },
-        { key: "fixed", label: "Фиксированная премия" },
+        ...(columns.showFixed ? [{ key: "fixed" as const, label: "Фиксированная премия" }] : []),
         { key: "current", label: "Текущая ЗП" },
         ...(showForecast ? [{ key: "forecast" as const, label: "Прогноз ЗП" }] : []),
         { key: "total", label: "Общая премия" },
         ...columns.baskets.map((indicator) => ({ key: indicator.id, label: indicator.title })),
-        ...SERVICE_INDICATORS.map((indicator) => ({ key: indicator.id, label: indicator.title })),
+        ...columns.services.map((indicator) => ({ key: indicator.id, label: indicator.title })),
     ];
 }
 
@@ -802,6 +839,8 @@ function BonusListItem({
     href,
     poolHref,
     baskets,
+    services,
+    showFixed,
     currentHeat,
     forecastHeat,
     showForecast,
@@ -814,6 +853,8 @@ function BonusListItem({
     href: string;
     poolHref: string;
     baskets: readonly CabinetIndicator[];
+    services: readonly CabinetIndicator[];
+    showFixed: boolean;
     currentHeat?: { backgroundColor: string };
     forecastHeat?: { backgroundColor: string };
     showForecast: boolean;
@@ -826,20 +867,32 @@ function BonusListItem({
     const valueTone = movementValueClass(movement);
     const details = [
         { label: "Оклад", amount: row.pay.salary },
-        { label: "Фиксированная премия", amount: row.fixed },
+        ...(showFixed ? [{ label: "Фиксированная премия", amount: row.fixed }] : []),
         { label: "Текущая ЗП", amount: row.pay.currentPay, heat: currentHeat },
         ...(showForecast ? [{ label: "Прогноз ЗП", amount: row.pay.forecastPay, heat: forecastHeat }] : []),
         { label: "Общая премия", amount: row.total, open: poolHref },
-        ...baskets.map((indicator) => ({
-            label: indicator.title,
-            amount: row.premiums[indicator.id],
-            ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
-        })),
-        ...SERVICE_INDICATORS.map((indicator) => ({
-            label: indicator.title,
-            amount: row.services[indicator.id],
-            ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
-        })),
+        ...baskets.flatMap((indicator) => {
+            const amount = row.premiums[indicator.id];
+            if (amount === 0) {
+                return [];
+            }
+            return [{
+                label: indicator.title,
+                amount,
+                ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
+            }];
+        }),
+        ...services.flatMap((indicator) => {
+            const amount = row.services[indicator.id as ServiceIndicatorId];
+            if (amount === 0) {
+                return [];
+            }
+            return [{
+                label: indicator.title,
+                amount,
+                ...(lines ? { open: segmentHref(withBranchQuery(`/branch/bonuses/${row.employee.id}/lines`, branchId, period, indicator.id), row.employee.activeFrom) } : {}),
+            }];
+        }),
     ];
     return (
         <Collapsible open={open} onOpenChange={setOpen} data-scroll-row="" className="border-b last:border-b-0">
@@ -1228,39 +1281,40 @@ async function runCabinetScrollBench(label = "run"): Promise<CabinetScrollBench 
     };
 }
 
-function placeAimFrame(frame: HTMLElement, scope: HTMLElement, cell: HTMLElement) {
+function placeAimBox(frame: HTMLElement, scope: HTMLElement, target: HTMLElement) {
     const scopeBox = scope.getBoundingClientRect();
-    const box = cell.getBoundingClientRect();
-    frame.style.width = `${box.width}px`;
-    frame.style.height = `${box.height}px`;
-    frame.style.transform = `translate3d(${box.left - scopeBox.left}px, ${box.top - scopeBox.top}px, 0)`;
+    const box = target.getBoundingClientRect();
+    const left = Math.max(box.left, scopeBox.left);
+    const right = Math.min(box.right, scopeBox.right);
+    const top = Math.max(box.top, scopeBox.top);
+    const bottom = Math.min(box.bottom, scopeBox.bottom);
+    frame.style.width = `${Math.max(0, right - left)}px`;
+    frame.style.height = `${Math.max(0, bottom - top)}px`;
+    frame.style.transform = `translate3d(${left - scopeBox.left}px, ${top - scopeBox.top}px, 0)`;
 }
 
 function AimFrame({ root }: { root: RefObject<HTMLDivElement | null> }) {
-    const frameRef = useRef<HTMLDivElement>(null);
+    const rowRef = useRef<HTMLDivElement>(null);
+    const cellRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const scopeEl = root.current;
-        const frameEl = frameRef.current;
-        if (!scopeEl || !frameEl) {
+        const rowEl = rowRef.current;
+        const cellEl = cellRef.current;
+        if (!scopeEl || !rowEl || !cellEl) {
             return;
         }
         const scope = scopeEl;
-        const frame = frameEl;
+        const rowFrame = rowEl;
+        const cellFrame = cellEl;
         const scroller = scope.querySelector<HTMLElement>("[data-slot=table-container]");
+        let activeRow: HTMLElement | null = null;
         let activeCell: HTMLElement | null = null;
         let observer: ResizeObserver | null = null;
         let scrolling = false;
         let scrollIdle = 0;
         let placeRaf = 0;
 
-        function clear() {
-            activeCell = null;
-            observer?.disconnect();
-            observer = null;
-            if (placeRaf) {
-                cancelAnimationFrame(placeRaf);
-                placeRaf = 0;
-            }
+        function hide(frame: HTMLElement) {
             frame.style.opacity = "0";
             frame.style.borderColor = "transparent";
             frame.style.backgroundColor = "transparent";
@@ -1270,35 +1324,70 @@ function AimFrame({ root }: { root: RefObject<HTMLDivElement | null> }) {
             frame.style.height = "0px";
         }
 
-        function schedulePlace(cell: HTMLElement) {
+        function clear() {
+            activeRow = null;
+            activeCell = null;
+            observer?.disconnect();
+            observer = null;
+            if (placeRaf) {
+                cancelAnimationFrame(placeRaf);
+                placeRaf = 0;
+            }
+            hide(rowFrame);
+            hide(cellFrame);
+        }
+
+        function schedulePlace() {
             if (placeRaf) {
                 return;
             }
             placeRaf = requestAnimationFrame(() => {
                 placeRaf = 0;
-                if (activeCell === cell) {
-                    placeAimFrame(frame, scope, cell);
+                if (activeRow) {
+                    placeAimBox(rowFrame, scope, activeRow);
+                }
+                if (activeCell) {
+                    placeAimBox(cellFrame, scope, activeCell);
                 }
             });
         }
 
         function aimAt(cell: HTMLElement) {
-            if (activeCell === cell) {
-                schedulePlace(cell);
+            if (cell.dataset.aim?.startsWith(`${HEAD_ROW}:`)) {
+                clear();
                 return;
             }
+            const row = cell.closest("tr");
+            if (!(row instanceof HTMLElement)) {
+                clear();
+                return;
+            }
+            if (activeCell === cell) {
+                return;
+            }
+            const sameRow = activeRow === row;
+            activeRow = row;
             activeCell = cell;
+            cellFrame.style.transition = "none";
+            cellFrame.style.opacity = "1";
+            cellFrame.style.borderColor = "transparent";
+            cellFrame.style.backgroundColor = "transparent";
+            placeAimBox(cellFrame, scope, cell);
+            cellFrame.getBoundingClientRect();
+            cellFrame.style.transition = `border-color ${AIM_FADE_MS}ms ease-out`;
+            cellFrame.style.borderColor = AIM_BORDER;
+            if (!sameRow) {
+                rowFrame.style.transition = "none";
+                rowFrame.style.opacity = "1";
+                rowFrame.style.backgroundColor = "transparent";
+                placeAimBox(rowFrame, scope, row);
+                rowFrame.getBoundingClientRect();
+                rowFrame.style.transition = `background-color ${AIM_FADE_MS}ms ease-out`;
+                rowFrame.style.backgroundColor = AIM_FILL;
+            }
             observer?.disconnect();
-            frame.style.transition = "none";
-            frame.style.opacity = "1";
-            frame.style.borderColor = "transparent";
-            frame.style.backgroundColor = "transparent";
-            placeAimFrame(frame, scope, cell);
-            frame.getBoundingClientRect();
-            frame.style.transition = `border-color ${AIM_FADE_MS}ms ease-out, background-color ${AIM_FADE_MS}ms ease-out`;
-            frame.style.borderColor = AIM_BORDER;
-            frame.style.backgroundColor = AIM_FILL;
-            observer = new ResizeObserver(() => schedulePlace(cell));
+            observer = new ResizeObserver(() => schedulePlace());
+            observer.observe(row);
             observer.observe(cell);
         }
 
@@ -1341,11 +1430,18 @@ function AimFrame({ root }: { root: RefObject<HTMLDivElement | null> }) {
         };
     }, [root]);
     return (
-        <div
-            ref={frameRef}
-            aria-hidden
-            className="pointer-events-none absolute top-0 left-0 z-40 border-2 border-transparent bg-transparent opacity-0 motion-reduce:transition-none"
-        />
+        <>
+            <div
+                ref={rowRef}
+                aria-hidden
+                className="pointer-events-none absolute top-0 left-0 z-40 bg-transparent opacity-0 motion-reduce:transition-none"
+            />
+            <div
+                ref={cellRef}
+                aria-hidden
+                className="pointer-events-none absolute top-0 left-0 z-40 border-2 border-transparent bg-transparent opacity-0 motion-reduce:transition-none"
+            />
+        </>
     );
 }
 

@@ -17,11 +17,22 @@ const COLUMNS: { key: SalesSortColumn; label: (axis: string) => string }[] = [
     { key: "b2b", label: () => "Безнал" },
 ];
 
-const RATE_COLUMNS = COLUMNS.filter((column) => column.key !== "title" && column.key !== "mode");
+const RATE_KEYS = ["stm", "nonStm", "im", "b2b"] as const satisfies readonly SalesSortColumn[];
+
+export function filledSalesColumns(rows: readonly TariffRow[]): SalesSortColumn[] {
+    const rates = RATE_KEYS.filter((key) => rows.some((row) => rateFilled(row[key])));
+    return ["title", "mode", ...rates];
+}
+
+function rateFilled(value: string): boolean {
+    const text = value.trim();
+    return text !== "" && text !== "—" && text !== "-";
+}
 
 export function SalesTariffTable({
     axis,
     rows,
+    columnRows,
     sort,
     onSort,
     bordered = false,
@@ -29,11 +40,14 @@ export function SalesTariffTable({
 }: {
     axis: string;
     rows: TariffRow[];
+    columnRows?: readonly TariffRow[];
     sort?: SalesSort;
     onSort?: (sort: SalesSort) => void;
     bordered?: boolean;
     emptyText?: string;
 }) {
+    const columns = COLUMNS.filter((column) => filledSalesColumns(columnRows ?? rows).includes(column.key));
+    const rateColumns = columns.filter((column) => column.key !== "title" && column.key !== "mode");
     const cellBorder = bordered ? "border border-border" : undefined;
     const headClass = cn(cellBorder, bordered && "sticky top-0 z-20 bg-muted");
 
@@ -43,7 +57,7 @@ export function SalesTariffTable({
                 <Table className="w-max min-w-full" containerClassName="overflow-visible">
                     <TableHeader>
                         <TableRow>
-                            {COLUMNS.map((column) => (
+                            {columns.map((column) => (
                                 <TableHead key={column.key}>{column.label(axis)}</TableHead>
                             ))}
                         </TableRow>
@@ -51,7 +65,7 @@ export function SalesTariffTable({
                     <TableBody>
                         {rows.map((row) => (
                             <TableRow key={row.title}>
-                                {COLUMNS.map((column) => (
+                                {columns.map((column) => (
                                     <TableCell
                                         key={column.key}
                                         className={cn(
@@ -81,7 +95,7 @@ export function SalesTariffTable({
                             <h3 className="text-sm leading-snug font-medium">{row.title}</h3>
                             <p className="text-xs text-muted-foreground">{salesRateKindLabel(row)}</p>
                             <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                                {RATE_COLUMNS.map((column) => (
+                                {rateColumns.map((column) => (
                                     <div key={column.key} className="min-w-0">
                                         <dt className="text-[0.7rem] leading-none text-muted-foreground">{column.label(axis)}</dt>
                                         <dd className="tabular-nums">{row[column.key]}</dd>
@@ -96,7 +110,7 @@ export function SalesTariffTable({
                 <Table className="w-full" containerClassName="overflow-visible">
                     <TableHeader>
                         <TableRow>
-                            {COLUMNS.map((column) => {
+                            {columns.map((column) => {
                                 const label = column.label(axis);
                                 if (!onSort || !sort) {
                                     return (
@@ -132,14 +146,14 @@ export function SalesTariffTable({
                     <TableBody>
                         {rows.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={COLUMNS.length} className={cn("h-24 text-center whitespace-normal text-muted-foreground", cellBorder)}>
+                                <TableCell colSpan={columns.length} className={cn("h-24 text-center whitespace-normal text-muted-foreground", cellBorder)}>
                                     {emptyText}
                                 </TableCell>
                             </TableRow>
                         ) : (
                             rows.map((row) => (
                                 <TableRow key={row.title}>
-                                    {COLUMNS.map((column) => (
+                                    {columns.map((column) => (
                                         <TableCell
                                             key={column.key}
                                             className={cn(

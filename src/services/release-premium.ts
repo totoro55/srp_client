@@ -194,21 +194,25 @@ ${selectSql}
             : [period, employeeId, branchId, from, until, accrualId, null],
         DETAIL_STATEMENT_TIMEOUT_MS,
     );
-    return rows.map((row, index) => {
+    return rows.flatMap((row, index) => {
+        const amount = finiteNumber(row.premium) ?? 0;
+        if (amount === 0) {
+            return [];
+        }
         const documentNumber = row.documentNumber?.trim() || "Без номера";
         const documentTitle = row.documentDay ? `${documentNumber} от ${row.documentDay}` : documentNumber;
         const documentId = row.linkDoc?.trim() || `${documentNumber}|${row.documentDay ?? ""}`;
         const personId = row.employeeId?.toLowerCase() ?? "";
-        return {
+        return [{
             id: `${personId}:${row.categoryCode ?? ""}:${documentId}:${index}`,
             categoryTitle: row.categoryTitle.trim() || "Без категории",
             calculation: calculationLabel(row),
-            amount: finiteNumber(row.premium) ?? 0,
+            amount,
             documentId,
             documentTitle,
             productName: row.productName?.trim() || "Без названия",
             ...(brigade || personId ? { employeeId: personId } : {}),
-        };
+        }];
     });
 }
 

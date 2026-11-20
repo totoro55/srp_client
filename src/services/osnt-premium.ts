@@ -144,7 +144,7 @@ ${selectSql}
         const documents = finiteNumber(row.documents);
         const tariff = finiteNumber(row.tariff);
         const amount = finiteNumber(row.premium);
-        if (documents === null || tariff === null || amount === null) {
+        if (documents === null || tariff === null || amount === null || amount === 0) {
             return [];
         }
         const personId = row.employeeId?.toLowerCase() ?? "";
